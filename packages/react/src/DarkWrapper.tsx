@@ -24,17 +24,21 @@ import {
   type StyleValue,
 } from './core';
 import { useGlobalDarkMode } from './useGlobalDarkMode';
-import { useConditionalWidth } from './useGlobalWidth';
-import { hasResponsiveBuckets, EMPTY_BREAKPOINTS } from './shared-utils';
+import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
+import { hasResponsiveBuckets } from './shared-utils';
 
 export interface DarkWrapperProps {
   Component: React.ComponentType<any> | string;
   resolvedStyle: ResolvedStyle;
   style?: StyleValue | StyleValue[];
   children?: React.ReactNode;
-  [key: string]: unknown;
 }
 
+// Note: DarkWrapperProps intentionally has no string index signature. Combining
+// React.forwardRef<T, P> with a P that carries an index signature makes TS widen
+// every destructured property (even explicitly declared ones) to `unknown` —
+// see InteractiveWrapper.tsx for the same pattern (rest cast to `any` below
+// instead of typing it on the interface).
 export const DarkWrapper = React.forwardRef<unknown, DarkWrapperProps>(
   function DarkWrapper({ Component, resolvedStyle, style: styleProp, children, ...rest }, ref) {
     const isDark = useGlobalDarkMode();

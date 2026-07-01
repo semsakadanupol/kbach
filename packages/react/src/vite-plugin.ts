@@ -1,6 +1,14 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
+// This file is Node-only (Vite build time). Import process explicitly and cast
+// to NodeJS.Process instead of relying on the ambient global — global.d.ts
+// declares a minimal `process` shim ({ env: { NODE_ENV } }) for browser/RN
+// runtime files, which otherwise shadows the full Process type here and hides
+// `.platform`/`.cwd()`.
+import processImport from 'node:process';
 import type { Plugin } from 'vite';
+
+const process = processImport as NodeJS.Process;
 
 // Normalize file paths to forward slashes so initialScan (which uses path.join →
 // backslashes on Windows) and handleHotUpdate (which uses Vite's forward-slash paths)

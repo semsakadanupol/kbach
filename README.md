@@ -40,10 +40,14 @@ className="bg-white dark:bg-gray-10 p-4" + <style> <- web
 
 ## Setup
 
-Kbach ships as two packages, one per platform. For install and setup instructions, see:
+Kbach ships as two packages, one per platform:
 
-- [`@kbach/react`](packages/react/README.md) ([npm](https://www.npmjs.com/package/@kbach/react)) -- React web
-- [`@kbach/native`](packages/native/README.md) ([npm](https://www.npmjs.com/package/@kbach/native)) -- React Native / Expo
+| Package | Platform | Setup guide | npm |
+|---|---|---|---|
+| `@kbach/react` | React web | [README](packages/react/README.md) | [npmjs.com/package/@kbach/react](https://www.npmjs.com/package/@kbach/react) |
+| `@kbach/native` | React Native / Expo | [README](packages/native/README.md) | [npmjs.com/package/@kbach/native](https://www.npmjs.com/package/@kbach/native) |
+
+Follow the README for whichever platform you're targeting -- it has the full install and configuration steps.
 
 ---
 

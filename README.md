@@ -47,7 +47,7 @@ className="bg-white dark:bg-gray-10 p-4" + <style> <- web
 npm install @kbach/react
 ```
 
-`@kbach/react` includes the core engine as a dependency -- no separate install needed.
+[`@kbach/react`](https://www.npmjs.com/package/@kbach/react) includes the core engine as a dependency -- no separate install needed.
 
 ### 2. Configure the JSX runtime
 
@@ -147,7 +147,7 @@ export default function Card() {
 npm install @kbach/native
 ```
 
-That's it. `@kbach/native` ships the core engine, Babel plugin, and Metro helpers as bundled dependencies -- nothing else to install.
+That's it. [`@kbach/native`](https://www.npmjs.com/package/@kbach/native) ships the core engine, Babel plugin, and Metro helpers as bundled dependencies -- nothing else to install.
 
 ### 2. babel.config.js
 

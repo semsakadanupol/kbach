@@ -27,6 +27,8 @@ export default function Screen() {
 
 ## Install
 
+[npm package](https://www.npmjs.com/package/@kbach/native)
+
 ```
 npm install @kbach/native
 ```

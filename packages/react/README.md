@@ -12,6 +12,8 @@ Tailwind-like utility classes for React (web). Write classes as `className` stri
 
 ## Install
 
+[npm package](https://www.npmjs.com/package/@kbach/react)
+
 ```
 npm install @kbach/react
 ```

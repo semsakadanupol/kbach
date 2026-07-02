@@ -12,7 +12,10 @@
     "dev": "turbo run dev --parallel",
     "test": "turbo run test",
     "lint": "turbo run lint",
-    "clean": "turbo run clean && node -e \"require('fs').rmSync('node_modules',{recursive:true,force:true})\""
+    "clean": "turbo run clean && node -e \"require('fs').rmSync('node_modules',{recursive:true,force:true})\"",
+    "publish:react": "npm version patch --workspaces --no-git-tag-version && turbo run build --filter=@kbach/react && npm publish --workspace=@kbach/react",
+    "publish:native": "npm version patch --workspaces --no-git-tag-version && turbo run build --filter=@kbach/native && npm publish --workspace=@kbach/native",
+    "publish:all": "npm version patch --workspaces --no-git-tag-version && turbo run build && npm publish --workspaces"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

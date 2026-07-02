@@ -608,3 +608,16 @@ npm run test    # run tests
 npm run lint    # TypeScript type check
 npm run clean   # delete all dist/ folders and node_modules
 ```
+
+### Publishing
+
+`@kbach/react` and `@kbach/native` are always version-locked — every publish script
+bumps both packages' version in lockstep (via `npm version patch --workspaces`),
+even when only one of them is actually uploaded to npm, so the two `package.json`
+versions never drift apart.
+
+```bash
+npm run publish:react   # bump both, build @kbach/react, publish @kbach/react only
+npm run publish:native  # bump both, build @kbach/native (and its @kbach/react dependency), publish @kbach/native only
+npm run publish:all     # bump both, build everything, publish both
+```

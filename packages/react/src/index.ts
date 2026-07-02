@@ -9,10 +9,6 @@ export type { ColorsAPI, ColorScale } from './useColors';
 export { ThemeProvider } from './ThemeProvider';
 export type { ThemeProviderProps } from './ThemeProvider';
 
-// Toggle
-export { ThemeToggle } from './ThemeToggle';
-export type { ThemeToggleProps, ToggleVariant } from './ThemeToggle';
-
 // styled() HOC
 export { styled } from './styled';
 export type { StyledProps } from './styled';

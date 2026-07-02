@@ -163,14 +163,6 @@ colors['white/20']        // 'rgba(255,255,255,0.2)'
 colors.alpha('#ff6b35', 60) // 'rgba(255,107,53,0.6)'
 ```
 
-### ThemeToggle
-```jsx
-<ThemeToggle />                                 // button (default)
-<ThemeToggle variant="switch" />               // toggle switch
-<ThemeToggle variant="icon-button" />          // icon button
-<ThemeToggle variant="button" includeSystem /> // three-way light/dark/system
-```
-
 ---
 
 ## Modifier System

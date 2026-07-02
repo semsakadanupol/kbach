@@ -145,31 +145,6 @@ colors.alpha('rgb(100,200,100)', 30)  // 'rgba(100,200,100,0.3)'
 
 Useful for chart libraries, Animated API, or any third-party component that needs raw color values instead of class strings.
 
-### ThemeToggle
-
-Drop-in toggle component. Works on web and native.
-
-```tsx
-// Simple button
-<ThemeToggle />
-
-// Toggle switch
-<ThemeToggle variant="switch" />
-
-// Icon button
-<ThemeToggle variant="icon-button" lightLabel="Light" darkLabel="Dark" />
-
-// Button group with system option
-<ThemeToggle variant="button" includeSystem />
-```
-
-| Prop | Type | Default | Description |
-|---|---|---|---|
-| `variant` | `'button' \| 'switch' \| 'icon-button'` | `'button'` | Visual style |
-| `lightLabel` | `string` | `'Light'` | Label for light mode |
-| `darkLabel` | `string` | `'Dark'` | Label for dark mode |
-| `includeSystem` | `boolean` | `false` | Show three-way Light/Dark/System selector |
-
 ---
 
 ## Styling APIs

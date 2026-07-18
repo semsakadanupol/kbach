@@ -90,8 +90,15 @@ function formatKbachCSS(tokenCSS: Map<string, string>, theme: ThemeConfig, respo
   const allRaw = [...tokenCSS.values()].filter(Boolean).join('\n');
   const colorVars = buildColorVarMap(theme, allRaw);
 
+  // Replace longest hex values first — every hex value starts with '#' followed
+  // only by hex digits, so the only way one can appear as a literal substring of
+  // another is as a same-position prefix (e.g. '#fff' inside '#ffffff'). Sorting
+  // descending by length ensures the longer value is already substituted before
+  // the shorter one's search runs, so it can no longer corrupt it.
+  const sortedColorVars = [...colorVars].sort(([a], [b]) => b.length - a.length);
+
   function applyVars(css: string): string {
-    for (const [val, varName] of colorVars)
+    for (const [val, varName] of sortedColorVars)
       css = css.split(val).join(`var(${varName})`);
     return css;
   }

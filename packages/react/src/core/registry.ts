@@ -9,6 +9,8 @@
  * Plugin authors can register custom modifiers via registerModifier().
  */
 
+import { escapeCSSSelector } from './platform';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ModifierDef {
@@ -152,12 +154,44 @@ export function clearPluginModifiers(): void {
   _invalidate();
 }
 
+// ─── Named group/peer variants ─────────────────────────────────────────────────
+//
+// `group-hover:x` always matches the nearest `.group` ancestor, which breaks
+// as soon as groups nest — the inner element reacts to BOTH ancestors. Tailwind's
+// fix is a name suffix: `group/card` marks the ancestor, `group-hover/card:x`
+// only matches that specific one. Since names are open-ended (infinite possible
+// values), they can't be pre-registered in BUILTIN_MODIFIERS like every other
+// modifier — this constructs a ModifierDef for them on demand instead, and
+// memoizes each one so repeated classes (the common case) don't reallocate.
+const NAMED_GROUP_PEER_RE = /^(group|peer)-(hover|focus)\/(.+)$/;
+const _namedModifierCache = new Map<string, ModifierDef>();
+
+function getNamedGroupPeerModifier(name: string): ModifierDef | undefined {
+  const cached = _namedModifierCache.get(name);
+  if (cached) return cached;
+
+  const m = NAMED_GROUP_PEER_RE.exec(name);
+  if (!m) return undefined;
+  const [, kind, trigger, groupName] = m as unknown as [string, 'group' | 'peer', 'hover' | 'focus', string];
+
+  const escapedName = escapeCSSSelector(groupName);
+  const pseudo = trigger === 'hover' ? ':hover' : ':focus';
+  const combinator = kind === 'group' ? ' ' : ' ~ ';
+  const def: ModifierDef = {
+    ancestorSelector: `.${kind}\\/${escapedName}${pseudo}${combinator}`,
+    jsBehavior: 'css-only',
+    forcesImportant: true,
+  };
+  _namedModifierCache.set(name, def);
+  return def;
+}
+
 export function getModifier(name: string): ModifierDef | undefined {
-  return BUILTIN_MODIFIERS[name] ?? _pluginModifiers[name];
+  return BUILTIN_MODIFIERS[name] ?? _pluginModifiers[name] ?? getNamedGroupPeerModifier(name);
 }
 
 export function isKnownModifier(name: string): boolean {
-  return name in BUILTIN_MODIFIERS || name in _pluginModifiers;
+  return name in BUILTIN_MODIFIERS || name in _pluginModifiers || NAMED_GROUP_PEER_RE.test(name);
 }
 
 // ─── Derived sets (lazy, recomputed after plugin changes) ─────────────────────

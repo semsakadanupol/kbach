@@ -253,6 +253,18 @@ Mark a parent with `group`, then use `group-hover:` etc. on children.
 | `peer-hover:` | Previous sibling `.peer` is hovered |
 | `peer-focus:` | Previous sibling `.peer` is focused |
 
+**Named groups/peers** — nested groups need names to avoid an inner element
+reacting to the wrong (nearest) ancestor: `group/{name}` + `group-hover/{name}:`,
+same for `peer/{name}` + `peer-hover/{name}:`/`peer-focus/{name}:`.
+```jsx
+<div className="group/card">
+  <div className="group/icon">
+    <span className="group-hover/icon:opacity-100" />
+  </div>
+  <span className="group-hover/card:underline" />
+</div>
+```
+
 ### Pseudo-element modifiers
 ```jsx
 <div className="before:content-['*'] before:text-red-6 relative" />

@@ -1784,10 +1784,18 @@ for (const [utility, [widthProp, colorProp]] of Object.entries(BORDER_SIDE_PROPS
 
 // ─── Public resolver ─────────────────────────────────────────────────────────
 
+// group/{name} and peer/{name} are the named-group marker classes (see
+// registry.ts's getNamedGroupPeerModifier for the group-hover/{name}: side).
+// The parser has no dash to split on here, so the whole "group/card" string
+// lands in parsed.utility with no dedicated resolver entry — without this
+// check they'd log a false "Unknown utility" warning below.
+const NAMED_GROUP_PEER_MARKER_RE = /^(group|peer)\/.+$/;
+
 export function resolveUtility(parsed: ParsedClass, theme: ThemeConfig): StyleValue | null {
   if (!parsed.value) {
     if (parsed.utility in PLUGIN_STANDALONE) return PLUGIN_STANDALONE[parsed.utility] ?? null;
     if (parsed.utility in getStandalone()) return getStandalone()[parsed.utility] ?? null;
+    if (NAMED_GROUP_PEER_MARKER_RE.test(parsed.utility)) return getEffectiveIsWeb() ? {} as StyleValue : null;
   }
 
   const resolver = PLUGIN_RESOLVERS[parsed.utility] ?? RESOLVERS[parsed.utility];
@@ -1829,7 +1837,8 @@ export function isKnownUtility(utility: string): boolean {
     utility in getStandalone() ||
     utility in RESOLVERS ||
     utility in PLUGIN_STANDALONE ||
-    utility in PLUGIN_RESOLVERS
+    utility in PLUGIN_RESOLVERS ||
+    NAMED_GROUP_PEER_MARKER_RE.test(utility)
   );
 }
 

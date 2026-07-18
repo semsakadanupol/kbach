@@ -298,6 +298,17 @@ Negated: `not-hover:`, `not-focus:`, `not-pressed:`, `not-active:`, `not-disable
 <p className="peer-focus:text-blue-6" />
 ```
 
+Nested groups need names, or the inner element reacts to whichever `.group` is nearest — not necessarily the one you meant:
+
+```jsx
+<div className="group/card">
+  <div className="group/icon">
+    <span className="group-hover/icon:opacity-100" /> {/* only the inner group */}
+  </div>
+  <span className="group-hover/card:underline" />      {/* only the outer group */}
+</div>
+```
+
 ### Responsive
 
 | Modifier | Min-width |

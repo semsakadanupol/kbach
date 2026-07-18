@@ -221,6 +221,22 @@ Mark a previous sibling with `peer`, then use `peer-hover:` etc. on the next sib
 | `peer-hover:` | Previous sibling `.peer` is hovered |
 | `peer-focus:` | Previous sibling `.peer` is focused |
 
+**Named groups/peers** — when groups nest, an unnamed `group-hover:` matches
+the NEAREST `.group` ancestor, so an inner element reacts to whichever group
+(inner or outer) is hovered, not necessarily the one you meant. Name the
+marker (`group/{name}`) and the modifier (`group-hover/{name}:`) to scope it
+to that specific ancestor — same for `peer/{name}` + `peer-hover/{name}:` /
+`peer-focus/{name}:`. `{name}` can be any string (`card`, `sidebar`, …).
+
+```jsx
+<div className="group/card">
+  <div className="group/icon">
+    <span className="group-hover/icon:opacity-100" /> {/* only inner group */}
+  </div>
+  <span className="group-hover/card:underline" />      {/* only outer group */}
+</div>
+```
+
 ### Pseudo-element modifiers (CSS-injection only, web only)
 ```jsx
 <div className="before:content-['*'] before:text-red-6 relative" />

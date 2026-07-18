@@ -574,15 +574,21 @@ shadow-sm/DEFAULT/md/lg/xl/2xl/none
 opacity-0/5/10/15/20/25/30/40/50/60/70/75/80/90/95/100
 ```
 
-### Ring (web only)
+### Ring
+Web: box-shadow ring (no layout impact). Native: approximated via
+borderWidth/borderColor (RN has no box-shadow) — this DOES affect layout
+there, and shares its properties with `border-*`, so combining `border-*`
+and `ring-*` on the same native element means whichever class comes last
+wins. `ring-offset-*` stays web-only — there's no native way to add a gap
+around an element without an extra wrapper view.
 ```
-ring             box-shadow ring (2px)
+ring             ring (2px)
 ring-{n}         ring width: 0 1 2 4 8
 ring-{color}     ring color
 ring-opacity-{n} ring opacity
-ring-offset-{n}  ring offset: 0 1 2 4 8
-ring-offset-{color}
-ring-inset       inset ring
+ring-offset-{n}  ring offset: 0 1 2 4 8 (web only)
+ring-offset-{color} (web only)
+ring-inset       inset ring (web only — native has no inset/outset distinction)
 ```
 
 ### Outline (web only)

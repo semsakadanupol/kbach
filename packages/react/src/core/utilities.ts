@@ -1638,42 +1638,71 @@ const RESOLVERS: Record<string, Resolver> = {
     return { transitionDelay: ms };
   },
 
-  // ── Ring (web-only: box-shadow outline ring) ──────────────────────────────
+  // ── Ring ───────────────────────────────────────────────────────────────────
+  // Web: box-shadow outline ring (doesn't affect layout).
+  // Native: React Native has no box-shadow, so this falls back to borderWidth/
+  // borderColor — the closest visual approximation (used by other RN Tailwind-
+  // likes for the same reason). Unlike the web ring, this DOES affect layout,
+  // and it shares its properties with the `border` utility — combining
+  // `border-*` and `ring-*` on the same native element means whichever class
+  // comes later wins, since both ultimately set borderWidth/borderColor.
   ring: ({ value, isArbitrary }, { colors }) => {
-    if (!getEffectiveIsWeb()) return null;
+    const onWeb = getEffectiveIsWeb();
     const DEFAULT_COLOR = 'rgba(59, 130, 246, 0.5)';
     const DEFAULT_WIDTH = 3;
 
+    const asNative = (w: number, color: string): StyleValue =>
+      w === 0 ? { borderWidth: 0 } : { borderWidth: w, borderColor: color };
+
     if (!value) {
-      return { boxShadow: `0 0 0 ${DEFAULT_WIDTH}px ${DEFAULT_COLOR}` } as StyleValue;
+      return onWeb
+        ? { boxShadow: `0 0 0 ${DEFAULT_WIDTH}px ${DEFAULT_COLOR}` } as StyleValue
+        : asNative(DEFAULT_WIDTH, DEFAULT_COLOR);
     }
 
     if (value === 'inset') {
-      return { boxShadow: `inset 0 0 0 ${DEFAULT_WIDTH}px ${DEFAULT_COLOR}` } as StyleValue;
+      // No inset/outset distinction for a native border — same visual result either way.
+      return onWeb
+        ? { boxShadow: `inset 0 0 0 ${DEFAULT_WIDTH}px ${DEFAULT_COLOR}` } as StyleValue
+        : asNative(DEFAULT_WIDTH, DEFAULT_COLOR);
     }
 
     const widthTokens: Record<string, number> = { '0': 0, '1': 1, '2': 2, '4': 4, '8': 8 };
     if (!isArbitrary && value in widthTokens) {
       const w = widthTokens[value]!;
-      return { boxShadow: w === 0 ? 'none' : `0 0 0 ${w}px ${DEFAULT_COLOR}` } as StyleValue;
+      return onWeb
+        ? { boxShadow: w === 0 ? 'none' : `0 0 0 ${w}px ${DEFAULT_COLOR}` } as StyleValue
+        : asNative(w, DEFAULT_COLOR);
     }
 
     if (isArbitrary) {
       const numMatch = /^(\d+(?:\.\d+)?)(px|rem|em|vw|vh)?$/.exec(value);
       if (numMatch) {
         const unit = numMatch[2] ?? 'px';
-        return { boxShadow: `0 0 0 ${numMatch[1]}${unit} ${DEFAULT_COLOR}` } as StyleValue;
+        if (onWeb) return { boxShadow: `0 0 0 ${numMatch[1]}${unit} ${DEFAULT_COLOR}` } as StyleValue;
+        // borderWidth is a raw number on native — only the (near-universal) px case translates.
+        return unit === 'px' ? asNative(parseFloat(numMatch[1]!), DEFAULT_COLOR) : null;
       }
-      // Treat as full box-shadow string (underscores → spaces)
-      return { boxShadow: value.replace(/_/g, ' ') } as StyleValue;
+      // Full arbitrary box-shadow string (e.g. ring-[0_0_0_2px_red]) — web-only,
+      // no native translation exists for an arbitrary box-shadow value.
+      return onWeb ? { boxShadow: value.replace(/_/g, ' ') } as StyleValue : null;
     }
 
     const color = resolveColor(value, colors, false);
-    if (color) return { boxShadow: `0 0 0 ${DEFAULT_WIDTH}px ${color}` } as StyleValue;
+    if (color) {
+      return onWeb
+        ? { boxShadow: `0 0 0 ${DEFAULT_WIDTH}px ${color}` } as StyleValue
+        : asNative(DEFAULT_WIDTH, color);
+    }
 
     return null;
   },
 
+  // Web-only, unlike `ring` above: this stacks a second box-shadow layer to
+  // create a gap between the element and the ring. There's no native
+  // equivalent to approximate that with (a border can't create a gap outside
+  // its own element without an extra wrapper view), so this stays a no-op
+  // on native rather than rendering a misleading half-translation.
   'ring-offset': ({ value, isArbitrary }, _theme) => {
     if (!getEffectiveIsWeb()) return null;
     const DEFAULT_RING_COLOR = 'rgba(59, 130, 246, 0.5)';

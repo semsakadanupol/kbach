@@ -519,11 +519,15 @@ opacity-0/5/10/15/20/25/30/40/50/60/70/75/80/90/95/100
 ```
 
 ### Ring
+Web: box-shadow ring. Native: approximated via borderWidth/borderColor
+(no box-shadow on RN) — affects layout there and shares properties with
+`border-*` (last class wins if both are used). `ring-offset-*`/`ring-inset`
+stay web-only, with no native equivalent.
 ```
 ring / ring-{n}(0 1 2 4 8)
 ring-{color}
-ring-inset
-ring-offset-{n}(0 1 2 4 8)
+ring-inset            (web only)
+ring-offset-{n}(0 1 2 4 8)  (web only)
 ```
 
 ### Outline

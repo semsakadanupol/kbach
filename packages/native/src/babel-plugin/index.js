@@ -3,6 +3,18 @@
 const path = require('path');
 const fs = require('fs');
 
+// ─── Terminal color helper ──────────────────────────────────────────────────────
+// Plain ANSI escapes — no-ops when stdout isn't a color-capable TTY (CI logs,
+// redirected output) or NO_COLOR is set.
+const _useColor = !!(process.stdout && process.stdout.isTTY) && !process.env.NO_COLOR;
+function _paint(code, s) { return _useColor ? `\x1b[${code}m${s}\x1b[0m` : s; }
+function log(message) {
+  console.log(`${_paint('1', _paint('35', '[kbach]'))} ${message}`);
+}
+function warn(message) {
+  console.warn(`${_paint('1', _paint('35', '[kbach]'))} ${_paint('33', message)}`);
+}
+
 // ─── Cross-file resolve cache ─────────────────────────────────────────────────
 // Keyed by (config file absolute path + classString) so that two projects/apps
 // transformed by the same long-lived Babel/Metro worker process (a shared worker
@@ -306,7 +318,7 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
           if (!hasStyles) return;
 
           if (debug) {
-            console.log(`[Kbach] Transformed: "${classString}"`);
+            log(`Transformed "${classString}"`);
           }
 
           let uid;
@@ -328,7 +340,7 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
           nodePath.node.name = t.jSXIdentifier('__kbachClasses');
         } catch (err) {
           if (debug) {
-            console.warn(`[Kbach] Could not transform "${classString}":`, err.message);
+            warn(`Couldn't transform "${classString}": ${err.message}`);
           }
         }
       },

@@ -3,6 +3,7 @@ import { defaultTheme } from './theme';
 import { clearPluginUtilities, getPluginStandaloneMap } from './utilities';
 import { clearCache, injectGlobalStyles, setDefaultFontFamily } from './resolver';
 import { registerModifier, clearPluginModifiers, type ModifierDef } from './registry';
+import { kbachWarn } from './devWarn';
 
 // ─── Deep merge ───────────────────────────────────────────────────────────────
 
@@ -139,7 +140,7 @@ export function buildConfig(userConfig: FrameworkConfig): ResolvedConfig {
       for (const [key, value] of Object.entries(ext)) {
         if (typeof value !== 'object' || value === null || Array.isArray(value)) {
           if (process.env.NODE_ENV !== 'production') {
-            console.warn(`[kbach] config.extend.${key} must be a plain object, got ${typeof value}. Skipping.`);
+            kbachWarn(`extend.${key} should be an object, got ${typeof value} — skipped`);
           }
           continue;
         }

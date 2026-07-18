@@ -10,6 +10,7 @@
  */
 
 import { escapeCSSSelector } from './platform';
+import { kbachWarn } from './devWarn';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -142,7 +143,7 @@ function _invalidate(): void {
 
 export function registerModifier(name: string, def: ModifierDef): void {
   if (process.env.NODE_ENV !== 'production' && name in BUILTIN_MODIFIERS) {
-    console.warn(`[kbach] registerModifier: "${name}" is a built-in modifier and cannot be overridden. Use a different name.`);
+    kbachWarn(`"${name}" is built-in — pick another modifier name`);
     return;
   }
   _pluginModifiers[name] = def;

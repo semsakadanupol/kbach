@@ -29,6 +29,28 @@ import type { FrameworkConfig, ThemeConfig } from './core/types';
 // web-only resolver branches generate CSS instead of returning null.
 setCSSGenMode(true);
 
+// ─── Terminal color helpers ────────────────────────────────────────────────────
+// Plain ANSI escapes — no chalk/picocolors dependency needed for a handful of
+// codes. No-ops when stdout isn't a color-capable TTY (CI logs, redirected
+// output) or NO_COLOR is set, so raw escape codes never leak into log files.
+const useColor = !!process.stdout?.isTTY && !process.env.NO_COLOR;
+const paint = (code: string, s: string) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
+const purple = (s: string) => paint('35', s);
+const yellow = (s: string) => paint('33', s);
+const dim = (s: string) => paint('2', s);
+const bold = (s: string) => paint('1', s);
+const TAG = () => `${bold(purple('[kbach]'))}`;
+
+/** Short, single-line warning: "[kbach] <message>" with the tag colored and the message in yellow. */
+function warn(message: string): void {
+  console.warn(`${TAG()} ${yellow(message)}`);
+}
+
+/** Multi-line warning: header in yellow, tag prefix, extra detail lines passed through as-is (already formatted/dimmed by the caller). */
+function warnBlock(header: string, ...lines: string[]): void {
+  console.warn([`${TAG()} ${yellow(header)}`, ...lines].join('\n'));
+}
+
 const KBACH_START = '/* kbach:start */';
 const KBACH_END = '/* kbach:end */';
 
@@ -178,10 +200,9 @@ function findKbachCSS(root: string): string | null {
   found.sort((a, b) => a.split(/[\\/]/g).length - b.split(/[\\/]/g).length);
 
   if (found.length > 1) {
-    console.warn(
-      '[kbach] Multiple kbach.css files found — only the shallowest will receive generated styles.\n' +
-      '        Remove duplicates to avoid confusion:\n' +
-      found.map(f => `          ${f}`).join('\n'),
+    warnBlock(
+      `Multiple kbach.css found, using the shallowest — remove the rest:`,
+      ...found.map(f => dim(`  ${f}`)),
     );
   }
 
@@ -287,7 +308,7 @@ function scanDir(dir: string, onFile: (filePath: string, code: string) => void):
     entries = readdirSync(dir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      console.warn(`[kbach] Cannot read directory ${dir}:`, (err as Error).message);
+      warn(`Can't read ${dir}: ${(err as Error).message}`);
     }
     return;
   }
@@ -299,7 +320,7 @@ function scanDir(dir: string, onFile: (filePath: string, code: string) => void):
       if (st.isDirectory()) scanDir(full, onFile);
       else if (/\.(tsx?|jsx?)$/.test(entry)) onFile(full, readFileSync(full, 'utf-8'));
     } catch (err) {
-      console.warn(`[kbach] Cannot process ${full}:`, (err as Error).message);
+      warn(`Can't process ${full}: ${(err as Error).message}`);
     }
   }
 }
@@ -417,11 +438,7 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
     if (!base || projectCssClasses.has(base)) return;
 
     warnedTokens.add(tok);
-    console.warn(
-      `[kbach] "${tok}" isn't a Kbach utility and no matching CSS rule was found anywhere `
-      + 'in the project (checked .css/.scss/.sass/.less files) — possible typo? If this is '
-      + 'intentional (a third-party class, one defined via CSS-in-JS, etc.), this warning is safe to ignore.',
-    );
+    warn(`Unknown class "${tok}" — no Kbach utility or project CSS rule matches it. Typo?`);
   }
 
   function processFile(filePath: string, code: string): void {
@@ -481,13 +498,10 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
       // leaving it as an unexplained blank/unstyled page + browser console error.
       const names = new Set(resolved.plugins.map((p) => p.name));
       if (names.has('react-router') && names.has('vite:react-refresh')) {
-        console.warn(
-          '[kbach] Detected both @vitejs/plugin-react and @react-router/dev\'s reactRouter() '
-          + 'plugin active together. reactRouter() already includes its own JSX transform and '
-          + 'Fast Refresh integration — having both crashes the page at runtime with '
-          + '"Identifier \'RefreshRuntime\' has already been declared" before React hydrates, '
-          + 'which looks like every class silently failing to style. Remove the react() plugin '
-          + 'from vite.config.ts; jsxImportSource in tsconfig.json is enough on its own.',
+        warnBlock(
+          '@vitejs/plugin-react + reactRouter() conflict — page will crash before styles apply.',
+          dim('  Both inject Fast Refresh ("RefreshRuntime already declared").'),
+          dim('  Fix: remove react() from vite.config.ts — tsconfig jsxImportSource is enough.'),
         );
       }
     },

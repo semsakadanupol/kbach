@@ -10,6 +10,7 @@ import {
   matchModifier,
   type ModifierDef,
 } from './registry';
+import { kbachWarn } from './devWarn';
 
 // ─── Style cache — per-theme, bounded LRU ────────────────────────────────────
 //
@@ -383,7 +384,7 @@ export function resolve(
     if (!styles) {
       if (process.env.NODE_ENV !== 'production' && !parsed.isArbitrary && !isKnownUtility(parsed.utility)
           && !parsed.original.startsWith('__')) {
-        console.warn(`[kbach] Unknown utility "${parsed.utility}" in class "${parsed.original}"`);
+        kbachWarn(`Unknown class "${parsed.original}"`);
       }
       continue;
     }

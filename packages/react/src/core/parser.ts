@@ -1,6 +1,7 @@
 import type { ParsedClass } from './types';
 import { isKnownModifier, getAllModifierNames } from './registry';
 import { getBuiltinUtilityPrefixes, getBuiltinStandaloneNames } from './utilities';
+import { kbachWarn } from './devWarn';
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
 // Modifiers, utility prefixes, and standalone names are no longer hardcoded here.
@@ -56,7 +57,7 @@ export function parseClass(className: string): ParsedClass | null {
   }
   if (remaining.endsWith(']') && bracketStart === -1) {
     if (process.env.NODE_ENV !== 'production') {
-      console.warn(`[kbach] Malformed class string: "${trimmed}" — unbalanced brackets`);
+      kbachWarn(`Unbalanced brackets: "${trimmed}"`);
     }
   }
   // Bare [value] — happens when the negative prefix was stripped from -[value],

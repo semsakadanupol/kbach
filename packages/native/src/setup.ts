@@ -6,6 +6,13 @@
  * Native bundles but will never execute there.
  */
 
+// This file only runs inside Node.js build tooling, but this package's
+// tsconfig has no @types/node (kept minimal for the RN app bundle), so
+// `process`/`node:process` aren't typed here. A minimal local ambient
+// declaration for just what's used below avoids pulling in the full
+// @types/node dependency for one warning helper.
+declare const process: { stdout?: { isTTY?: boolean }; env: Record<string, string | undefined> };
+
 export interface KbachOptions {
   /** Path to kbach.config.js, relative to project root. Default: 'kbach.config.js' */
   configFile?: string;
@@ -13,6 +20,15 @@ export interface KbachOptions {
   attributes?: string[];
   /** Log transformed class strings to the Metro console. Default: false */
   debug?: boolean;
+}
+
+// ─── Terminal color helper ──────────────────────────────────────────────────────
+// Plain ANSI escapes — no-ops when stdout isn't a color-capable TTY (CI logs,
+// redirected output) or NO_COLOR is set.
+function warn(message: string): void {
+  const useColor = !!process.stdout?.isTTY && !process.env.NO_COLOR;
+  const paint = (code: string, s: string) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
+  console.warn(`${paint('1', paint('35', '[kbach]'))} ${paint('33', message)}`);
 }
 
 // ─── withKbach ────────────────────────────────────────────────────────────────
@@ -86,10 +102,7 @@ export function withKbachBabel(
       // (This file only runs inside Node.js build tooling, never in the app
       // bundle, so the warning is unconditional — no process.env gating needed.)
       if (opts.jsxRuntime === 'classic') {
-        console.warn(
-          '[kbach] withKbachBabel: overriding jsxRuntime "classic" to "automatic" on '
-          + `"${name}" — Kbach requires the automatic JSX runtime to work.`,
-        );
+        warn(`Forcing jsxRuntime "automatic" on ${name} (was "classic") — required for Kbach`);
       }
       return [name, { ...opts, jsxRuntime: 'automatic', jsxImportSource: '@kbach/native' }];
     }

@@ -630,6 +630,8 @@ aspect-auto / aspect-square / aspect-video / aspect-[4/3]
 columns-{n} / columns-auto / columns-{size}
 caret-{color} / caret-auto / caret-transparent
 accent-{color} / accent-auto
+stroke-{color} / stroke-{n} / stroke-none  (web only, SVG)
+fill-{color} / fill-none                    (web only, SVG)
 mix-blend-{mode}
 bg-blend-{mode}
 will-change-auto/scroll/contents/transform

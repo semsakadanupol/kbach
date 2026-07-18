@@ -746,6 +746,17 @@ accent-{color}    accent-color
 accent-auto       accent-color: auto
 ```
 
+### SVG stroke / fill (web only)
+Native excluded: react-native-svg takes stroke/fill as component props, not
+style entries, so there's no reliable way to apply these through `style`.
+```
+stroke-{color}    stroke
+stroke-{n}        strokeWidth (numeric, not a color)
+stroke-none       stroke: none
+fill-{color}      fill
+fill-none         fill: none
+```
+
 ### Mix blend / Background blend (web only)
 ```
 mix-blend-{mode}  mix-blend-mode

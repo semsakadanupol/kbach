@@ -1384,6 +1384,34 @@ const RESOLVERS: Record<string, Resolver> = {
     return color ? { accentColor: color } as StyleValue : null;
   },
 
+  // ── SVG stroke/fill (web-only) ────────────────────────────────────────────
+  // Native is intentionally excluded: react-native-svg's <Path>/<Circle>/etc.
+  // take stroke/fill as component PROPS, not style entries, so there's no
+  // reliable way to apply a resolved color through the `style` prop there.
+  // `stroke-{n}` sets strokeWidth (a plain number, unlike a color) — same
+  // color-first-then-numeric-fallback disambiguation `border` uses above.
+  stroke: ({ value, isArbitrary }, { colors }) => {
+    if (!getEffectiveIsWeb()) return null;
+    if (!value) return null;
+    if (value === 'none') return { stroke: 'none' } as StyleValue;
+    if (isArbitrary) {
+      const w = toNativeValue(value);
+      return typeof w === 'number' ? { strokeWidth: w } as StyleValue : { stroke: value } as StyleValue;
+    }
+    const color = resolveColor(value, colors, false);
+    if (color) return { stroke: color } as StyleValue;
+    const n = parseFloat(value);
+    return isNaN(n) ? null : { strokeWidth: n } as StyleValue;
+  },
+  fill: ({ value, isArbitrary }, { colors }) => {
+    if (!getEffectiveIsWeb()) return null;
+    if (!value) return null;
+    if (value === 'none') return { fill: 'none' } as StyleValue;
+    if (isArbitrary) return { fill: value } as StyleValue;
+    const color = resolveColor(value, colors, false);
+    return color ? { fill: color } as StyleValue : null;
+  },
+
   // ── Flex ───────────────────────────────────────────────────────────────────
   flex: ({ value, isArbitrary }, { flex }) => {
     if (!value) return { display: 'flex' };

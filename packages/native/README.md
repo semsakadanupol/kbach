@@ -345,7 +345,14 @@ Create and import `kbach.css` in your entry file exactly as in the `@kbach/react
 
 These resolve to `null` on React Native and produce no warning:
 
-`caret-*`, `accent-*`, `touch-*`, `float-*`, `clear-*`, `line-clamp-*`, `scroll-*`, `animate-*`, `transition`, `filter`, `backdrop-filter`, `print:`, `before:`, `after:`, `selection:`, `first-letter:`, `first-line:`, `marker:`, `landscape:`, `portrait:`, `motion-reduce:`, `motion-safe:`, `contrast-more:`, `contrast-less:`, `rtl:`, `ltr:`, `grid`, `grid-cols-*`, `ring`, `outline-*`, `cursor-*`, `bg-gradient-*`
+`caret-*`, `accent-*`, `stroke-*`, `fill-*`, `touch-*`, `float-*`, `clear-*`, `line-clamp-*`, `scroll-*`, `animate-*`, `transition`, `filter`, `backdrop-filter`, `print:`, `before:`, `after:`, `selection:`, `first-letter:`, `first-line:`, `marker:`, `landscape:`, `portrait:`, `motion-reduce:`, `motion-safe:`, `contrast-more:`, `contrast-less:`, `rtl:`, `ltr:`, `grid`, `grid-cols-*`, `ring-offset-*`, `outline-*`, `cursor-*`, `bg-gradient-*`
+
+`ring`/`ring-{n}`/`ring-{color}`/`ring-inset` are the one exception in this
+family — they fall back to `borderWidth`/`borderColor` on native (the closest
+available approximation, since RN has no box-shadow) instead of resolving to
+null. This does affect layout on native (unlike the real web ring) and shares
+properties with `border-*`, so combining `border-*` and `ring-*` on the same
+native element means whichever class comes last wins.
 
 ## Configuration
 

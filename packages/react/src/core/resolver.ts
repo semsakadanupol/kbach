@@ -207,7 +207,13 @@ function styleValueToCSS(styles: StyleValue, forceImportant = false): string {
 
     let cssVal: string;
     if (typeof val === 'number') {
-      cssVal = (val === 0 || CSS_UNITLESS.has(prop)) ? String(val) : `${val}px`;
+      // CSS custom properties (--bg-opacity, --text-opacity, …) are raw token
+      // streams, not tied to any property's expected unit — every numeric one
+      // in this codebase is a dimensionless multiplier read via var() inside
+      // another declaration (e.g. an rgba() alpha channel), so a "px" suffix
+      // would make that declaration invalid CSS, not just visually wrong.
+      const isCustomProp = prop.startsWith('--');
+      cssVal = (val === 0 || isCustomProp || CSS_UNITLESS.has(prop)) ? String(val) : `${val}px`;
     } else {
       cssVal = String(val);
     }

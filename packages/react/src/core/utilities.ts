@@ -105,6 +105,29 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+/**
+ * Web only. Wrap a flat hex color in `rgba(r,g,b,var(--name,1))` so a sibling
+ * `bg-opacity-{n}`/`text-opacity-{n}` class — which independently sets --name
+ * as a bare CSS custom property — can control this declaration's alpha via
+ * the CSS cascade. Each class token resolves independently with no awareness
+ * of what else is on the same element, so a shared CSS variable read at the
+ * point of use is the only way for one class to affect another's output.
+ *
+ * Only flat hex colors are wrapped. Colors that already carry their own alpha
+ * (the `bg-blue-6/50` slash syntax, which calls hexToRgba above) and anything
+ * that isn't hex (`transparent`, `currentColor`, an arbitrary `hsl(...)`/named
+ * CSS color) pass through unchanged — there's no clean way to compose a var()
+ * alpha into an already-resolved rgba() or a keyword, and the slash syntax is
+ * the direct, explicit way to set opacity for a single class anyway.
+ */
+function withOpacityVar(color: string, varName: string): string {
+  if (!color.startsWith('#')) return color;
+  const rgb = parseHexRgb(color);
+  if (!rgb) return color;
+  const [r, g, b] = rgb;
+  return `rgba(${r},${g},${b},var(${varName},1))`;
+}
+
 // ─── Spacing resolution ───────────────────────────────────────────────────────
 
 export function resolveSpacing(
@@ -642,7 +665,8 @@ const RESOLVERS: Record<string, Resolver> = {
   // ── Background ─────────────────────────────────────────────────────────────
   bg: ({ value, isArbitrary }, { colors }) => {
     const color = resolveColor(value, colors, isArbitrary);
-    return color ? { backgroundColor: color } : null;
+    if (!color) return null;
+    return { backgroundColor: getEffectiveIsWeb() ? withOpacityVar(color, '--bg-opacity') : color };
   },
   'bg-opacity': ({ value, isArbitrary }, _) => {
     if (!getEffectiveIsWeb()) return null;
@@ -663,11 +687,12 @@ const RESOLVERS: Record<string, Resolver> = {
       if (/^\d/.test(value) || /^(calc|min|max|clamp)/.test(value)) {
         return { fontSize: getEffectiveIsWeb() ? value : toNativeValue(value) };
       }
-      return { color: value };
+      return { color: getEffectiveIsWeb() ? withOpacityVar(value, '--text-opacity') : value };
     }
 
     const color = resolveColor(value, colors, false);
-    return color ? { color } : null;
+    if (!color) return null;
+    return { color: getEffectiveIsWeb() ? withOpacityVar(color, '--text-opacity') : color };
   },
   'text-opacity': ({ value, isArbitrary }, _) => {
     if (!getEffectiveIsWeb()) return null;

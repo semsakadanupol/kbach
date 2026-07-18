@@ -88,7 +88,7 @@ import './kbach.css';
 
 The plugin scans your source files and writes generated CSS between the `/* kbach:start */`/`/* kbach:end */` markers. Importing `kbach.css` automatically disables runtime injection — all styles come from the file instead. On HMR, only the changed file is rescanned; unchanged tokens reuse cached CSS.
 
-While it's scanning, the plugin also indexes every `.css`/`.scss`/`.sass`/`.less` file under the same directories and warns in the terminal (not the browser console) for any class that's neither a real Kbach utility nor defined anywhere in those stylesheets — likely a typo. A class you've defined yourself elsewhere (CSS Modules, styled-components, a third-party component's class) is recognized as soon as something in the project literally has a `.that-class-name` rule, so it won't get flagged just because Kbach itself doesn't know it.
+While it's scanning, the plugin also indexes every `.css`/`.scss`/`.sass`/`.less` file under the same directories and warns in the terminal (not the browser console) for any class that's neither a real Kbach utility nor defined anywhere in those stylesheets — likely a typo. A class you've defined yourself elsewhere (CSS Modules, styled-components, a third-party component's class) is recognized as soon as something in the project literally has a `.that-class-name` rule, so it won't get flagged just because Kbach itself doesn't know it. Each warning includes a `file:line:column` location that most terminals (VS Code's integrated terminal included) turn into a clickable link straight to that class.
 
 ## Next.js
 

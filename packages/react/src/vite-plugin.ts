@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'fs';
-import { join } from 'path';
+import { join, relative } from 'path';
 // This file is Node-only (Vite build time). Import process explicitly and cast
 // to NodeJS.Process instead of relying on the ambient global — global.d.ts
 // declares a minimal `process` shim ({ env: { NODE_ENV } }) for browser/RN
@@ -49,6 +49,32 @@ function warn(message: string): void {
 /** Multi-line warning: header in yellow, tag prefix, extra detail lines passed through as-is (already formatted/dimmed by the caller). */
 function warnBlock(header: string, ...lines: string[]): void {
   console.warn([`${TAG()} ${yellow(header)}`, ...lines].join('\n'));
+}
+
+// Most terminals (VS Code's integrated terminal, iTerm2, Windows Terminal, …)
+// auto-detect a bare `path:line:column` and turn it into a clickable link that
+// opens the file at that exact position — no editor-launching machinery needed
+// on our side, just printing the location in this exact, widely-recognized shape.
+function findLineCol(code: string, needle: string): { line: number; column: number } | null {
+  const index = code.indexOf(needle);
+  if (index === -1) return null;
+  let line = 1;
+  let lastNewline = -1;
+  for (let i = 0; i < index; i++) {
+    if (code.charCodeAt(i) === 10 /* \n */) { line++; lastNewline = i; }
+  }
+  return { line, column: index - lastNewline };
+}
+
+/** Warning with a clickable `file:line:column` location, when the token's position can be found. */
+function warnAt(message: string, root: string, filePath: string, code: string, needle: string): void {
+  const pos = findLineCol(code, needle);
+  // Forward slashes regardless of OS — Windows' path.relative() returns
+  // backslashes, but terminal auto-linkers (VS Code's included) recognize
+  // forward-slash paths more reliably across platforms.
+  const relPath = relative(root, filePath).replace(/\\/g, '/');
+  const location = pos ? `${relPath}:${pos.line}:${pos.column}` : relPath;
+  console.warn(`${TAG()} ${yellow(message)}\n  ${dim('at')} ${location}`);
 }
 
 const KBACH_START = '/* kbach:start */';
@@ -418,7 +444,7 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
   const projectCssClasses = new Set<string>();
   const warnedTokens = new Set<string>();
 
-  function checkUnknownToken(tok: string): void {
+  function checkUnknownToken(tok: string, filePath: string, code: string): void {
     if (process.env.NODE_ENV === 'production' || warnedTokens.has(tok) || tok.startsWith('__')) return;
 
     const parsed = parseClass(tok);
@@ -438,7 +464,7 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
     if (!base || projectCssClasses.has(base)) return;
 
     warnedTokens.add(tok);
-    warn(`Unknown class "${tok}" — no Kbach utility or project CSS rule matches it. Typo?`);
+    warnAt(`Unknown class "${tok}" — no Kbach utility or project CSS rule matches it. Typo?`, root, filePath, code, tok);
   }
 
   function processFile(filePath: string, code: string): void {
@@ -449,7 +475,7 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
       if (!tokenCSS.has(tok)) {
         tokenCSS.set(tok, generateClassCSS(tok, cfg.theme, cfg.darkMode, screens));
       }
-      checkUnknownToken(tok);
+      checkUnknownToken(tok, filePath, code);
     }
     fileTokens.set(key, tokens);
   }

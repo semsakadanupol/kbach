@@ -170,7 +170,10 @@ export const defaultTheme: ThemeConfig = {
     '2/3': '66.666667%',
     '1/4': '25%',
     '3/4': '75%',
-    screen: '100vh',
+    // Dynamic viewport unit — see the comment on the 'screen' standalone utilities
+    // in utilities.ts for why dvh beats vh on mobile. Used by h-screen (w-screen
+    // has its own standalone entry so it never reaches this spacing lookup).
+    screen: '100dvh',
     min: 'min-content',
     max: 'max-content',
     fit: 'fit-content',

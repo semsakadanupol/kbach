@@ -428,7 +428,7 @@ mx-auto   (centers element)
 ```
 
 Spacing scale (1 unit = 4px):
-`px(1) 0 0.5(2) 1(4) 1.5(6) 2(8) 2.5(10) 3(12) 3.5(14) 4(16) 5(20) 6(24) 7(28) 8(32) 9(36) 10(40) 11(44) 12(48) 14(56) 16(64) 20(80) 24(96) 28(112) 32(128) 36(144) 40(160) 44(176) 48(192) 52(208) 56(224) 60(240) 64(256) 72(288) 80(320) 96(384) auto full(100%) 1/2 1/3 2/3 1/4 3/4 screen(100vh) min max fit`
+`px(1) 0 0.5(2) 1(4) 1.5(6) 2(8) 2.5(10) 3(12) 3.5(14) 4(16) 5(20) 6(24) 7(28) 8(32) 9(36) 10(40) 11(44) 12(48) 14(56) 16(64) 20(80) 24(96) 28(112) 32(128) 36(144) 40(160) 44(176) 48(192) 52(208) 56(224) 60(240) 64(256) 72(288) 80(320) 96(384) auto full(100%) 1/2 1/3 2/3 1/4 3/4 screen(100dvh) min max fit`
 
 ### Sizing
 ```
@@ -437,7 +437,9 @@ w-{n}  h-{n}  size-{n}  min-w-{n}  min-h-{n}  max-w-{n}  max-h-{n}
 Named max-w: none xs(320) sm(384) md(448) lg(512) xl(576) 2xl(672) 3xl(768)
              4xl(896) 5xl(1024) 6xl(1152) 7xl(1280) prose(65ch)
 
-Screen:  w-screen(100vw)  h-screen(100vh)
+Screen (dvw/dvh — correct on mobile where browser chrome resizes the
+visible viewport; vw/vh are pinned to the largest viewport and overflow
+behind a shown address bar): w-screen(100dvw)  h-screen(100dvh)
          min-w-screen  max-w-screen  min-h-screen  max-h-screen
 ```
 

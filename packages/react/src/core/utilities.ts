@@ -205,15 +205,19 @@ function buildStandalone(): Record<string, StyleValue | null> {
   // Display
   // React Native only supports display:'flex'|'none'. Setting 'flex' explicitly is
   // a no-op normally, but is needed to re-show an element that was hidden via `hidden`.
-  // `grid`, `inline-*`, `contents`, `flow-root` have no native equivalent.
+  // `grid`, `contents`, `flow-root` have no native equivalent and stay null there.
+  // The inline-* family (inline, inline-block, inline-flex, inline-grid) falls back
+  // to 'flex' on native instead — like plain `flex`, this is a no-op most of the
+  // time, but without it these utilities couldn't re-show a `hidden` element on
+  // native either (null → no style applied → still display:'none').
   flex:           { display: 'flex' },
   block:          web ? { display: 'block' } : null,
-  'inline-block': web ? { display: 'inline-block' } : null,
-  inline:         web ? { display: 'inline' } : null,
+  'inline-block': { display: web ? 'inline-block' : 'flex' },
+  inline:         { display: web ? 'inline' : 'flex' },
   grid:           web ? { display: 'grid' } : null,
   grd:            web ? { display: 'grid' } : null,
   'inline-flex':  { display: web ? 'inline-flex' : 'flex' },
-  'inline-grid':  web ? { display: 'inline-grid' } : null,
+  'inline-grid':  { display: web ? 'inline-grid' : 'flex' },
   hidden:         { display: 'none' },
   contents:       web ? { display: 'contents' } : null,
   'flow-root':    web ? { display: 'flow-root' } : null,
@@ -501,12 +505,17 @@ function buildStandalone(): Record<string, StyleValue | null> {
   'text-balance': web ? { textWrap: 'balance' } as StyleValue : null,
   'text-pretty':  web ? { textWrap: 'pretty' } as StyleValue : null,
 
-  // Screen sizing (vw values are web-only; vh values work cross-platform via spacing scale for h-*)
-  'w-screen':     web ? { width: '100vw' } : null,
-  'min-h-screen': { minHeight: '100vh' },
-  'max-h-screen': { maxHeight: '100vh' },
-  'min-w-screen': web ? { minWidth: '100vw' } : null,
-  'max-w-screen': web ? { maxWidth: '100vw' } : null,
+  // Screen sizing — dvw/dvh (dynamic viewport units) instead of vw/vh: on mobile
+  // browsers, vh/vw are pinned to the LARGEST viewport size (address bar hidden),
+  // so `h-screen` overflows behind the address bar when it's shown. dvh/dvw track
+  // the actual visible viewport as browser chrome shows/hides. Desktop behavior
+  // is unchanged since there's no dynamic chrome to account for.
+  // (vw/dvw values are web-only; vh/dvh values work cross-platform via spacing scale for h-*)
+  'w-screen':     web ? { width: '100dvw' } : null,
+  'min-h-screen': { minHeight: '100dvh' },
+  'max-h-screen': { maxHeight: '100dvh' },
+  'min-w-screen': web ? { minWidth: '100dvw' } : null,
+  'max-w-screen': web ? { maxWidth: '100dvw' } : null,
 
   // max-w named container sizes (mirrors Tailwind's container scale)
   'max-w-none':  { maxWidth: 'none' },

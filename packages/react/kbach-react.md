@@ -67,6 +67,7 @@ The `kbach()` Vite plugin scans your source files and writes generated CSS betwe
 - Runs on `buildStart` (initial load) and on every HMR file change
 - Stateless: rescans all files fresh every time — removed classes are immediately evicted
 - Output is grouped by category with CSS custom properties for theme colors
+- Also indexes every `.css`/`.scss`/`.sass`/`.less` file the same `include` dirs cover, and warns (`console.warn`, dev-server terminal, not the browser) for any class that's neither a real Kbach utility NOR defined anywhere in those stylesheets — a likely typo. Classes intentionally handled elsewhere (CSS Modules, styled-components, a third-party component's own class) are recognized once anything in the project literally defines `.that-class-name` and stay silent.
 
 ```ts
 // vite.config.ts

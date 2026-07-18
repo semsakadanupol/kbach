@@ -21,7 +21,8 @@ import { setCSSGenMode } from './core/platform';
 import { BASE_RESET } from './core/reset';
 import { buildConfig } from './core/config';
 import { generateClassCSS } from './core/resolver';
-import { splitClassTokens } from './core/parser';
+import { splitClassTokens, parseClass } from './core/parser';
+import { resolveUtility } from './core/utilities';
 import type { FrameworkConfig, ThemeConfig } from './core/types';
 
 // This module runs in Node.js (Vite build time). Force web mode so that
@@ -303,6 +304,56 @@ function scanDir(dir: string, onFile: (filePath: string, code: string) => void):
   }
 }
 
+// ── Project CSS selector index ──────────────────────────────────────────────────
+//
+// The "unknown utility" check below needs to tell apart two very different
+// situations that both look like "not a Kbach class": a genuine typo (nothing
+// anywhere styles it — dead weight, worth flagging), and a class the project
+// intentionally defines itself (CSS Modules, a plain stylesheet, a third-party
+// component's own class) that Kbach was never meant to resolve. Only the first
+// one is worth a warning. This scans every .css/.scss/.sass/.less file the same
+// includeDirs cover and extracts literal class-selector names (a regex over the
+// raw text, not a real CSS/Sass parser — nested selectors and interpolation
+// still contain the class name as a literal substring, so this is good enough
+// without needing a stylesheet AST).
+
+const CSS_CLASS_SELECTOR_RE = /\.(-?[a-zA-Z_][a-zA-Z0-9_-]*)/g;
+const CSS_FILE_RE = /\.(css|scss|sass|less)$/;
+
+/** Extract every literal class-selector name in one stylesheet file into `into`. */
+function scanCssFileInto(filePath: string, into: Set<string>): void {
+  try {
+    const text = readFileSync(filePath, 'utf-8');
+    let m: RegExpExecArray | null;
+    CSS_CLASS_SELECTOR_RE.lastIndex = 0;
+    while ((m = CSS_CLASS_SELECTOR_RE.exec(text)) !== null) into.add(m[1]!);
+  } catch { /* unreadable file — skip */ }
+}
+
+function scanCssSelectorsInto(dir: string, into: Set<string>): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.startsWith('.') || entry === 'node_modules') continue;
+    const full = join(dir, entry);
+    try {
+      const st = statSync(full);
+      if (st.isDirectory()) scanCssSelectorsInto(full, into);
+      else if (CSS_FILE_RE.test(entry)) scanCssFileInto(full, into);
+    } catch { /* unreadable file — skip */ }
+  }
+}
+
+// Strip a leading chain of Kbach modifier prefixes (hover:, dark:, group-hover/card:, …)
+// to recover the base class name as it would actually appear in a stylesheet selector.
+function stripModifierPrefix(token: string): string {
+  return token.replace(/^(?:[a-zA-Z0-9_/-]+:)+/, '');
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 export interface KbachPluginOptions {
@@ -338,6 +389,41 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
   const fileTokens = new Map<string, Set<string>>();
   const tokenCSS   = new Map<string, string>();
 
+  // Literal class-selector names found anywhere in the project's own .css/.scss/
+  // .sass/.less files — see scanCssSelectorsInto's comment above for why this
+  // exists. Populated once at buildStart, before the JS/TSX scan runs (so the
+  // check below has the full picture), and grown incrementally as stylesheets
+  // change during dev.
+  const projectCssClasses = new Set<string>();
+  const warnedTokens = new Set<string>();
+
+  function checkUnknownToken(tok: string): void {
+    if (process.env.NODE_ENV === 'production' || warnedTokens.has(tok) || tok.startsWith('__')) return;
+
+    const parsed = parseClass(tok);
+    // resolveUtility() !== null is the authoritative "does Kbach resolve this"
+    // check — deliberately not isKnownUtility(parsed.utility), which only checks
+    // the utility PREFIX and would treat garbage like "flex-not-a-real-value" as
+    // known just because "flex" itself is a real prefix. And not tokenCSS.get(tok)
+    // either, which is falsy for legitimate utilities that produce no CSS
+    // declarations of their own (`group`/`peer` markers resolve to an empty style
+    // object, so generateClassCSS emits '' for them even though they're valid).
+    if (parsed && resolveUtility(parsed, cfg.theme) !== null) return;
+
+    // Not a Kbach utility — but that alone isn't a typo. Only warn if the class
+    // also isn't defined anywhere in the project's own stylesheets (see
+    // scanCssSelectorsInto's comment above).
+    const base = stripModifierPrefix(tok);
+    if (!base || projectCssClasses.has(base)) return;
+
+    warnedTokens.add(tok);
+    console.warn(
+      `[kbach] "${tok}" isn't a Kbach utility and no matching CSS rule was found anywhere `
+      + 'in the project (checked .css/.scss/.sass/.less files) — possible typo? If this is '
+      + 'intentional (a third-party class, one defined via CSS-in-JS, etc.), this warning is safe to ignore.',
+    );
+  }
+
   function processFile(filePath: string, code: string): void {
     const key = normPath(filePath);
     const tokens = new Set<string>();
@@ -346,8 +432,13 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
       if (!tokenCSS.has(tok)) {
         tokenCSS.set(tok, generateClassCSS(tok, cfg.theme, cfg.darkMode, screens));
       }
+      checkUnknownToken(tok);
     }
     fileTokens.set(key, tokens);
+  }
+
+  function scanProjectCssSelectors(): void {
+    for (const dir of includeDirs) scanCssSelectorsInto(join(root, dir), projectCssClasses);
   }
 
   function buildTokenCSSView(): Map<string, string> {
@@ -414,12 +505,26 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
 
     buildStart() {
       mainCSSFile = findKbachCSS(root);
+      // Index project stylesheets BEFORE scanning JS/TSX — the unknown-utility
+      // check needs the full picture of what's already styled elsewhere, not a
+      // partial one that would misreport project-defined classes as unknown.
+      scanProjectCssSelectors();
       initialScan();
       if (mainCSSFile) writeKbachToFile(mainCSSFile, generateCSS());
     },
 
     handleHotUpdate({ file, server }) {
-      if (file.includes('node_modules') || !/\.(tsx?|jsx?)$/.test(file)) return;
+      if (file.includes('node_modules')) return;
+
+      if (CSS_FILE_RE.test(file)) {
+        // Grow the index only — a selector that disappears from a stylesheet
+        // just stops suppressing future warnings until the next full restart,
+        // which is an acceptable imprecision for a dev-time diagnostic.
+        scanCssFileInto(file, projectCssClasses);
+        return;
+      }
+
+      if (!/\.(tsx?|jsx?)$/.test(file)) return;
       try {
         processFile(file, readFileSync(file, 'utf-8'));
       } catch {

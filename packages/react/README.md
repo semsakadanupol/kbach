@@ -88,6 +88,8 @@ import './kbach.css';
 
 The plugin scans your source files and writes generated CSS between the `/* kbach:start */`/`/* kbach:end */` markers. Importing `kbach.css` automatically disables runtime injection — all styles come from the file instead. On HMR, only the changed file is rescanned; unchanged tokens reuse cached CSS.
 
+While it's scanning, the plugin also indexes every `.css`/`.scss`/`.sass`/`.less` file under the same directories and warns in the terminal (not the browser console) for any class that's neither a real Kbach utility nor defined anywhere in those stylesheets — likely a typo. A class you've defined yourself elsewhere (CSS Modules, styled-components, a third-party component's class) is recognized as soon as something in the project literally has a `.that-class-name` rule, so it won't get flagged just because Kbach itself doesn't know it.
+
 ## Next.js
 
 Step 1 (tsconfig `jsxImportSource`) and step 2 (`ThemeProvider`) above apply as-is — Next.js's SWC compiler reads `jsxImportSource` from `tsconfig.json` the same way Vite does, and `@kbach/react` shipping its own `"use client"` directive means `ThemeProvider` works directly in a Server Component tree (e.g. the App Router root `layout.tsx`) with no wrapper of your own needed.

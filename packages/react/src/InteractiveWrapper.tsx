@@ -128,10 +128,18 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
       style: finalStyle,
       ...(!isNative && className ? { className } : {}),
       // On web, onPointerDown/Up drive the wrapper's own pressed state (covers mouse + touch),
-      // but onPressIn/onPressOut are still forwarded unchanged — react-native-web components
-      // (and any component that accepts both prop names) depend on receiving them directly.
+      // and onPressIn/onPressOut are ALSO forwarded — but only when Component is an actual
+      // component (react-native-web components accept both prop names), never when it's a
+      // literal HTML tag string ('div', 'a', …). React DOM warns "Unknown event handler
+      // property" for onPressIn/onPressOut on a host element even when the value is
+      // undefined — the check is on the prop KEY being present at all, not its value — so
+      // the key must be omitted entirely for string components, not just set to undefined.
       ...(!isNative
-        ? { onPointerDown: handlePointerDown, onPointerUp: handlePointerUp, onPointerLeave: handlePointerLeave, onPointerCancel: handlePointerCancel, onPressIn, onPressOut }
+        ? {
+            onPointerDown: handlePointerDown, onPointerUp: handlePointerUp,
+            onPointerLeave: handlePointerLeave, onPointerCancel: handlePointerCancel,
+            ...(typeof Component !== 'string' ? { onPressIn, onPressOut } : {}),
+          }
         : { onPressIn: handlePressIn, onPressOut: handlePressOut }),
       onMouseEnter: handleMouseEnter,
       onMouseLeave: handleMouseLeave,

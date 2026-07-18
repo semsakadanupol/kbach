@@ -132,11 +132,23 @@ export function styled<T extends ComponentType<any>>(
         // Only attach state-tracking handlers when interactive modifiers are present.
         // Always forward user-provided handlers to avoid silently swallowing them.
         // onPressIn/onPressOut are forwarded on web too (not just native) since
-        // react-native-web components rely on receiving them directly.
+        // react-native-web components rely on receiving them directly — but only
+        // when effectiveComponent is an actual component, never a literal HTML tag
+        // string ('div', 'a', …). React DOM warns "Unknown event handler property"
+        // for onPressIn/onPressOut on a host element even when the value is
+        // undefined — the check is on the prop KEY being present at all, not its
+        // value — so the key must be omitted entirely for string components.
         ...(isWeb
           ? (hasInteractive
-              ? { onPointerDown: handlePointerDown, onPointerUp: handlePointerUp, onPointerLeave: handlePointerLeave, onPointerCancel: handlePointerCancel, onPressIn, onPressOut }
-              : { onPointerDown, onPointerUp, onPointerLeave, onPointerCancel, onPressIn, onPressOut })
+              ? {
+                  onPointerDown: handlePointerDown, onPointerUp: handlePointerUp,
+                  onPointerLeave: handlePointerLeave, onPointerCancel: handlePointerCancel,
+                  ...(typeof effectiveComponent !== 'string' ? { onPressIn, onPressOut } : {}),
+                }
+              : {
+                  onPointerDown, onPointerUp, onPointerLeave, onPointerCancel,
+                  ...(typeof effectiveComponent !== 'string' ? { onPressIn, onPressOut } : {}),
+                })
           : (hasInteractive
               ? { onPressIn: handlePressIn, onPressOut: handlePressOut }
               : { onPressIn, onPressOut })),

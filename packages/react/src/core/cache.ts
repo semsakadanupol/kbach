@@ -6,11 +6,13 @@
 export class LRUCache<K, V> {
   private readonly capacity: number;
   private readonly cache: Map<K, V>;
+  private readonly onEvict?: (key: K, value: V) => void;
 
-  constructor(capacity = 10_000) {
+  constructor(capacity = 10_000, onEvict?: (key: K, value: V) => void) {
     this.capacity = capacity;
     if (capacity <= 0) throw new Error('LRUCache: capacity must be a positive integer');
     this.cache = new Map();
+    this.onEvict = onEvict;
   }
 
   get(key: K): V | undefined {
@@ -27,7 +29,10 @@ export class LRUCache<K, V> {
       this.cache.delete(key);
     } else if (this.cache.size >= this.capacity) {
       // Evict least-recently-used (first key in Map)
-      this.cache.delete(this.cache.keys().next().value!);
+      const oldestKey = this.cache.keys().next().value as K;
+      const oldestValue = this.cache.get(oldestKey) as V;
+      this.cache.delete(oldestKey);
+      this.onEvict?.(oldestKey, oldestValue);
     }
     this.cache.set(key, value);
     return this;

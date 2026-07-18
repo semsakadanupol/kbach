@@ -9,7 +9,7 @@ import {
 } from './core';
 import { useGlobalDarkMode } from './useGlobalDarkMode';
 import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
-import { hasResponsiveBuckets } from './shared-utils';
+import { hasResponsiveBuckets, stripInternalMarkers, stripWebOnlyProps, chain } from './shared-utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,23 +29,11 @@ export interface InteractiveWrapperProps {
   onPointerDown?: (...args: any[]) => void;
   onPointerUp?: (...args: any[]) => void;
   onPointerLeave?: (...args: any[]) => void;
+  onPointerCancel?: (...args: any[]) => void;
   onMouseEnter?: (...args: any[]) => void;
   onMouseLeave?: (...args: any[]) => void;
   onFocus?: (...args: any[]) => void;
   onBlur?: (...args: any[]) => void;
-}
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
-
-/** Chain two event handlers without losing the original. */
-function chain<T extends (...args: any[]) => void>(
-  original: T | undefined,
-  extra: () => void,
-): (...args: Parameters<T>) => void {
-  return (...args) => {
-    original?.(...args);
-    extra();
-  };
 }
 
 // ─── InteractiveWrapper ───────────────────────────────────────────────────────
@@ -72,6 +60,7 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
       onPointerDown,
       onPointerUp,
       onPointerLeave,
+      onPointerCancel,
       onMouseEnter,
       onMouseLeave,
       onFocus,
@@ -98,6 +87,7 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
     const handlePointerDown = useCallback(chain(onPointerDown, () => setPressed(true)), [onPointerDown]);
     const handlePointerUp = useCallback(chain(onPointerUp, () => setPressed(false)), [onPointerUp]);
     const handlePointerLeave = useCallback(chain(onPointerLeave, () => setPressed(false)), [onPointerLeave]);
+    const handlePointerCancel = useCallback(chain(onPointerCancel, () => setPressed(false)), [onPointerCancel]);
     const handleMouseEnter = useCallback(chain(onMouseEnter, () => setHovered(true)), [onMouseEnter]);
     const handleMouseLeave = useCallback(chain(onMouseLeave, () => setHovered(false)), [onMouseLeave]);
     const handleFocus = useCallback(chain(onFocus, () => setFocused(true)), [onFocus]);
@@ -112,21 +102,8 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
         const s = flatten(resolvedStyle, isDark, { pressed, hover: hovered, focus: focused, disabled: !!disabled, checked: !!checked }, breakpoints) as Record<string, unknown>;
         // Only strip web-only props for RN components. Native HTML elements ('div' etc.)
         // handle display:grid, gridTemplateColumns, and position:sticky as inline styles.
-        delete s.__divideX; delete s.__divideY; delete s.__divideColor; delete s.__divideStyle;
-        delete s.__keyframe;
-        if (typeof Component !== 'string') {
-          if (s.display === 'grid' || s.display === 'inline-grid') delete s.display;
-          delete s.gridTemplateColumns; delete s.gridTemplateRows;
-          delete s.gridColumn; delete s.gridRow; delete s.gridArea;
-          delete s.gridColumnStart; delete s.gridColumnEnd;
-          delete s.gridRowStart; delete s.gridRowEnd;
-          delete s.gridAutoFlow; delete s.gridAutoColumns; delete s.gridAutoRows;
-          delete s.placeItems; delete s.placeContent; delete s.justifyItems;
-          delete s.placeSelf; delete s.justifySelf;
-          if (s.position === 'sticky' || s.position === 'fixed' || s.position === 'static') {
-            delete s.position;
-          }
-        }
+        stripInternalMarkers(s);
+        if (typeof Component !== 'string') stripWebOnlyProps(s);
         return s;
       },
       [resolvedStyle, isDark, pressed, hovered, focused, width, disabled, checked],
@@ -154,7 +131,7 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
       // but onPressIn/onPressOut are still forwarded unchanged — react-native-web components
       // (and any component that accepts both prop names) depend on receiving them directly.
       ...(!isNative
-        ? { onPointerDown: handlePointerDown, onPointerUp: handlePointerUp, onPointerLeave: handlePointerLeave, onPointerCancel: handlePointerLeave, onPressIn, onPressOut }
+        ? { onPointerDown: handlePointerDown, onPointerUp: handlePointerUp, onPointerLeave: handlePointerLeave, onPointerCancel: handlePointerCancel, onPressIn, onPressOut }
         : { onPressIn: handlePressIn, onPressOut: handlePressOut }),
       onMouseEnter: handleMouseEnter,
       onMouseLeave: handleMouseLeave,

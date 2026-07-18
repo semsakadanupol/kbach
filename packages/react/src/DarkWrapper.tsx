@@ -25,7 +25,7 @@ import {
 } from './core';
 import { useGlobalDarkMode } from './useGlobalDarkMode';
 import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
-import { hasResponsiveBuckets } from './shared-utils';
+import { hasResponsiveBuckets, stripInternalMarkers, stripWebOnlyProps } from './shared-utils';
 
 export interface DarkWrapperProps {
   Component: React.ComponentType<any> | string;
@@ -78,24 +78,3 @@ export const DarkWrapper = React.forwardRef<unknown, DarkWrapperProps>(
   },
 );
 DarkWrapper.displayName = 'Kbach.DarkWrapper';
-
-function stripInternalMarkers(s: Record<string, unknown>): void {
-  delete s.__divideX; delete s.__divideY; delete s.__divideColor; delete s.__divideStyle;
-  delete s.__keyframe;
-}
-
-// Strip web-only grid/position props for React Native components.
-// CSS classes with !important handle these instead. Native <div> elements skip this.
-function stripWebOnlyProps(s: Record<string, unknown>): void {
-  if (s.display === 'grid' || s.display === 'inline-grid') delete s.display;
-  delete s.gridTemplateColumns; delete s.gridTemplateRows;
-  delete s.gridColumn; delete s.gridRow; delete s.gridArea;
-  delete s.gridColumnStart; delete s.gridColumnEnd;
-  delete s.gridRowStart; delete s.gridRowEnd;
-  delete s.gridAutoFlow; delete s.gridAutoColumns; delete s.gridAutoRows;
-  delete s.placeItems; delete s.placeContent; delete s.justifyItems;
-  delete s.placeSelf; delete s.justifySelf;
-  if (s.position === 'sticky' || s.position === 'fixed' || s.position === 'static') {
-    delete s.position;
-  }
-}

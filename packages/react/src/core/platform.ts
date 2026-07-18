@@ -17,12 +17,28 @@ export const isNative: boolean =
     typeof (globalThis as any).__REACT_NATIVE__ !== 'undefined'
   );
 
-// CSS generation mode: set to true by the Vite plugin (which runs in Node.js)
-// so that web-only resolver branches generate CSS rather than returning null.
-let _cssGenMode = false;
-export function setCSSGenMode(on: boolean): void { _cssGenMode = on; }
+// Build-time tooling (the Vite plugin, the @kbach/native Babel plugin) resolves
+// classes inside a plain Node.js process, where neither isWeb nor isNative's
+// ambient-global detection is accurate — Node has no `window` (isWeb false)
+// AND no RN globals (isNative false), so getEffectiveIsWeb()'s fallback would
+// default to "web" regardless of which platform the build actually targets.
+// Build tooling that knows its real target calls setResolveTarget() once so
+// every getEffectiveIsWeb() call in that process resolves correctly.
+let _resolveTargetOverride: 'web' | 'native' | null = null;
+export function setResolveTarget(target: 'web' | 'native' | null): void {
+  _resolveTargetOverride = target;
+}
+
+/** @deprecated Use setResolveTarget('web' | null) — kept for the Vite plugin. */
+export function setCSSGenMode(on: boolean): void {
+  _resolveTargetOverride = on ? 'web' : null;
+}
+
 // Returns true in browser, Vite plugin, and SSR (Node.js for web) — false in React Native.
-export function getEffectiveIsWeb(): boolean { return isWeb || _cssGenMode || !isNative; }
+export function getEffectiveIsWeb(): boolean {
+  if (_resolveTargetOverride) return _resolveTargetOverride === 'web';
+  return isWeb || !isNative;
+}
 
 /**
  * Convert an arbitrary-bracket value to a native-friendly number when possible.

@@ -69,10 +69,23 @@ export function getDefaultFontFamily(): string | undefined {
 
 let _styleEl: HTMLStyleElement | null = null;
 
-// Bug #12 fix: LRU-bounded instead of unbounded Set.
-// Capacity 50 000 covers even the largest apps; evicted rules may be re-injected
-// once (the browser sheet deduplicates at render time).
-const _injectedRules = new LRUCache<string, true>(50_000);
+// Bug #12 fix: LRU-bounded instead of unbounded Set. Capacity 50 000 covers
+// even the largest apps. Browsers do NOT deduplicate stylesheet rules, so an
+// evicted entry's CSS rule is also removed from the live <style> sheet here —
+// otherwise re-injecting a class that cycled out of the tracking cache would
+// duplicate its rule in the CSSOM and grow the sheet without bound.
+function evictInjectedRule(rule: string): void {
+  const sheet = _styleEl?.sheet;
+  if (!sheet) return;
+  for (let i = 0; i < sheet.cssRules.length; i++) {
+    if (sheet.cssRules[i].cssText === rule) {
+      try { sheet.deleteRule(i); } catch { /* ignore */ }
+      return;
+    }
+  }
+}
+
+const _injectedRules = new LRUCache<string, true>(50_000, evictInjectedRule);
 
 // When kbach.css is loaded as a static stylesheet (Vite plugin), runtime CSS
 // injection is redundant. Call disableRuntimeCSS() once at startup to skip it.
@@ -121,8 +134,7 @@ export function injectGlobalStyles(theme: ThemeConfig): void {
   if (typeof document === 'undefined' || isRuntimeCSSDisabled()) return;
   const rules: string[] = [BASE_RESET];
   const ff = theme.fontFamily;
-  if (!ff) return;
-  if (ff.sans && ff.sans !== 'System') {
+  if (ff?.sans && ff.sans !== 'System') {
     const family = Array.isArray(ff.sans) ? ff.sans.join(', ') : ff.sans;
     rules.push(`body { font-family: ${family}; }`);
   }
@@ -301,7 +313,7 @@ export function buildClassCSSRules(
     else rule = `[data-theme="dark"] ${selector} { ${decls} }`;
   } else if (darkScheme === 'light') {
     if (darkMode === 'media') rule = `@media (prefers-color-scheme: light) { ${selector} { ${decls} } }`;
-    else if (darkMode === 'class') rule = `:not(.dark) ${selector} { ${decls} }`;
+    else if (darkMode === 'class') rule = `.light ${selector} { ${decls} }`;
     else rule = `[data-theme="light"] ${selector} { ${decls} }`;
   } else {
     rule = `${selector} { ${decls} }`;

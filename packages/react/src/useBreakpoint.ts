@@ -18,7 +18,8 @@ export function useBreakpoint(): string {
   const sorted = useMemo(
     () =>
       (Object.entries(screens) as [string, string | number][])
-        .filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+        .map(([name, v]): [string, number] => [name, typeof v === 'number' ? v : parseInt(String(v), 10)])
+        .filter(([, minW]) => !Number.isNaN(minW))
         .sort(([, a], [, b]) => b - a),
     [screens],
   );
@@ -43,8 +44,9 @@ export function useResponsive(): Record<string, boolean> {
   const screens = config.theme.screens as Record<string, string | number>;
   return useMemo(() => {
     const result: Record<string, boolean> = {};
-    for (const [name, minW] of Object.entries(screens)) {
-      if (typeof minW === 'number') result[name] = width >= minW;
+    for (const [name, v] of Object.entries(screens)) {
+      const minW = typeof v === 'number' ? v : parseInt(String(v), 10);
+      if (!Number.isNaN(minW)) result[name] = width >= minW;
     }
     return result;
   }, [screens, width]);

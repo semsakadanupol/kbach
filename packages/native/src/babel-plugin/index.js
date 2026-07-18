@@ -11,6 +11,16 @@ const fs = require('fs');
 const _resolveCache = new Map();
 
 // ─── Load core lazily, reloading when the dist changes ───────────────────────
+//
+// This plugin runs inside a plain Node.js process (a Metro/Babel worker), where
+// @kbach/react's isWeb and isNative both read false — there's no `window` and no
+// RN device globals. Left alone, getEffectiveIsWeb() would default to "web" and
+// bake web-flavored values (e.g. padding: '10px' as a string) into the
+// __kbachStyles this plugin injects, which the actual native runtime then uses
+// verbatim (see jsx-runtime.tsx's `!isWeb && __kbachStyles != null` fast path) —
+// breaking arbitrary values, transforms, and any other getEffectiveIsWeb()-gated
+// utility on a real device. setResolveTarget('native') forces the correct answer
+// for every resolve() call this plugin makes.
 let _core = null;
 let _coreMtime = 0;
 let _corePath = null;
@@ -32,11 +42,15 @@ function getCore() {
       }
     }
     _core = require('@kbach/react');
+    _core.setResolveTarget?.('native');
     _coreMtime = mtime;
     _config = null;
     _resolveCache.clear(); // config changed — invalidate resolve cache too
   } catch {
-    if (!_core) _core = require('@kbach/react');
+    if (!_core) {
+      _core = require('@kbach/react');
+      _core.setResolveTarget?.('native');
+    }
   }
   return _core;
 }

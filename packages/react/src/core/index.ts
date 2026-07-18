@@ -16,7 +16,7 @@ export type {
 
 export { defaultTheme, defaultColors } from './theme';
 export { LRUCache } from './cache';
-export { isWeb, isNative, toNativeValue, escapeCSSSelector } from './platform';
+export { isWeb, isNative, toNativeValue, escapeCSSSelector, setResolveTarget } from './platform';
 export { parseClass, parseClasses, splitClassTokens, normalizeClassString } from './parser';
 export {
   registerModifier,
@@ -29,7 +29,7 @@ export {
   matchModifier,
   isKnownModifier,
 } from './registry';
-export { resolveUtility, resolveColor, resolveSpacing, resolveSizing, getBuiltinUtilityPrefixes, getBuiltinStandaloneNames, isKnownUtility } from './utilities';
+export { resolveUtility, resolveColor, resolveSpacing, resolveSizing, getBuiltinUtilityPrefixes, getBuiltinStandaloneNames, isKnownUtility, parseHexRgb } from './utilities';
 export { resolve, flatten, clearCache, getDefaultFontFamily, generateClassCSS, setDefaultFontFamily, disableRuntimeCSS, isRuntimeCSSDisabled } from './resolver';
 export {
   getConfig,

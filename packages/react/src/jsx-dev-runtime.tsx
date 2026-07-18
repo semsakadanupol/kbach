@@ -28,7 +28,11 @@ export function jsxDEV(
   // Patch the element's _source so React DevTools shows the original file/line,
   // not this wrapper. The _source field is non-standard but consumed by the
   // react-refresh and react-devtools-extension stacks.
-  if (source && element && typeof element === 'object') {
+  //
+  // React's dev JSX runtime freezes the returned element (and no longer even
+  // defines _source/_self as of React 19), so only attempt the patch when the
+  // object is still extensible — otherwise skip it rather than throwing.
+  if (source && element && typeof element === 'object' && Object.isExtensible(element)) {
     (element as any)._source = source;
     (element as any)._self = self;
   }

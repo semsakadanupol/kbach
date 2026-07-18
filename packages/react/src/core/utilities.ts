@@ -74,18 +74,34 @@ export function resolveColor(value: string, colors: ThemeColors, isArbitrary: bo
   return hexToRgba(hex, alpha);
 }
 
-function hexToRgba(hex: string, alpha: number): string {
+/**
+ * Parse a hex color string (#rgb, #rgba, #rrggbb, #rrggbbaa) into an [r, g, b]
+ * tuple. Any alpha nibble/byte is ignored — callers apply their own opacity.
+ * Shared with useColors.ts's applyOpacity() so hex parsing lives in one place.
+ */
+export function parseHexRgb(hex: string): [number, number, number] | null {
   const h = hex.replace('#', '');
-  let r: number, g: number, b: number;
-  if (h.length === 3) {
-    r = parseInt(h[0]! + h[0]!, 16);
-    g = parseInt(h[1]! + h[1]!, 16);
-    b = parseInt(h[2]! + h[2]!, 16);
-  } else {
-    r = parseInt(h.slice(0, 2), 16);
-    g = parseInt(h.slice(2, 4), 16);
-    b = parseInt(h.slice(4, 6), 16);
+  if (h.length === 3 || h.length === 4) {
+    return [
+      parseInt(h[0]! + h[0]!, 16),
+      parseInt(h[1]! + h[1]!, 16),
+      parseInt(h[2]! + h[2]!, 16),
+    ];
   }
+  if (h.length === 6 || h.length === 8) {
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16),
+    ];
+  }
+  return null;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const rgb = parseHexRgb(hex);
+  if (!rgb) return hex;
+  const [r, g, b] = rgb;
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
@@ -171,10 +187,10 @@ function resolveFontSize(
 // and the shared expression reads them all — composable without JS post-processing.
 
 const FILTER_COMPOSE =
-  'var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,)';
+  'var(--kb-blur,) var(--kb-brightness,) var(--kb-contrast,) var(--kb-grayscale,) var(--kb-hue-rotate,) var(--kb-invert,) var(--kb-saturate,) var(--kb-sepia,) var(--kb-drop-shadow,)';
 
 const BACKDROP_FILTER_COMPOSE =
-  'var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,)';
+  'var(--kb-backdrop-blur,) var(--kb-backdrop-brightness,) var(--kb-backdrop-contrast,) var(--kb-backdrop-grayscale,) var(--kb-backdrop-hue-rotate,) var(--kb-backdrop-invert,) var(--kb-backdrop-opacity,) var(--kb-backdrop-saturate,) var(--kb-backdrop-sepia,)';
 
 // ─── Standalone utility map ───────────────────────────────────────────────────
 // null entries are intentionally unsupported on the current platform (silently skipped).
@@ -468,9 +484,9 @@ function buildStandalone(): Record<string, StyleValue | null> {
   'backface-hidden':  { backfaceVisibility: 'hidden' },
 
   // CSS filters — standalone = default/full effect (web-only)
-  grayscale: web ? { '--tw-grayscale': 'grayscale(100%)', filter: FILTER_COMPOSE } : null,
-  invert:    web ? { '--tw-invert': 'invert(100%)', filter: FILTER_COMPOSE } : null,
-  sepia:     web ? { '--tw-sepia': 'sepia(100%)', filter: FILTER_COMPOSE } : null,
+  grayscale: web ? { '--kb-grayscale': 'grayscale(100%)', filter: FILTER_COMPOSE } : null,
+  invert:    web ? { '--kb-invert': 'invert(100%)', filter: FILTER_COMPOSE } : null,
+  sepia:     web ? { '--kb-sepia': 'sepia(100%)', filter: FILTER_COMPOSE } : null,
 
   // Divide none
   'divide-none': web ? { __divideX: 0, __divideY: 0 } as StyleValue : null,
@@ -573,6 +589,46 @@ function getStandalone(): Record<string, StyleValue | null> {
 
 type Resolver = (parsed: ParsedClass, theme: ThemeConfig) => StyleValue | null;
 
+// p/px/py/pt/pr/pb/pl and m/mx/my/mt/mr/mb/ml all resolve a spacing value and
+// differ only in the output CSS property name — generate them from one factory.
+function makeSpacingResolver(prop: string): Resolver {
+  return ({ value, negative, isArbitrary }, { spacing }) => {
+    const v = resolveSpacing(value, negative, spacing, isArbitrary);
+    return v !== null ? { [prop]: v } : null;
+  };
+}
+
+const PADDING_MARGIN_PROPS: Record<string, string> = {
+  p: 'padding', px: 'paddingHorizontal', py: 'paddingVertical',
+  pt: 'paddingTop', pr: 'paddingRight', pb: 'paddingBottom', pl: 'paddingLeft',
+  m: 'margin', mx: 'marginHorizontal', my: 'marginVertical',
+  mt: 'marginTop', mr: 'marginRight', mb: 'marginBottom', ml: 'marginLeft',
+};
+
+// border-t/-r/-b/-l all resolve either an arbitrary/named width or a color for
+// one side, differing only in which *Width/*Color property they touch.
+function makeBorderSideResolver(widthProp: string, colorProp: string): Resolver {
+  return ({ value, isArbitrary }, { colors, borderWidth }) => {
+    if (!value) return { [widthProp]: 1 };
+    if (isArbitrary) {
+      const w = toNativeValue(value);
+      if (typeof w === 'number') return { [widthProp]: w };
+      return { [colorProp]: value };
+    }
+    const color = resolveColor(value, colors, false);
+    if (color) return { [colorProp]: color };
+    const w = borderWidth[value];
+    return w !== undefined ? { [widthProp]: w } : null;
+  };
+}
+
+const BORDER_SIDE_PROPS: Record<string, [string, string]> = {
+  'border-t': ['borderTopWidth', 'borderTopColor'],
+  'border-r': ['borderRightWidth', 'borderRightColor'],
+  'border-b': ['borderBottomWidth', 'borderBottomColor'],
+  'border-l': ['borderLeftWidth', 'borderLeftColor'],
+};
+
 const RESOLVERS: Record<string, Resolver> = {
   // ── Background ─────────────────────────────────────────────────────────────
   bg: ({ value, isArbitrary }, { colors }) => {
@@ -612,65 +668,8 @@ const RESOLVERS: Record<string, Resolver> = {
     return { '--text-opacity': v } as StyleValue;
   },
 
-  // ── Padding ────────────────────────────────────────────────────────────────
-  p: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { padding: v } : null;
-  },
-  px: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { paddingHorizontal: v } : null;
-  },
-  py: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { paddingVertical: v } : null;
-  },
-  pt: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { paddingTop: v } : null;
-  },
-  pr: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { paddingRight: v } : null;
-  },
-  pb: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { paddingBottom: v } : null;
-  },
-  pl: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { paddingLeft: v } : null;
-  },
-
-  // ── Margin ─────────────────────────────────────────────────────────────────
-  m: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { margin: v } : null;
-  },
-  mx: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { marginHorizontal: v } : null;
-  },
-  my: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { marginVertical: v } : null;
-  },
-  mt: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { marginTop: v } : null;
-  },
-  mr: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { marginRight: v } : null;
-  },
-  mb: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { marginBottom: v } : null;
-  },
-  ml: ({ value, negative, isArbitrary }, { spacing }) => {
-    const v = resolveSpacing(value, negative, spacing, isArbitrary);
-    return v !== null ? { marginLeft: v } : null;
-  },
+  // ── Padding & margin ───────────────────────────────────────────────────────
+  // Generated below via makeSpacingResolver() — see PADDING_MARGIN_PROPS.
 
   // ── Sizing ─────────────────────────────────────────────────────────────────
   w: ({ value, isArbitrary }, { spacing }) => {
@@ -721,54 +720,7 @@ const RESOLVERS: Record<string, Resolver> = {
     return null;
   },
 
-  'border-t': ({ value, isArbitrary }, { colors, borderWidth }) => {
-    if (!value) return { borderTopWidth: 1 };
-    if (isArbitrary) {
-      const w = toNativeValue(value);
-      if (typeof w === 'number') return { borderTopWidth: w };
-      return { borderTopColor: value };
-    }
-    const color = resolveColor(value, colors, false);
-    if (color) return { borderTopColor: color };
-    const w = borderWidth[value];
-    return w !== undefined ? { borderTopWidth: w } : null;
-  },
-  'border-r': ({ value, isArbitrary }, { colors, borderWidth }) => {
-    if (!value) return { borderRightWidth: 1 };
-    if (isArbitrary) {
-      const w = toNativeValue(value);
-      if (typeof w === 'number') return { borderRightWidth: w };
-      return { borderRightColor: value };
-    }
-    const color = resolveColor(value, colors, false);
-    if (color) return { borderRightColor: color };
-    const w = borderWidth[value];
-    return w !== undefined ? { borderRightWidth: w } : null;
-  },
-  'border-b': ({ value, isArbitrary }, { colors, borderWidth }) => {
-    if (!value) return { borderBottomWidth: 1 };
-    if (isArbitrary) {
-      const w = toNativeValue(value);
-      if (typeof w === 'number') return { borderBottomWidth: w };
-      return { borderBottomColor: value };
-    }
-    const color = resolveColor(value, colors, false);
-    if (color) return { borderBottomColor: color };
-    const w = borderWidth[value];
-    return w !== undefined ? { borderBottomWidth: w } : null;
-  },
-  'border-l': ({ value, isArbitrary }, { colors, borderWidth }) => {
-    if (!value) return { borderLeftWidth: 1 };
-    if (isArbitrary) {
-      const w = toNativeValue(value);
-      if (typeof w === 'number') return { borderLeftWidth: w };
-      return { borderLeftColor: value };
-    }
-    const color = resolveColor(value, colors, false);
-    if (color) return { borderLeftColor: color };
-    const w = borderWidth[value];
-    return w !== undefined ? { borderLeftWidth: w } : null;
-  },
+  // border-t/-r/-b/-l generated below via makeBorderSideResolver() — see BORDER_SIDE_PROPS.
 
   // ── Border radius ──────────────────────────────────────────────────────────
   rounded: ({ value, isArbitrary }, { borderRadius }) => {
@@ -977,49 +929,49 @@ const RESOLVERS: Record<string, Resolver> = {
       '': 'blur(8px)', sm: 'blur(4px)', md: 'blur(12px)',
       lg: 'blur(16px)', xl: 'blur(24px)', '2xl': 'blur(40px)', '3xl': 'blur(64px)',
     };
-    if (value === 'none') return { '--tw-blur': '', filter: FILTER_COMPOSE } as StyleValue;
+    if (value === 'none') return { '--kb-blur': '', filter: FILTER_COMPOSE } as StyleValue;
     const v = isArbitrary ? `blur(${value})` : sizes[value];
-    return v !== undefined ? { '--tw-blur': v, filter: FILTER_COMPOSE } as StyleValue : null;
+    return v !== undefined ? { '--kb-blur': v, filter: FILTER_COMPOSE } as StyleValue : null;
   },
   brightness: ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
     const v = isArbitrary ? `brightness(${value})` : `brightness(${parseFloat(value) / 100})`;
-    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--tw-brightness': v, filter: FILTER_COMPOSE } as StyleValue;
+    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--kb-brightness': v, filter: FILTER_COMPOSE } as StyleValue;
   },
   contrast: ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
     const v = isArbitrary ? `contrast(${value})` : `contrast(${parseFloat(value) / 100})`;
-    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--tw-contrast': v, filter: FILTER_COMPOSE } as StyleValue;
+    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--kb-contrast': v, filter: FILTER_COMPOSE } as StyleValue;
   },
   grayscale: ({ value }) => {
     if (!getEffectiveIsWeb()) return null;
     const v = value === '0' ? 'grayscale(0)' : 'grayscale(100%)';
-    return { '--tw-grayscale': v, filter: FILTER_COMPOSE } as StyleValue;
+    return { '--kb-grayscale': v, filter: FILTER_COMPOSE } as StyleValue;
   },
   'hue-rotate': ({ value, negative, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
     const deg = isArbitrary ? value : `${(negative ? -1 : 1) * parseFloat(value)}deg`;
     if (isNaN(parseFloat(deg)) && !isArbitrary) return null;
-    return { '--tw-hue-rotate': `hue-rotate(${deg})`, filter: FILTER_COMPOSE } as StyleValue;
+    return { '--kb-hue-rotate': `hue-rotate(${deg})`, filter: FILTER_COMPOSE } as StyleValue;
   },
   invert: ({ value }) => {
     if (!getEffectiveIsWeb()) return null;
     const v = value === '0' ? 'invert(0)' : 'invert(100%)';
-    return { '--tw-invert': v, filter: FILTER_COMPOSE } as StyleValue;
+    return { '--kb-invert': v, filter: FILTER_COMPOSE } as StyleValue;
   },
   saturate: ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
     const v = isArbitrary ? `saturate(${value})` : `saturate(${parseFloat(value) / 100})`;
-    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--tw-saturate': v, filter: FILTER_COMPOSE } as StyleValue;
+    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--kb-saturate': v, filter: FILTER_COMPOSE } as StyleValue;
   },
   sepia: ({ value }) => {
     if (!getEffectiveIsWeb()) return null;
     const v = value === '0' ? 'sepia(0)' : 'sepia(100%)';
-    return { '--tw-sepia': v, filter: FILTER_COMPOSE } as StyleValue;
+    return { '--kb-sepia': v, filter: FILTER_COMPOSE } as StyleValue;
   },
   'drop-shadow': ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
-    if (isArbitrary) return { '--tw-drop-shadow': `drop-shadow(${value.replace(/_/g, ' ')})`, filter: FILTER_COMPOSE } as StyleValue;
+    if (isArbitrary) return { '--kb-drop-shadow': `drop-shadow(${value.replace(/_/g, ' ')})`, filter: FILTER_COMPOSE } as StyleValue;
     const presets: Record<string, string> = {
       '': 'drop-shadow(0 1px 2px rgb(0 0 0/0.1)) drop-shadow(0 1px 1px rgb(0 0 0/0.06))',
       sm: 'drop-shadow(0 1px 1px rgb(0 0 0/0.05))',
@@ -1030,7 +982,7 @@ const RESOLVERS: Record<string, Resolver> = {
       none: 'drop-shadow(0 0 #0000)',
     };
     const v = presets[value];
-    return v !== undefined ? { '--tw-drop-shadow': v, filter: FILTER_COMPOSE } as StyleValue : null;
+    return v !== undefined ? { '--kb-drop-shadow': v, filter: FILTER_COMPOSE } as StyleValue : null;
   },
   // Arbitrary full filter string: filter-[blur(4px)_grayscale(1)]
   filter: ({ value, isArbitrary }) => {
@@ -1047,47 +999,47 @@ const RESOLVERS: Record<string, Resolver> = {
       '': 'blur(8px)', sm: 'blur(4px)', md: 'blur(12px)',
       lg: 'blur(16px)', xl: 'blur(24px)', '2xl': 'blur(40px)', '3xl': 'blur(64px)',
     };
-    if (value === 'none') return { '--tw-backdrop-blur': '', backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    if (value === 'none') return { '--kb-backdrop-blur': '', backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
     const v = isArbitrary ? `blur(${value})` : sizes[value];
-    return v !== undefined ? { '--tw-backdrop-blur': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue : null;
+    return v !== undefined ? { '--kb-backdrop-blur': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue : null;
   },
   'backdrop-brightness': ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
     const v = isArbitrary ? `brightness(${value})` : `brightness(${parseFloat(value) / 100})`;
-    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--tw-backdrop-brightness': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--kb-backdrop-brightness': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
   'backdrop-contrast': ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
     const v = isArbitrary ? `contrast(${value})` : `contrast(${parseFloat(value) / 100})`;
-    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--tw-backdrop-contrast': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--kb-backdrop-contrast': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
   'backdrop-grayscale': ({ value }) => {
     if (!getEffectiveIsWeb()) return null;
-    return { '--tw-backdrop-grayscale': value === '0' ? 'grayscale(0)' : 'grayscale(100%)', backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    return { '--kb-backdrop-grayscale': value === '0' ? 'grayscale(0)' : 'grayscale(100%)', backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
   'backdrop-hue-rotate': ({ value, negative, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
     const deg = isArbitrary ? value : `${(negative ? -1 : 1) * parseFloat(value)}deg`;
     if (isNaN(parseFloat(deg)) && !isArbitrary) return null;
-    return { '--tw-backdrop-hue-rotate': `hue-rotate(${deg})`, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    return { '--kb-backdrop-hue-rotate': `hue-rotate(${deg})`, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
   'backdrop-invert': ({ value }) => {
     if (!getEffectiveIsWeb()) return null;
-    return { '--tw-backdrop-invert': value === '0' ? 'invert(0)' : 'invert(100%)', backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    return { '--kb-backdrop-invert': value === '0' ? 'invert(0)' : 'invert(100%)', backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
   'backdrop-opacity': ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
     const v = isArbitrary ? `opacity(${value})` : `opacity(${parseFloat(value) / 100})`;
-    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--tw-backdrop-opacity': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--kb-backdrop-opacity': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
   'backdrop-saturate': ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
     const v = isArbitrary ? `saturate(${value})` : `saturate(${parseFloat(value) / 100})`;
-    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--tw-backdrop-saturate': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--kb-backdrop-saturate': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
   'backdrop-sepia': ({ value }) => {
     if (!getEffectiveIsWeb()) return null;
-    return { '--tw-backdrop-sepia': value === '0' ? 'sepia(0)' : 'sepia(100%)', backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    return { '--kb-backdrop-sepia': value === '0' ? 'sepia(0)' : 'sepia(100%)', backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
   'backdrop-filter': ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
@@ -1106,7 +1058,7 @@ const RESOLVERS: Record<string, Resolver> = {
     const dir = directions[value];
     if (!dir) return null;
     return {
-      backgroundImage: `linear-gradient(${dir}, var(--tw-gradient-from, transparent), var(--tw-gradient-stops, transparent))`,
+      backgroundImage: `linear-gradient(${dir}, var(--kb-gradient-from, transparent), var(--kb-gradient-stops, transparent))`,
     } as StyleValue;
   },
   from: ({ value, isArbitrary }, { colors }) => {
@@ -1114,8 +1066,8 @@ const RESOLVERS: Record<string, Resolver> = {
     const color = resolveColor(value, colors, isArbitrary);
     if (!color) return null;
     return {
-      '--tw-gradient-from': color,
-      '--tw-gradient-stops': `var(--tw-gradient-from), var(--tw-gradient-to, transparent)`,
+      '--kb-gradient-from': color,
+      '--kb-gradient-stops': `var(--kb-gradient-from), var(--kb-gradient-to, transparent)`,
     } as StyleValue;
   },
   via: ({ value, isArbitrary }, { colors }) => {
@@ -1123,15 +1075,15 @@ const RESOLVERS: Record<string, Resolver> = {
     const color = resolveColor(value, colors, isArbitrary);
     if (!color) return null;
     return {
-      '--tw-gradient-via': color,
-      '--tw-gradient-stops': `var(--tw-gradient-from), var(--tw-gradient-via), var(--tw-gradient-to, transparent)`,
+      '--kb-gradient-via': color,
+      '--kb-gradient-stops': `var(--kb-gradient-from), var(--kb-gradient-via), var(--kb-gradient-to, transparent)`,
     } as StyleValue;
   },
   to: ({ value, isArbitrary }, { colors }) => {
     if (!getEffectiveIsWeb()) return null;
     const color = resolveColor(value, colors, isArbitrary);
     if (!color) return null;
-    return { '--tw-gradient-to': color } as StyleValue;
+    return { '--kb-gradient-to': color } as StyleValue;
   },
 
   // ── Transform extras (web-only) ───────────────────────────────────────────
@@ -1756,6 +1708,13 @@ const RESOLVERS: Record<string, Resolver> = {
     return { rowGap: v };
   },
 };
+
+for (const [utility, prop] of Object.entries(PADDING_MARGIN_PROPS)) {
+  RESOLVERS[utility] = makeSpacingResolver(prop);
+}
+for (const [utility, [widthProp, colorProp]] of Object.entries(BORDER_SIDE_PROPS)) {
+  RESOLVERS[utility] = makeBorderSideResolver(widthProp, colorProp);
+}
 
 // ─── Public resolver ─────────────────────────────────────────────────────────
 

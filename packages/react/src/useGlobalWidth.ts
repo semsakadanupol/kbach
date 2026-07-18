@@ -1,19 +1,6 @@
-import React from 'react';
 import { isWeb } from './core/platform';
 import { getGlobalWidth, subscribeGlobalWidth } from './core';
-
-// useSyncExternalStore polyfill — same pattern as useGlobalDarkMode.ts
-const useSyncExternalStore: typeof React.useSyncExternalStore =
-  (React as any).useSyncExternalStore ??
-  function useSyncExternalStoreFallback<T>(
-    subscribe: (cb: () => void) => () => void,
-    getSnapshot: () => T,
-    _getServerSnapshot?: () => T,
-  ): T {
-    const [, forceUpdate] = React.useReducer((n: number) => n + 1, 0);
-    React.useEffect(() => subscribe(forceUpdate), [subscribe]);
-    return getSnapshot();
-  };
+import { useSyncExternalStore } from './useSyncExternalStoreShim';
 
 const NOOP_SUB = (_: () => void): (() => void) => () => {};
 const ZERO_SNAP = (): number => 0;

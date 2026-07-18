@@ -240,14 +240,15 @@ export function transformToWebProps(
         continue;
       }
       if (k === 'resizeMode') {
-        const existing = (out.style as any) ?? {};
-        out.style = { ...existing, objectFit: _resizeModeMap[v as string] ?? 'cover' };
+        // Collected as pendingStyle (like horizontal/pointerEvents above) so a
+        // `style` prop encountered later in iteration order merges with this
+        // instead of overwriting it outright.
+        pendingStyle = { ...(pendingStyle ?? {}), objectFit: _resizeModeMap[v as string] ?? 'cover' };
         continue;
       }
       if (k === 'contentFit') {
         // expo-image prop: same values as CSS object-fit (cover, contain, fill, none, scale-down)
-        const existing = (out.style as any) ?? {};
-        out.style = { ...existing, objectFit: v };
+        pendingStyle = { ...(pendingStyle ?? {}), objectFit: v };
         continue;
       }
       // alt is valid HTML — let it pass through. defaultSource has no web equivalent.

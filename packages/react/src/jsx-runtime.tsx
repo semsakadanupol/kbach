@@ -14,6 +14,7 @@ import { getInteractiveModifiers, getModeModifiers, getResponsiveModifiers } fro
 import { InteractiveWrapper } from './InteractiveWrapper';
 import { DarkWrapper } from './DarkWrapper';
 import { getWebTag, transformToWebProps, registerWebElement } from './web-substitute';
+import { stripInternalMarkers, stripWebOnlyProps as stripWebOnlyInlineProps } from './shared-utils';
 
 export { registerWebElement };
 
@@ -115,25 +116,6 @@ function makeElement(
   key: string | undefined,
 ): ReactElement {
   return (isStaticChildren ? _jsxs : _jsx)(type, props, key) as ReactElement;
-}
-
-function stripInternalMarkers(s: Record<string, unknown>): void {
-  delete s.__divideX; delete s.__divideY; delete s.__divideColor; delete s.__divideStyle;
-  delete s.__keyframe;
-}
-
-function stripWebOnlyInlineProps(s: Record<string, unknown>): void {
-  if (s.display === 'grid' || s.display === 'inline-grid') delete s.display;
-  delete s.gridTemplateColumns; delete s.gridTemplateRows;
-  delete s.gridColumn; delete s.gridRow; delete s.gridArea;
-  delete s.gridColumnStart; delete s.gridColumnEnd;
-  delete s.gridRowStart; delete s.gridRowEnd;
-  delete s.gridAutoFlow; delete s.gridAutoColumns; delete s.gridAutoRows;
-  delete s.placeItems; delete s.placeContent; delete s.justifyItems;
-  delete s.placeSelf; delete s.justifySelf;
-  if (s.position === 'sticky' || s.position === 'fixed' || s.position === 'static') {
-    delete s.position;
-  }
 }
 
 // ─── Core element processor ───────────────────────────────────────────────────

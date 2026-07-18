@@ -71,11 +71,17 @@ export function resetConfig(): void {
 // 'orange-6' → resolved hex of orange shade 6 from the same colors map.
 
 function resolveOneRef(ref: string, colors: ThemeColors): string | null {
-  const m = /^([a-z][a-z0-9]*)-(\d+)$/.exec(ref);
-  if (!m) return null;
-  const entry = colors[m[1]];
+  // Split on the LAST hyphen (not a regex) so hyphenated custom color group
+  // names like 'warm-gray-6' split into name='warm-gray', shade='6' — matching
+  // the same lookup logic resolveColor() uses in utilities.ts.
+  const lastDash = ref.lastIndexOf('-');
+  if (lastDash <= 0) return null;
+  const name = ref.slice(0, lastDash);
+  const shade = ref.slice(lastDash + 1);
+  if (!/^\d+$/.test(shade)) return null;
+  const entry = colors[name];
   if (!entry || typeof entry !== 'object') return null;
-  return (entry as ColorShades)[m[2]] ?? null;
+  return (entry as ColorShades)[shade] ?? null;
 }
 
 function resolveColorRefs(colors: ThemeColors): ThemeColors {
@@ -111,9 +117,11 @@ function resolveColorRefs(colors: ThemeColors): ThemeColors {
 export function buildConfig(userConfig: FrameworkConfig): ResolvedConfig {
   let theme: ThemeConfig = { ...defaultTheme };
 
-  // 1. Apply theme overrides (replace sections entirely)
+  // 1. Apply theme overrides (replace sections entirely — a shallow merge, not
+  // deepMerge, so e.g. specifying one `colors` shade drops the rest of the
+  // default palette instead of merging into it. Use `extend` for additive merging.)
   if (userConfig.theme) {
-    theme = deepMerge(theme, userConfig.theme as Partial<ThemeConfig>);
+    theme = { ...theme, ...(userConfig.theme as Partial<ThemeConfig>) };
   }
 
   // 2. Merge extend (additive — keeps defaults).

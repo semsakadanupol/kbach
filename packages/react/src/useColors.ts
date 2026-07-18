@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useTheme } from './context';
+import { parseHexRgb } from './core';
 import type { ThemeColors, ColorShades } from './core';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -27,17 +28,10 @@ export interface ColorsAPI {
 function applyOpacity(color: string, opacity: number): string {
   const a = Math.max(0, Math.min(1, opacity / 100));
   if (color.startsWith('#')) {
-    const h = color.slice(1);
-    let rs: string, gs: string, bs: string;
-    if (h.length === 3 || h.length === 4) {
-      rs = h[0] + h[0]; gs = h[1] + h[1]; bs = h[2] + h[2];
-    } else if (h.length === 8) {
-      // #rrggbbaa — ignore embedded alpha, caller's opacity wins
-      rs = h.slice(0, 2); gs = h.slice(2, 4); bs = h.slice(4, 6);
-    } else {
-      rs = h.slice(0, 2); gs = h.slice(2, 4); bs = h.slice(4, 6);
-    }
-    return `rgba(${parseInt(rs, 16)},${parseInt(gs, 16)},${parseInt(bs, 16)},${a})`;
+    const rgb = parseHexRgb(color);
+    if (!rgb) return color;
+    const [r, g, b] = rgb;
+    return `rgba(${r},${g},${b},${a})`;
   }
   if (color.startsWith('rgb(')) return color.replace('rgb(', 'rgba(').replace(')', `,${a})`);
   if (color.startsWith('rgba(')) return color.replace(/,\s*[\d.]+\)$/, `,${a})`);

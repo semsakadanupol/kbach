@@ -41,6 +41,7 @@ export {
   initConfig,
   getConfig,
   buildConfig,
+  clearCache,
   defaultTheme,
   defaultColors,
   parseClass,
@@ -48,6 +49,7 @@ export {
   splitClassTokens,
   normalizeClassString,
   disableRuntimeCSS,
+  setResolveTarget,
 } from './core';
 
 export type {

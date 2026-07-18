@@ -6,6 +6,7 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
+import { useSyncExternalStore } from './useSyncExternalStoreShim';
 import {
   isWeb,
   getConfig,
@@ -40,6 +41,33 @@ function persistMode(mode: ThemeMode): void {
   try {
     if (isWeb) localStorage.setItem(STORAGE_KEY, mode);
   } catch { /* ignore */ }
+}
+
+// ─── System color scheme (useSyncExternalStore) ───────────────────────────────
+//
+// Reading matchMedia synchronously in a useState lazy initializer would return
+// the real system scheme on the client's first (hydration) render while SSR
+// always has no matchMedia — mismatching any output useTheme()/useIsDark()
+// consumers render from it. useSyncExternalStore is the React-blessed fix:
+// hydrating roots get getServerSnapshot() first and reconcile after, while
+// plain client-side rendering (no SSR) reads the real value immediately with
+// no extra flash — subscribe/getSnapshot must stay referentially stable across
+// renders, so these are module-level functions rather than closures.
+function subscribeSystemScheme(callback: () => void): () => void {
+  if (!isWeb || typeof window === 'undefined') return () => {};
+  const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+  if (!mq) return () => {};
+  mq.addEventListener('change', callback);
+  return () => mq.removeEventListener('change', callback);
+}
+
+function getSystemScheme(): 'light' | 'dark' {
+  if (!isWeb || typeof window === 'undefined') return 'light';
+  return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
+}
+
+function getSystemSchemeServerSnapshot(): 'light' | 'dark' {
+  return 'light';
 }
 
 // ─── Web DOM helpers ──────────────────────────────────────────────────────────
@@ -103,9 +131,14 @@ export function ThemeProvider({
   // ── Responsive width ───────────────────────────────────────────────────────
   // Web: track window.innerWidth in state so children re-render on resize.
   // Native: windowWidthProp comes from NativeThemeProvider via useWindowDimensions().
-  const [webWidth, setWebWidth] = useState<number>(() =>
-    isWeb && typeof window !== 'undefined' ? window.innerWidth : 0,
-  );
+  //
+  // Initial value MUST be 0 (not window.innerWidth) even though this only runs
+  // on web — reading window.innerWidth here would return the real width on the
+  // client's first (hydration) render while SSR always rendered 0, mismatching
+  // any sm:/md:/lg: responsive classes rendered synchronously from this value
+  // below. The real width is instead picked up once in the resize effect below,
+  // which — being an effect — only ever runs post-hydration on the client.
+  const [webWidth, setWebWidth] = useState<number>(0);
   const effectiveWidth = windowWidthProp ?? (isWeb ? webWidth : 0);
 
   // Convert string screens ('640px') to numbers before syncing — the raw theme
@@ -142,6 +175,8 @@ export function ThemeProvider({
 
   useEffect(() => {
     if (!isWeb || typeof window === 'undefined') return;
+    // Pick up the real width once now that we're safely past hydration.
+    setWebWidth(window.innerWidth);
     let raf = 0;
     const update = () => {
       cancelAnimationFrame(raf);
@@ -159,28 +194,35 @@ export function ThemeProvider({
   }, []);
 
   // ── System scheme ──────────────────────────────────────────────────────────
-  // Web: detect via matchMedia.
+  // Web: detect via matchMedia (SSR-safe — see subscribeSystemScheme above).
   // Native: caller passes colorScheme from useColorScheme() (done automatically
   // when using ThemeProvider from @kbach/native via NativeThemeProvider).
-  const [webScheme, setWebScheme] = useState<'light' | 'dark'>(() => {
-    if (isWeb && typeof window !== 'undefined') {
-      return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    }
-    return 'light';
-  });
+  const webScheme = useSyncExternalStore(
+    subscribeSystemScheme,
+    getSystemScheme,
+    getSystemSchemeServerSnapshot,
+  );
 
   const systemScheme: 'light' | 'dark' = isWeb
     ? webScheme
     : (colorScheme === 'dark' ? 'dark' : 'light');
 
   // ── User mode ──────────────────────────────────────────────────────────────
-  const [mode, _setMode] = useState<ThemeMode>(() => {
-    if (!disablePersistence) {
-      const persisted = loadPersistedMode();
-      if (persisted) return persisted;
-    }
-    return defaultMode;
-  });
+  // Initial state MUST ignore localStorage on first render, for the same
+  // hydration-mismatch reason as webWidth/webScheme above: SSR never has a
+  // persisted value, so reading it here would only diverge on the client's
+  // hydration pass. The persisted value (if any) is applied once in an effect
+  // below, which only runs post-hydration.
+  const [mode, _setMode] = useState<ThemeMode>(defaultMode);
+
+  useEffect(() => {
+    if (disablePersistence) return;
+    const persisted = loadPersistedMode();
+    if (persisted) _setMode(persisted);
+    // Intentionally run once on mount only — a live prop change to
+    // defaultMode/disablePersistence shouldn't override user interaction.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const setMode = useCallback((next: ThemeMode) => {
     _setMode(next);
@@ -204,21 +246,6 @@ export function ThemeProvider({
     applyWebTheme(resolvedMode, resolvedConfig.darkMode);
     setGlobalDarkMode(isDark);
   }, [isDark, resolvedMode, resolvedConfig.darkMode]);
-
-  // ── Web: matchMedia change listener ────────────────────────────────────────
-  const setWebSchemeRef = useRef(setWebScheme);
-  setWebSchemeRef.current = setWebScheme;
-
-  useEffect(() => {
-    if (!isWeb || typeof window === 'undefined') return;
-    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
-    if (!mq) return;
-    const handler = (e: MediaQueryListEvent) => {
-      setWebSchemeRef.current(e.matches ? 'dark' : 'light');
-    };
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
 
   // ── Keep resolvedConfig in sync when configOverride prop changes ───────────
   // Also push to the global store so the JSX runtime (dynamic classes) and any

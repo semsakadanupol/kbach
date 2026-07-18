@@ -11,7 +11,7 @@ import { resolve, flatten, isWeb, normalizeClassString, getActiveBreakpoints, ty
 import { useTheme } from './context';
 import { useGlobalDarkMode } from './useGlobalDarkMode';
 import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
-import { hasResponsiveBuckets, hasInteractiveBuckets } from './shared-utils';
+import { hasResponsiveBuckets, hasInteractiveBuckets, chain } from './shared-utils';
 import { getWebTag, transformToWebProps } from './web-substitute';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -55,6 +55,7 @@ export function styled<T extends ComponentType<any>>(
         onPointerDown,
         onPointerUp,
         onPointerLeave,
+        onPointerCancel,
         onMouseEnter,
         onMouseLeave,
         onFocus,
@@ -74,51 +75,17 @@ export function styled<T extends ComponentType<any>>(
       const [hovered, setHovered] = useState(false);
       const [focused, setFocused] = useState(false);
 
-      const handlePressIn = useCallback((e: unknown) => {
-        setPressed(true);
-        onPressIn?.(e);
-      }, [onPressIn]);
-
-      const handlePressOut = useCallback((e: unknown) => {
-        setPressed(false);
-        onPressOut?.(e);
-      }, [onPressOut]);
-
+      const handlePressIn = useCallback(chain(onPressIn, () => setPressed(true)), [onPressIn]);
+      const handlePressOut = useCallback(chain(onPressOut, () => setPressed(false)), [onPressOut]);
       // Web equivalents of onPressIn/onPressOut (covers mouse + touch via Pointer Events)
-      const handlePointerDown = useCallback((e: unknown) => {
-        setPressed(true);
-        onPointerDown?.(e);
-      }, [onPointerDown]);
-
-      const handlePointerUp = useCallback((e: unknown) => {
-        setPressed(false);
-        onPointerUp?.(e);
-      }, [onPointerUp]);
-
-      const handlePointerLeave = useCallback((e: unknown) => {
-        setPressed(false);
-        onPointerLeave?.(e);
-      }, [onPointerLeave]);
-
-      const handleMouseEnter = useCallback((e: unknown) => {
-        setHovered(true);
-        onMouseEnter?.(e);
-      }, [onMouseEnter]);
-
-      const handleMouseLeave = useCallback((e: unknown) => {
-        setHovered(false);
-        onMouseLeave?.(e);
-      }, [onMouseLeave]);
-
-      const handleFocus = useCallback((e: unknown) => {
-        setFocused(true);
-        onFocus?.(e);
-      }, [onFocus]);
-
-      const handleBlur = useCallback((e: unknown) => {
-        setFocused(false);
-        onBlur?.(e);
-      }, [onBlur]);
+      const handlePointerDown = useCallback(chain(onPointerDown, () => setPressed(true)), [onPointerDown]);
+      const handlePointerUp = useCallback(chain(onPointerUp, () => setPressed(false)), [onPointerUp]);
+      const handlePointerLeave = useCallback(chain(onPointerLeave, () => setPressed(false)), [onPointerLeave]);
+      const handlePointerCancel = useCallback(chain(onPointerCancel, () => setPressed(false)), [onPointerCancel]);
+      const handleMouseEnter = useCallback(chain(onMouseEnter, () => setHovered(true)), [onMouseEnter]);
+      const handleMouseLeave = useCallback(chain(onMouseLeave, () => setHovered(false)), [onMouseLeave]);
+      const handleFocus = useCallback(chain(onFocus, () => setFocused(true)), [onFocus]);
+      const handleBlur = useCallback(chain(onBlur, () => setFocused(false)), [onBlur]);
 
       // ── Style resolution ────────────────────────────────────────────────────
       const combined = extraClasses ? `${baseClasses} ${extraClasses}` : baseClasses;
@@ -168,8 +135,8 @@ export function styled<T extends ComponentType<any>>(
         // react-native-web components rely on receiving them directly.
         ...(isWeb
           ? (hasInteractive
-              ? { onPointerDown: handlePointerDown, onPointerUp: handlePointerUp, onPointerLeave: handlePointerLeave, onPointerCancel: handlePointerLeave, onPressIn, onPressOut }
-              : { onPointerDown, onPointerUp, onPointerLeave, onPressIn, onPressOut })
+              ? { onPointerDown: handlePointerDown, onPointerUp: handlePointerUp, onPointerLeave: handlePointerLeave, onPointerCancel: handlePointerCancel, onPressIn, onPressOut }
+              : { onPointerDown, onPointerUp, onPointerLeave, onPointerCancel, onPressIn, onPressOut })
           : (hasInteractive
               ? { onPressIn: handlePressIn, onPressOut: handlePressOut }
               : { onPressIn, onPressOut })),

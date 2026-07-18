@@ -125,12 +125,12 @@ import { useColors } from '@kbach/react'; // or '@kbach/native'
 const colors = useColors();
 
 // Shade access
-colors.blue[6]           // '#6c87b6'
-colors.red[11]           // '#3e0606'
+colors.blue[6]           // '#3b82f6'
+colors.red[11]           // '#450a0a'
 
 // Shade + opacity — number 0–100
-colors.blue['6/50']      // 'rgba(108,135,182,0.5)'
-colors.slate['3/10']     // 'rgba(221,227,242,0.1)'
+colors.blue['6/50']      // 'rgba(59,130,246,0.5)'
+colors.slate['3/10']     // 'rgba(226,232,240,0.1)'
 
 // Flat colors
 colors.white             // '#ffffff'
@@ -265,6 +265,27 @@ Up to **3 modifiers** can be chained in any order.
 // Chained (up to 3)
 <View className="dark:hover:bg-gray-9" />
 <View className="dark:pressed:bg-indigo-8" />
+```
+
+### Group / peer (web only)
+
+Mark a parent with `group`, then style children based on its state with `group-hover:`/`group-focus:`. Mark a preceding sibling with `peer` for `peer-hover:`/`peer-focus:` the same way.
+
+```tsx
+<div className="group">
+  <span className="opacity-0 group-hover:opacity-100 transition" />
+</div>
+```
+
+Nested groups need names, or an inner element reacts to whichever `.group` is nearest — not necessarily the one you meant. Name the marker (`group/{name}`) and the modifier (`group-hover/{name}:`) to scope it to that specific ancestor — same for `peer/{name}` + `peer-hover/{name}:`/`peer-focus/{name}:`.
+
+```tsx
+<div className="group/card">
+  <div className="group/icon">
+    <span className="group-hover/icon:opacity-100" /> {/* only the inner group */}
+  </div>
+  <span className="group-hover/card:underline" />      {/* only the outer group */}
+</div>
 ```
 
 ### Arbitrary values

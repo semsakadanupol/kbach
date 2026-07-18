@@ -73,6 +73,8 @@ export default defineConfig({
 });
 ```
 
+Adding the plugin also declares `@kbach/react` in Vite's `optimizeDeps.include` upfront, so Vite pre-bundles it during its initial dependency scan instead of discovering it lazily on the first page that imports it — avoiding a forced full-reload mid-render, which is what a rare "Invalid hook call"-style crash on first load (but never again after) usually turns out to be.
+
 Then create an empty `kbach.css` anywhere in your project and import it once in your app entry:
 
 ```css

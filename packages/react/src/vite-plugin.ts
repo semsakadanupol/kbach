@@ -511,6 +511,22 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
     name: 'kbach',
     enforce: 'pre',
 
+    // Without this, Vite only discovers @kbach/react needs pre-bundling once it
+    // actually crawls into an import of it — typically the FIRST page load — and
+    // has to stop, optimize it, and force a full reload mid-render. That reload
+    // can land in the middle of a render pass (React hooks resolving against a
+    // module graph that's being swapped out from under it), which is what an
+    // "Invalid hook call" / hook-related crash on first load only usually is.
+    // Declaring it here upfront means Vite pre-bundles it during its initial
+    // dependency scan, before any page ever requests it — no mid-render reload.
+    config() {
+      return {
+        optimizeDeps: {
+          include: ['@kbach/react', '@kbach/react/jsx-runtime', '@kbach/react/jsx-dev-runtime'],
+        },
+      };
+    },
+
     configResolved(resolved) {
       root = resolved.root;
 

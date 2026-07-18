@@ -16,6 +16,7 @@ Two packages:
 ```
 
 ### vite.config.ts
+Not installed by `@kbach/react` itself: `npm install -D vite @vitejs/plugin-react`.
 ```ts
 import react from '@vitejs/plugin-react';
 export default { plugins: [react({ jsxImportSource: '@kbach/react' })] };
@@ -31,6 +32,15 @@ export default { plugins: [react({ jsxImportSource: '@kbach/react' })] };
 import { ThemeProvider } from '@kbach/react';
 <ThemeProvider defaultMode="system"><App /></ThemeProvider>
 ```
+
+### Next.js
+- tsconfig `jsxImportSource` setup above applies as-is (SWC reads it like Vite does).
+- No Vite plugin / static `kbach.css` for Next.js (webpack/Turbopack, not Vite) — falls back to runtime CSS injection, which only runs in the browser, so expect a brief flash of unstyled content on first paint before hydration. Known limitation.
+- `@kbach/react`'s compiled output ships its own `"use client"` directive (`dist/index.js`, `dist/jsx-runtime.js`, `dist/jsx-dev-runtime.js`), so App Router Server Components can use `className`, `styled()`, hooks, and `<ThemeProvider>` directly — no manual `'use client'` wrapper needed.
+
+### React Router
+- Framework mode (v7, SSR): works via the same Vite setup above — it builds with Vite, and default scan dirs already include `app/`. Static `kbach.css` avoids the Next.js FOUC issue since there's no runtime-injection gap.
+- Library mode (client-only): identical to any Vite + React app, no extra config.
 
 ---
 

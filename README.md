@@ -36,6 +36,8 @@ style={{ backgroundColor: '#fff', padding: 16 }}   <- native
 className="bg-white dark:bg-gray-10 p-4" + <style> <- web
 ```
 
+`@kbach/react`'s runtime output ships its own `"use client"` directive, so Next.js App Router Server Components can use `className`, `styled()`, hooks, and `<ThemeProvider>` without adding `"use client"` themselves.
+
 ---
 
 ## Setup

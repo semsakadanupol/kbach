@@ -52,6 +52,12 @@ module.exports = {
 
 ### 2. Add the Vite plugin
 
+`@kbach/react` doesn't bundle a React plugin for Vite — if your project doesn't already have one, install it first:
+
+```
+npm install -D vite @vitejs/plugin-react
+```
+
 ```ts
 // vite.config.ts
 import { defineConfig } from 'vite';
@@ -99,6 +105,49 @@ export default function Root() {
   );
 }
 ```
+
+## Next.js
+
+Steps 1 and 4 above apply as-is — the JSX runtime setup works via `jsxImportSource` in `tsconfig.json` (Next.js's SWC compiler reads it the same way Vite does), and `ThemeProvider` wraps your app the same way.
+
+Two things differ from the Vite setup:
+
+**No Vite plugin, no static `kbach.css`.** Next.js builds with webpack/Turbopack, not Vite, so step 2/3 (the `@kbach/react/vite` plugin) don't apply — there's currently no static-CSS build step for Next.js. Styles fall back to runtime injection (the same mechanism used automatically when no `kbach.css` is imported). This works, but since the injection only runs in the browser (there's no `document` during the server render), server-rendered HTML has classes with no matching CSS yet — expect a brief flash of unstyled content on first paint before hydration completes and injects the rules. This is a known limitation, not a bug to work around per-project.
+
+**`ThemeProvider` needs a `'use client'` boundary.** `@kbach/react` doesn't ship the `'use client'` directive in its build output, so importing `ThemeProvider` directly into a Server Component (e.g. the App Router root `layout.tsx`, which is a Server Component by default) will fail. Wrap it in your own client component once:
+
+```tsx
+// app/providers.tsx
+'use client';
+import { ThemeProvider } from '@kbach/react';
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  return <ThemeProvider defaultMode="system">{children}</ThemeProvider>;
+}
+```
+
+```tsx
+// app/layout.tsx (Server Component — no 'use client' needed here)
+import { Providers } from './providers';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <Providers>{children}</Providers>
+      </body>
+    </html>
+  );
+}
+```
+
+This is the standard pattern for any hook-using npm package that predates the App Router — the same workaround is needed for many other UI libraries.
+
+## React Router
+
+**Framework mode (v7, SSR by default):** works with the same Vite-based setup as above — framework mode builds with Vite under the hood, so the `@kbach/react/vite` plugin runs normally. `include` defaults to `['src', 'app', 'pages', 'components', 'views', 'layouts']`, which already covers React Router's `app/` routes convention. Because the static `kbach.css` approach ships real CSS (not runtime JS injection), there's no FOUC concern for server-rendered routes the way there is with Next.js.
+
+**Library mode (client-only, `createBrowserRouter`/`<BrowserRouter>`):** no SSR involved — set it up exactly like any other Vite + React app per the steps above.
 
 ## API
 

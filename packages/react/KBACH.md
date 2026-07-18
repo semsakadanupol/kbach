@@ -15,7 +15,7 @@ Two packages:
 { "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@kbach/react" } }
 ```
 
-### vite.config.ts
+### vite.config.ts (plain Vite only — skip if a meta-framework already provides its own Vite/React plugin, e.g. React Router's reactRouter())
 Not installed by `@kbach/react` itself: `npm install -D vite @vitejs/plugin-react`.
 ```ts
 import react from '@vitejs/plugin-react';
@@ -39,8 +39,14 @@ import { ThemeProvider } from '@kbach/react';
 - `@kbach/react`'s compiled output ships its own `"use client"` directive (`dist/index.js`, `dist/jsx-runtime.js`, `dist/jsx-dev-runtime.js`), so App Router Server Components can use `className`, `styled()`, hooks, and `<ThemeProvider>` directly — no manual `'use client'` wrapper needed.
 
 ### React Router
-- Framework mode (v7, SSR): works via the same Vite setup above — it builds with Vite, and default scan dirs already include `app/`. Static `kbach.css` avoids the Next.js FOUC issue since there's no runtime-injection gap.
-- Library mode (client-only): identical to any Vite + React app, no extra config.
+- Framework mode (v7+, SSR): do NOT add `@vitejs/plugin-react` — `reactRouter()` already includes its own JSX transform + Fast Refresh integration. Adding both makes each inject its own Fast Refresh preamble into the same module, crashing the page (`Identifier 'RefreshRuntime' has already been declared`) before React hydrates — every class on the page silently fails to style because the app never mounts. tsconfig `jsxImportSource` alone is enough; `reactRouter()` reads it the same way plain Vite does:
+  ```ts
+  import { reactRouter } from '@react-router/dev/vite';
+  import { kbach } from '@kbach/react/vite'; // omit if not using static CSS
+  export default { plugins: [kbach(), reactRouter()] };
+  ```
+  Default scan dirs already include `app/`. Static `kbach.css` avoids the Next.js FOUC issue since there's no runtime-injection gap.
+- Library mode (client-only, no meta-framework Vite plugin involved): identical to any Vite + React app — the vite.config.ts section above.
 
 ---
 

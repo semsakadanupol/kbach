@@ -13,7 +13,7 @@ Package: `@kbach/react`
 { "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@kbach/react" } }
 ```
 
-### vite.config.ts
+### vite.config.ts (plain Vite only — skip @vitejs/plugin-react if a meta-framework already provides its own Vite/React plugin, e.g. React Router's reactRouter(); see below)
 Requires `vite` and `@vitejs/plugin-react` as dev dependencies — not installed by `@kbach/react` itself: `npm install -D vite @vitejs/plugin-react`.
 ```ts
 import { defineConfig } from 'vite';
@@ -50,7 +50,13 @@ import { ThemeProvider } from '@kbach/react';
 tsconfig `jsxImportSource` setup above applies as-is. No Vite plugin for Next.js (webpack/Turbopack) — falls back to runtime CSS injection, which only runs client-side, so expect a brief flash of unstyled content on first paint before hydration. `@kbach/react`'s compiled output ships its own `"use client"` directive, so App Router Server Components can use `className`, `styled()`, hooks, and `<ThemeProvider>` directly, with no manual client wrapper needed.
 
 ### React Router
-Framework mode (v7, SSR) builds with Vite, so the setup above works unchanged — default scan dirs include `app/`. Library mode (client-only) needs no special handling beyond the standard Vite setup.
+Framework mode (v7+, SSR): do NOT add `@vitejs/plugin-react` — `@react-router/dev`'s `reactRouter()` Vite plugin already includes its own JSX transform + Fast Refresh integration. Adding both makes each inject its own Fast Refresh preamble into the same module, crashing the page (`Identifier 'RefreshRuntime' has already been declared`) before React hydrates — every class on the page silently fails to style because the app never mounts. tsconfig `jsxImportSource` alone is enough:
+```ts
+import { reactRouter } from '@react-router/dev/vite';
+import { kbach } from '@kbach/react/vite'; // omit if not using static CSS
+export default { plugins: [kbach(), reactRouter()] };
+```
+Default scan dirs include `app/`. Library mode (client-only, no meta-framework Vite plugin involved) needs no special handling beyond the standard Vite setup above.
 
 ---
 

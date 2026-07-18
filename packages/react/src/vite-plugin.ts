@@ -377,7 +377,29 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
     name: 'kbach',
     enforce: 'pre',
 
-    configResolved(resolved) { root = resolved.root; },
+    configResolved(resolved) {
+      root = resolved.root;
+
+      // React Router's own Vite plugin (name: 'react-router') already includes
+      // its own JSX transform + Fast Refresh integration. Adding @vitejs/plugin-react
+      // on top (name: 'vite:react-refresh') makes both inject a Fast Refresh
+      // preamble into the same module — the page crashes at runtime with
+      // "Identifier 'RefreshRuntime' has already been declared" before React
+      // ever hydrates, and every class on the page silently fails to style
+      // because the app never actually mounts. Catch it here instead of
+      // leaving it as an unexplained blank/unstyled page + browser console error.
+      const names = new Set(resolved.plugins.map((p) => p.name));
+      if (names.has('react-router') && names.has('vite:react-refresh')) {
+        console.warn(
+          '[kbach] Detected both @vitejs/plugin-react and @react-router/dev\'s reactRouter() '
+          + 'plugin active together. reactRouter() already includes its own JSX transform and '
+          + 'Fast Refresh integration — having both crashes the page at runtime with '
+          + '"Identifier \'RefreshRuntime\' has already been declared" before React hydrates, '
+          + 'which looks like every class silently failing to style. Remove the react() plugin '
+          + 'from vite.config.ts; jsxImportSource in tsconfig.json is enough on its own.',
+        );
+      }
+    },
 
     // When any JS/TS file imports kbach.css, prepend a disableRuntimeCSS() call
     // so styles come solely from the static stylesheet — no duplicate injection.

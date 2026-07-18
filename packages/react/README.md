@@ -20,9 +20,11 @@ npm install @kbach/react
 
 ## Setup
 
+Two steps, and you're done — styles work immediately via runtime CSS injection, no build plugin required:
+
 ### 1. Configure the JSX runtime
 
-**tsconfig.json**
+**tsconfig.json** (works for Vite, Next.js, React Router, and most other tooling — it's the one setting that everything reads):
 
 ```json
 {
@@ -33,66 +35,11 @@ npm install @kbach/react
 }
 ```
 
-Or per-file (no config change needed):
+Don't also pass `jsxImportSource` to `@vitejs/plugin-react` (or any other bundler plugin) unless you have a specific reason to — the tsconfig setting alone is enough, and pointing two different places at the JSX runtime is a common source of "it's not applying" confusion (or, worse, plugin conflicts — see the React Router note below).
 
-```js
-/** @jsxImportSource @kbach/react */
-```
+Alternatives if you can't use tsconfig: a per-file `/** @jsxImportSource @kbach/react */` pragma comment, or `['@babel/preset-react', { runtime: 'automatic', importSource: '@kbach/react' }]` in `babel.config.js` for non-Vite/non-SWC toolchains.
 
-**Babel (non-Vite)**
-
-```js
-// babel.config.js
-module.exports = {
-  presets: [
-    ['@babel/preset-react', { runtime: 'automatic', importSource: '@kbach/react' }],
-  ],
-};
-```
-
-### 2. Add the Vite plugin
-
-`@kbach/react` doesn't bundle a React plugin for Vite — if your project doesn't already have one, install it first:
-
-```
-npm install -D vite @vitejs/plugin-react
-```
-
-```ts
-// vite.config.ts
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import { kbach } from '@kbach/react/vite';
-
-export default defineConfig({
-  plugins: [
-    react({ jsxImportSource: '@kbach/react' }),
-    kbach(),
-  ],
-});
-```
-
-The plugin scans your source files and writes generated CSS between `/* kbach:start */` / `/* kbach:end */` markers inside any `kbach.css` file it finds in your project. On HMR only the changed file is rescanned — unchanged tokens reuse cached CSS.
-
-### 3. Create and import kbach.css
-
-Create `kbach.css` anywhere in your project (e.g. `src/kbach.css`):
-
-```css
-/* kbach:start */
-/* kbach:end */
-```
-
-Import it in your app entry:
-
-```ts
-// main.tsx
-import './kbach.css';
-```
-
-Importing `kbach.css` automatically disables runtime style injection — all styles come from the CSS file instead.
-
-### 4. Wrap your app
+### 2. Wrap your app
 
 ```jsx
 import { ThemeProvider } from '@kbach/react';
@@ -106,48 +53,67 @@ export default function Root() {
 }
 ```
 
+That's the whole setup. `@kbach/react` ships its own `"use client"` directive, so this works directly in a Next.js App Router Server Component tree too — no manual client wrapper needed.
+
+### Optional: static CSS for production (Vite only)
+
+By default, styles are generated and injected into a `<style>` tag by client-side JS at runtime — simple, but it means server-rendered HTML has no matching CSS until hydration runs (a brief flash of unstyled content on first paint). If you're on a Vite-based project and want zero-runtime-cost CSS instead, add the `@kbach/react/vite` plugin:
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import { kbach } from '@kbach/react/vite';
+
+export default defineConfig({
+  plugins: [
+    // ...your framework's own plugin(s) — see the framework notes below
+    // before adding @vitejs/plugin-react yourself.
+    kbach(),
+  ],
+});
+```
+
+Then create an empty `kbach.css` anywhere in your project and import it once in your app entry:
+
+```css
+/* src/kbach.css */
+/* kbach:start */
+/* kbach:end */
+```
+
+```ts
+// main.tsx
+import './kbach.css';
+```
+
+The plugin scans your source files and writes generated CSS between the `/* kbach:start */`/`/* kbach:end */` markers. Importing `kbach.css` automatically disables runtime injection — all styles come from the file instead. On HMR, only the changed file is rescanned; unchanged tokens reuse cached CSS.
+
 ## Next.js
 
-Steps 1 and 4 above apply as-is — the JSX runtime setup works via `jsxImportSource` in `tsconfig.json` (Next.js's SWC compiler reads it the same way Vite does), and `ThemeProvider` wraps your app the same way.
+Step 1 (tsconfig `jsxImportSource`) and step 2 (`ThemeProvider`) above apply as-is — Next.js's SWC compiler reads `jsxImportSource` from `tsconfig.json` the same way Vite does, and `@kbach/react` shipping its own `"use client"` directive means `ThemeProvider` works directly in a Server Component tree (e.g. the App Router root `layout.tsx`) with no wrapper of your own needed.
 
-Two things differ from the Vite setup:
-
-**No Vite plugin, no static `kbach.css`.** Next.js builds with webpack/Turbopack, not Vite, so step 2/3 (the `@kbach/react/vite` plugin) don't apply — there's currently no static-CSS build step for Next.js. Styles fall back to runtime injection (the same mechanism used automatically when no `kbach.css` is imported). This works, but since the injection only runs in the browser (there's no `document` during the server render), server-rendered HTML has classes with no matching CSS yet — expect a brief flash of unstyled content on first paint before hydration completes and injects the rules. This is a known limitation, not a bug to work around per-project.
-
-**`ThemeProvider` needs a `'use client'` boundary.** `@kbach/react` doesn't ship the `'use client'` directive in its build output, so importing `ThemeProvider` directly into a Server Component (e.g. the App Router root `layout.tsx`, which is a Server Component by default) will fail. Wrap it in your own client component once:
-
-```tsx
-// app/providers.tsx
-'use client';
-import { ThemeProvider } from '@kbach/react';
-
-export function Providers({ children }: { children: React.ReactNode }) {
-  return <ThemeProvider defaultMode="system">{children}</ThemeProvider>;
-}
-```
-
-```tsx
-// app/layout.tsx (Server Component — no 'use client' needed here)
-import { Providers } from './providers';
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <body>
-        <Providers>{children}</Providers>
-      </body>
-    </html>
-  );
-}
-```
-
-This is the standard pattern for any hook-using npm package that predates the App Router — the same workaround is needed for many other UI libraries.
+The "Optional: static CSS" step above doesn't apply — Next.js builds with webpack/Turbopack, not Vite, so there's currently no static-CSS build step for it. Styles fall back to runtime injection, which means the same first-paint FOUC note above applies: expect a brief flash of unstyled content before hydration completes. This is a known limitation, not a per-project bug to work around.
 
 ## React Router
 
-**Framework mode (v7, SSR by default):** works with the same Vite-based setup as above — framework mode builds with Vite under the hood, so the `@kbach/react/vite` plugin runs normally. `include` defaults to `['src', 'app', 'pages', 'components', 'views', 'layouts']`, which already covers React Router's `app/` routes convention. Because the static `kbach.css` approach ships real CSS (not runtime JS injection), there's no FOUC concern for server-rendered routes the way there is with Next.js.
+**Framework mode (v7+, SSR by default):** `@react-router/dev`'s own `reactRouter()` Vite plugin already includes its own React JSX transform and Fast Refresh integration — **do not also add `@vitejs/plugin-react`.** Having both active makes each one inject its own Fast Refresh preamble into the same module, which crashes the page at runtime (`Identifier 'RefreshRuntime' has already been declared`) before React ever hydrates — every class on the page will silently fail to style because the app never actually mounts. The correct setup is just:
 
-**Library mode (client-only, `createBrowserRouter`/`<BrowserRouter>`):** no SSR involved — set it up exactly like any other Vite + React app per the steps above.
+```ts
+// vite.config.ts
+import { reactRouter } from '@react-router/dev/vite';
+import { defineConfig } from 'vite';
+import { kbach } from '@kbach/react/vite'; // omit if you're not using static CSS
+
+export default defineConfig({
+  plugins: [kbach(), reactRouter()],
+});
+```
+
+`jsxImportSource` in `tsconfig.json` (step 1 above) is all that's needed for the JSX runtime — React Router's Vite plugin reads it the same way plain Vite does. `include`'s default scan dirs (`['src', 'app', 'pages', 'components', 'views', 'layouts']`) already cover React Router's `app/` routes convention if you're using the static-CSS plugin.
+
+If you do add `kbach()` to `vite.config.ts` and it detects both plugins active together, it prints a warning explaining exactly this at dev-server startup — so this doesn't have to be a silent, hard-to-diagnose blank page.
+
+**Library mode (client-only, `createBrowserRouter`/`<BrowserRouter>`):** no SSR involved — set it up exactly like any other Vite + React app. Since there's no meta-framework Vite plugin providing JSX handling here, you likely do need `@vitejs/plugin-react({ jsxImportSource: '@kbach/react' })` (or rely on tsconfig alone — Vite's default esbuild-based transform reads it too).
 
 ## API
 

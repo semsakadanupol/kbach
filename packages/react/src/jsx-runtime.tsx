@@ -9,7 +9,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from 'react/jsx-runtime';
 import { Fragment } from 'react';
 import type { ReactElement } from 'react';
-import { isWeb, isNative, getConfig, onConfigChange, resolve, flatten, getDefaultFontFamily, normalizeClassString, isRuntimeCSSDisabled, type ResolvedStyle } from './core';
+import { isWeb, isNative, getEffectiveIsWeb, getConfig, onConfigChange, resolve, flatten, getDefaultFontFamily, normalizeClassString, isRuntimeCSSDisabled, type ResolvedStyle } from './core';
 import { getInteractiveModifiers, getModeModifiers, getResponsiveModifiers } from './core/registry';
 import { InteractiveWrapper } from './InteractiveWrapper';
 import { DarkWrapper } from './DarkWrapper';
@@ -128,10 +128,16 @@ function processElement(
 ): ReactElement {
   if (type === null || typeof type === 'symbol') return makeElement(isStaticChildren, type, rawProps ?? {}, key);
 
-  // On web, substitute React Native components with HTML elements so the DOM
-  // shows clean Kbach class names instead of RNW's css-view-* hash classes.
+  // On web (including Node.js SSR, which renders web HTML — see platform.ts),
+  // substitute React Native components with HTML elements so the DOM shows clean
+  // Kbach class names instead of RNW's css-view-* hash classes. Using the raw
+  // `isWeb` constant here would make SSR skip substitution (isWeb is false in
+  // Node) while the browser applies it (isWeb is true there), producing a
+  // different element type server- vs client-side and a hydration mismatch on
+  // every affected element. getEffectiveIsWeb() is true in both the browser and
+  // Node SSR, and false only in a real React Native runtime.
   // Pass rawProps to getWebTag so TextInput can pick 'textarea' vs 'input'.
-  const webTag = isWeb ? getWebTag(type, rawProps ?? undefined) : null;
+  const webTag = getEffectiveIsWeb() ? getWebTag(type, rawProps ?? undefined) : null;
   const effectiveType: unknown = webTag ?? type;
   const originalName: string | undefined = webTag
     ? ((type as any)?.displayName ?? (type as any)?.name)
@@ -175,9 +181,13 @@ function processElement(
   }
 
   if (!classStr && !__kbachStyles) {
-    // On web, global CSS (injected by ThemeProvider via injectGlobalStyles) already sets
-    // the default font-family — no per-element inline style needed.
-    if (isWeb) return makeElement(isStaticChildren, effectiveType, omitConsumed(workingProps), key);
+    // On web (including SSR), global CSS (injected by ThemeProvider via
+    // injectGlobalStyles) already sets the default font-family — no per-element
+    // inline style needed. Must match the client's decision exactly (both use
+    // getEffectiveIsWeb()): if SSR added this inline style but the browser's
+    // first render didn't (or vice versa), React sees a style-attribute
+    // mismatch on every bare element during hydration.
+    if (getEffectiveIsWeb()) return makeElement(isStaticChildren, effectiveType, omitConsumed(workingProps), key);
     // Bug #16: use cached font sentinel — avoids globalThis lookup on every bare element.
     const defaultFont = getCachedDefaultFont();
     if (!defaultFont) return makeElement(isStaticChildren, effectiveType, workingProps, key);
@@ -224,10 +234,13 @@ function processElement(
     }, key) as ReactElement;
   }
 
-  // On web (browser), CSS classes handle all Kbach styles — skip flatten() and inline styles.
-  // On native (no CSS), always flatten into inline styles.
-  // On SSR (neither isWeb nor isNative): skip inline for HTML string elements, apply for components.
-  const skipComputedInline = isWeb || (!isNative && typeof effectiveType === 'string');
+  // On web (browser and SSR alike), CSS classes handle all Kbach styles — skip
+  // flatten() and inline styles. On native (no CSS), always flatten into inline
+  // styles. Must use getEffectiveIsWeb() (not raw `isWeb`) so SSR makes exactly
+  // the same skip/apply decision the browser will make on the same markup —
+  // otherwise the server adds an inline `style` the client's first render
+  // omits (or vice versa), which React reports as a hydration mismatch.
+  const skipComputedInline = getEffectiveIsWeb();
   let finalStyle: Record<string, unknown> | undefined;
   if (!skipComputedInline) {
     const computedStyle = flatten(resolved, false) as Record<string, unknown>;

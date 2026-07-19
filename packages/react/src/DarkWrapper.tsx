@@ -16,14 +16,13 @@
 import React, { useMemo } from 'react';
 import {
   flatten,
-  isWeb,
-  isNative,
+  getEffectiveIsWeb,
   getActiveBreakpoints,
   getGlobalScreens,
   type ResolvedStyle,
   type StyleValue,
 } from './core';
-import { useGlobalDarkMode } from './useGlobalDarkMode';
+import { useConditionalGlobalDarkMode } from './useGlobalDarkMode';
 import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
 import { hasResponsiveBuckets, stripInternalMarkers, stripWebOnlyProps } from './shared-utils';
 
@@ -41,28 +40,42 @@ export interface DarkWrapperProps {
 // instead of typing it on the interface).
 export const DarkWrapper = React.forwardRef<unknown, DarkWrapperProps>(
   function DarkWrapper({ Component, resolvedStyle, style: styleProp, children, ...rest }, ref) {
-    const isDark = useGlobalDarkMode();
+    // Computed once per render; stable for the app's whole lifetime (platform
+    // never changes at runtime), so it's safe to gate hook subscriptions on it
+    // below without violating rules of hooks (every hook is still called
+    // unconditionally, every render).
+    const isWebPlatform = getEffectiveIsWeb();
 
-    // Only subscribe to width when this element actually has responsive classes.
-    // Pure dark:/light: elements get NOOP_SUB — no resize re-renders for them.
+    // On web, subscribing to the dark-mode store would re-render this element on
+    // every theme toggle purely to recompute computedStyle — which is always {}
+    // on web (see below), so the value is never actually used there.
+    const isDark = useConditionalGlobalDarkMode(!isWebPlatform);
+
+    // Only subscribe to width when this element actually has responsive classes
+    // AND isn't on web (computedStyle is discarded on web regardless of
+    // breakpoints). Pure dark:/light: elements, or any element on web, get
+    // NOOP_SUB — no resize re-renders.
     const needsWidth = hasResponsiveBuckets(resolvedStyle);
-    const width = useConditionalWidth(needsWidth);
+    const width = useConditionalWidth(needsWidth && !isWebPlatform);
     const breakpoints = needsWidth ? getActiveBreakpoints(width) : EMPTY_BREAKPOINTS;
 
     const screens = getGlobalScreens();
     const isNonStringComponent = typeof Component !== 'string';
     const computedStyle = useMemo(() => {
-      // On web, CSS classes carry all styles — flatten() output is never applied as inline style.
-      if (isWeb) return {} as Record<string, unknown>;
+      // On web (browser and SSR alike), CSS classes carry all styles — flatten()
+      // output is never applied as inline style. isWebPlatform comes from
+      // getEffectiveIsWeb() (not raw `isWeb`) so SSR and the browser make the
+      // identical choice on the same markup, avoiding a hydration mismatch.
+      if (isWebPlatform) return {} as Record<string, unknown>;
       const s = flatten(resolvedStyle as ResolvedStyle, isDark, {}, breakpoints) as Record<string, unknown>;
       stripInternalMarkers(s);
       if (isNonStringComponent) stripWebOnlyProps(s);
       return s;
     }, [resolvedStyle, isDark, width, screens, isNonStringComponent]);
 
-    // On web (browser), CSS classes handle all Kbach styles — only forward user's explicit style.
-    // On native, merge computedStyle with user's style prop.
-    const skipComputedInline = isWeb || (!isNative && typeof Component === 'string');
+    // On web (browser and SSR alike), CSS classes handle all Kbach styles — only
+    // forward user's explicit style. On native, merge computedStyle with user's style prop.
+    const skipComputedInline = isWebPlatform;
     const finalStyle: StyleValue = skipComputedInline
       ? (styleProp ?? undefined)
       : styleProp

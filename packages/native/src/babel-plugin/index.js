@@ -56,7 +56,7 @@ function getCore() {
     _core = require('@kbach/react');
     _core.setResolveTarget?.('native');
     _coreMtime = mtime;
-    _config = null;
+    _configCache.clear();
     _resolveCache.clear(); // config changed — invalidate resolve cache too
   } catch {
     if (!_core) {
@@ -68,41 +68,65 @@ function getCore() {
 }
 
 // ─── Load user config ─────────────────────────────────────────────────────────
-// Track kbach.config.js mtime separately from the dist so that changes to
-// the user's config file are picked up during watch mode without restarting
-// the build process.
-let _config = null;
-let _cfgMtime = 0;
-let _lastCfgStatMs = 0;
+// Keyed by resolved config file path (like _resolveCache above), not a single
+// global slot — resolveProjectRoot() means two files in the same worker process
+// can legitimately resolve to two DIFFERENT kbach.config.js paths (different
+// projects sharing a Metro/Babel worker pool, see _resolveCache's comment). A
+// single-slot cache was safe back when configFile resolution was always
+// process.cwd()-based (constant for the whole process, so every call landed on
+// the same path); with per-file roots, it would serve one project's cached
+// config to another's classes. Each entry also tracks its own mtime so
+// kbach.config.js edits are picked up during watch mode without restarting.
+const _configCache = new Map(); // cfgPath -> { config, mtime, lastStatMs }
 const CFG_STAT_INTERVAL_MS = 500;
 
-function getUserConfig(configFile) {
+function getUserConfig(configFile, root) {
+  const cfgPath = path.resolve(root || process.cwd(), configFile);
   const now = Date.now();
-  if (_config && (now - _lastCfgStatMs) < CFG_STAT_INTERVAL_MS) return _config;
+  let entry = _configCache.get(cfgPath);
+
+  if (entry && (now - entry.lastStatMs) < CFG_STAT_INTERVAL_MS) return entry.config;
 
   try {
-    const cfgPath = path.resolve(process.cwd(), configFile);
     let mtime = 0;
     try { mtime = fs.statSync(cfgPath).mtimeMs; } catch {}
-    _lastCfgStatMs = now;
 
-    if (_config && mtime === _cfgMtime) return _config;
+    if (entry && mtime === entry.mtime) {
+      entry.lastStatMs = now;
+      return entry.config;
+    }
 
-    // Config file changed — bust require cache for it and reload.
+    // Config file changed (or first load for this path) — bust require cache
+    // for it and reload.
     if (require.cache[cfgPath]) delete require.cache[cfgPath];
     // eslint-disable-next-line import/no-dynamic-require
     const userCfg = require(cfgPath);
     const { buildConfig } = getCore();
-    _config = buildConfig(userCfg);
-    _cfgMtime = mtime;
+    entry = { config: buildConfig(userCfg), mtime, lastStatMs: now };
+    _configCache.set(cfgPath, entry);
     _resolveCache.clear();
   } catch {
-    if (!_config) {
+    if (!entry) {
       const { getConfig } = getCore();
-      _config = getConfig();
+      entry = { config: getConfig(), mtime: 0, lastStatMs: now };
+      _configCache.set(cfgPath, entry);
+    } else {
+      entry.lastStatMs = now;
     }
   }
-  return _config;
+  return entry.config;
+}
+
+// Resolve the project root a config-relative path (kbach.config.js) should be
+// read from. process.cwd() is only correct when the Metro/Babel worker's cwd
+// happens to be the app directory — not guaranteed for a monorepo root script
+// or a CI job invoked from the repo root. state.file.opts.root is Babel's own
+// resolved project root (based on where babel.config.js was found for this
+// file), which tracks the actual app directory regardless of the process cwd.
+function resolveProjectRoot(state) {
+  return (state && state.file && state.file.opts && state.file.opts.root)
+    || (state && state.cwd)
+    || process.cwd();
 }
 
 // Valid JS identifier pattern — avoids quoting camelCase property names like fontFamily.
@@ -204,6 +228,26 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
     debug = false,
   } = options;
 
+  // The JSX runtime (jsx-runtime.tsx) only ever reads className/kb/__kbachClasses
+  // off props — it has no way to know about a custom `attributes` name configured
+  // here, since that option never reaches the runtime. A STATIC string on a custom
+  // attribute still works (this plugin resolves and renames it to __kbachClasses
+  // at build time), but a DYNAMIC expression (template literal, ternary, computed)
+  // on that same custom attribute is left completely untouched by both this plugin
+  // (correctly, since it's not a string literal) and the runtime (which never
+  // recognizes the original attribute name) — it silently renders unstyled with no
+  // error. Surfacing that gap once per build beats leaving it silent.
+  const customAttributes = attributes.filter((a) => a !== 'kb' && a !== 'className');
+  if (customAttributes.length) {
+    warn(
+      `Custom class attribute(s) ${customAttributes.map((a) => `"${a}"`).join(', ')} are ` +
+      'only resolved for STATIC string classes at build time. A dynamic expression ' +
+      '(template literal, ternary, computed value) on them is not recognized by the ' +
+      '@kbach/native runtime, which only reads className/kb — it will render unstyled ' +
+      'with no warning at runtime. Use className or kb for any dynamic class string.',
+    );
+  }
+
   const SEP = path.sep;
 
   return {
@@ -242,7 +286,18 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
         },
 
         exit(programPath, state) {
-          if (!state.kbachDeclarations || !state.kbachDeclarations.size) return;
+          const hasStaticDeclarations = !!(state.kbachDeclarations && state.kbachDeclarations.size);
+          // hasClassAttr is set by the JSXAttribute visitor for ANY matched attribute
+          // (kb/className/…), static or dynamic — a file whose only usage is a
+          // dynamic class expression (template literal, conditional, computed) never
+          // populates kbachDeclarations, but the runtime still resolves those classes
+          // dynamically and needs kbach.config.js synced just as much as a file with
+          // static classes does. Gating this whole block on kbachDeclarations.size
+          // (as before) meant a dynamic-only file — or a dynamic-only app, if no file
+          // anywhere has a static class string — never got the config-init call at
+          // all, silently leaving dark mode / useColors() / dynamic resolution on the
+          // default config instead of the user's kbach.config.js.
+          if (!hasStaticDeclarations && !state.hasClassAttr) return;
 
           const body = programPath.get('body');
           const imports = body.filter(p => p.isImportDeclaration());
@@ -254,17 +309,19 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
           };
 
           // 1. Inject __kbachStyles declarations (reverse so they appear in order)
-          const entries = [...state.kbachDeclarations.values()];
-          for (let i = entries.length - 1; i >= 0; i--) {
-            const { uid, astNode } = entries[i];
-            insert(t.variableDeclaration('const', [t.variableDeclarator(uid, astNode)]));
+          if (hasStaticDeclarations) {
+            const entries = [...state.kbachDeclarations.values()];
+            for (let i = entries.length - 1; i >= 0; i--) {
+              const { uid, astNode } = entries[i];
+              insert(t.variableDeclaration('const', [t.variableDeclarator(uid, astNode)]));
+            }
           }
 
           // 2. Inject runtime config init LAST so insertAfter places it FIRST
           //    (right after imports, before the declarations above).
           //    This syncs kbach.config.js into the runtime for dynamic class
           //    resolution, useColors(), and custom darkMode strategy.
-          const cfgAbsPath = path.resolve(process.cwd(), configFile).replace(/\\/g, '/');
+          const cfgAbsPath = path.resolve(resolveProjectRoot(state), configFile).replace(/\\/g, '/');
           if (fs.existsSync(cfgAbsPath.replace(/\//g, path.sep))) {
             insert(buildConfigInitAST(t, cfgAbsPath));
           }
@@ -280,6 +337,12 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
         const name = t.isJSXIdentifier(attrName) ? attrName.name : null;
 
         if (!name || !attributes.includes(name)) return;
+
+        // Mark this file as having class-attribute usage regardless of whether
+        // the value turns out to be static or dynamic — see the exit() handler
+        // above for why the config-init injection depends on this, not just on
+        // whether any static declarations were collected.
+        state.hasClassAttr = true;
 
         const value = nodePath.node.value;
 
@@ -298,14 +361,15 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
           // across different files in the same build. Namespaced by the
           // resolved config file path so different projects/configs sharing
           // this worker process never collide (see _resolveCache comment above).
-          const cfgAbsPath = path.resolve(process.cwd(), configFile);
-          const cacheKey = `${cfgAbsPath} ${classString}`;
+          const projectRoot = resolveProjectRoot(state);
+          const cfgAbsPath = path.resolve(projectRoot, configFile);
+          const cacheKey = `${cfgAbsPath} ${classString}`;
           let resolved;
           if (_resolveCache.has(cacheKey)) {
             resolved = _resolveCache.get(cacheKey);
           } else {
             const { resolve } = getCore();
-            const config = getUserConfig(configFile);
+            const config = getUserConfig(configFile, projectRoot);
             resolved = resolve(classString, config.theme, config.darkMode);
             _resolveCache.set(cacheKey, resolved);
           }

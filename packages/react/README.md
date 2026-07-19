@@ -1,6 +1,6 @@
 # @kbach/react
 
-Tailwind-like utility classes for React (web). Write classes as `className` strings — the custom JSX runtime resolves them at render time. A Vite plugin generates a static `kbach.css` file so styles ship as real CSS with zero runtime overhead in production.
+Tailwind-like utility classes for React (web). Write `className` strings — a custom JSX runtime resolves them at render time. An optional Vite plugin outputs a static `kbach.css` for zero runtime cost.
 
 ```jsx
 <div className="bg-white dark:bg-gray-10 p-4 rounded-xl shadow" />
@@ -12,36 +12,37 @@ Tailwind-like utility classes for React (web). Write classes as `className` stri
 
 ## Install
 
-[npm package](https://www.npmjs.com/package/@kbach/react)
-
 ```
 npm install @kbach/react
 ```
 
+[npm package](https://www.npmjs.com/package/@kbach/react)
+
 ## Setup
 
-Step 1 is always required. After that, pick **one** of the two setups below — Quick if you just want styles working, Static CSS if you're shipping to production and/or using SSR.
+Two steps: configure the JSX runtime (always), then pick one styling method.
 
-### 1. Configure the JSX runtime
+### Step 1 — JSX runtime
 
-**tsconfig.json** (works for Vite, Next.js, React Router, and most other tooling — it's the one setting that everything reads):
+**tsconfig.json:**
 
 ```json
-{
-  "compilerOptions": {
-    "jsx": "react-jsx",
-    "jsxImportSource": "@kbach/react"
-  }
-}
+{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@kbach/react" } }
 ```
 
-Don't also pass `jsxImportSource` to `@vitejs/plugin-react` (or any other bundler plugin) unless you have a specific reason to — the tsconfig setting alone is enough, and pointing two different places at the JSX runtime is a common source of "it's not applying" confusion (or, worse, plugin conflicts — see the React Router note below).
+That's the only setting needed — Vite, Next.js, and React Router all read it. Don't *also* set `jsxImportSource` on a bundler plugin (e.g. `@vitejs/plugin-react`); one source of truth avoids conflicts.
 
-Alternatives if you can't use tsconfig: a per-file `/** @jsxImportSource @kbach/react */` pragma comment, or `['@babel/preset-react', { runtime: 'automatic', importSource: '@kbach/react' }]` in `babel.config.js` for non-Vite/non-SWC toolchains.
+### Step 2 — Styling method
 
-### 2a. Quick setup (runtime CSS injection)
+Not sure which? Check your framework first:
 
-No build plugin, works with any bundler (Vite, webpack, Turbopack, Metro-for-web, …). Styles are generated and injected into a `<style>` tag by client-side JS the moment `ThemeProvider` mounts.
+| Framework | Use |
+|---|---|
+| Next.js | **Quick setup** — Static CSS doesn't apply (webpack/Turbopack, not Vite) |
+| React Router, framework mode | **Static CSS setup** — and skip `@vitejs/plugin-react`, see note below |
+| Vite, React Router library mode, CRA, other | Either — Quick is faster to try, Static CSS is zero-cost for production |
+
+#### Quick setup — any bundler, client-side CSS injection
 
 ```jsx
 import { ThemeProvider, KbachReset } from '@kbach/react';
@@ -56,31 +57,19 @@ export default function Root() {
 }
 ```
 
-`<KbachReset />` renders Kbach's base browser-default reset (borderless buttons/inputs, visible checkboxes/radios, no arrow-less `<select>`, etc. — see [CSS resets](#css-resets) below) as a plain `<style>` tag instead of waiting for the client-side injector. On a plain client-rendered app (Vite CSR, Create React App, …) it's a nice-to-have, since the injector already runs before first paint there. **On SSR** (Next.js, React Router framework mode, Remix, …) it's the difference between correct styling from the first byte and a flash of raw browser defaults (default button border, unstyled `<select>`, serif-ish fonts, …) that only clears up once hydration finishes — the server has no JS to run the injector, but it *can* render this component, since it's just JSX. Put it as high in `<head>` as your framework allows; the snippet above (right after `ThemeProvider` opens) works everywhere `<head>` isn't directly reachable.
+Done. `<KbachReset />` renders the base reset (see [CSS resets](#css-resets)) as real markup instead of waiting on client JS — matters most for SSR, where it avoids a flash of unstyled browser defaults before hydration. `@kbach/react` ships its own `"use client"` directive, so this works in a Next.js Server Component tree with no wrapper needed — in Next.js, render it once in the root `layout.tsx`.
 
-That's the whole setup. `@kbach/react` ships its own `"use client"` directive, so both of these work directly in a Next.js App Router Server Component tree — no manual client wrapper needed.
+#### Static CSS setup — Vite only, zero runtime cost
 
-### 2b. Static CSS setup (recommended for production / SSR, Vite only)
-
-Zero runtime cost: a Vite plugin scans your source at build time and writes real CSS into a file you import, so styles ship as an ordinary stylesheet with no client-side generation step at all — nothing to flash-of-unstyled before. This is the better choice for any Vite-based SSR framework (React Router, SvelteKit-style meta-frameworks, etc.) over the Quick setup + `<KbachReset />` combination, since it covers *every* class, not just the base reset.
+A build-time plugin writes real CSS into a file you import — nothing generated client-side.
 
 ```ts
 // vite.config.ts
 import { defineConfig } from 'vite';
 import { kbach } from '@kbach/react/vite';
 
-export default defineConfig({
-  plugins: [
-    // ...your framework's own plugin(s) — see the framework notes below
-    // before adding @vitejs/plugin-react yourself.
-    kbach(),
-  ],
-});
+export default defineConfig({ plugins: [kbach()] });
 ```
-
-Adding the plugin also declares `@kbach/react` in Vite's `optimizeDeps.include` upfront, so Vite pre-bundles it during its initial dependency scan instead of discovering it lazily on the first page that imports it — avoiding a forced full-reload mid-render, which is what a rare "Invalid hook call"-style crash on first load (but never again after) usually turns out to be.
-
-Then create an empty `kbach.css` anywhere in your project and import it once in your app entry:
 
 ```css
 /* src/kbach.css */
@@ -95,142 +84,106 @@ import './kbach.css';
 
 ```jsx
 import { ThemeProvider } from '@kbach/react';
-// No <KbachReset /> needed — kbach.css already includes the same base reset.
+// No <KbachReset /> — kbach.css already includes the reset.
 
 export default function Root() {
-  return (
-    <ThemeProvider defaultMode="system">
-      <App />
-    </ThemeProvider>
-  );
+  return <ThemeProvider defaultMode="system"><App /></ThemeProvider>;
 }
 ```
 
-The plugin scans your source files and writes generated CSS between the `/* kbach:start */`/`/* kbach:end */` markers. Importing `kbach.css` automatically disables runtime injection — all styles come from the file instead. On HMR, only the changed file is rescanned; unchanged tokens reuse cached CSS.
+The plugin scans your source at build time and writes CSS between the markers — importing `kbach.css` auto-disables runtime injection. It also warns in the terminal (with a clickable `file:line`) for any class it doesn't recognize as a real utility or an existing CSS rule elsewhere in the project — usually a typo.
 
-While it's scanning, the plugin also indexes every `.css`/`.scss`/`.sass`/`.less` file under the same directories and warns in the terminal (not the browser console) for any class that's neither a real Kbach utility nor defined anywhere in those stylesheets — likely a typo. A class you've defined yourself elsewhere (CSS Modules, styled-components, a third-party component's class) is recognized as soon as something in the project literally has a `.that-class-name` rule, so it won't get flagged just because Kbach itself doesn't know it. Each warning includes a `file:line:column` location that most terminals (VS Code's integrated terminal included) turn into a clickable link straight to that class.
-
-## Next.js
-
-Step 1 (tsconfig `jsxImportSource`) above applies as-is — Next.js's SWC compiler reads `jsxImportSource` from `tsconfig.json` the same way Vite does. For step 2, use **Quick setup (2a)** — Next.js builds with webpack/Turbopack, not Vite, so the static-CSS plugin (2b) doesn't apply. Render `<KbachReset />` once in the root App Router `layout.tsx` (inside `<head>`, or right after `<ThemeProvider>` opens) so Server Component HTML gets the base reset without waiting on hydration; `@kbach/react` shipping its own `"use client"` directive means both `ThemeProvider` and `KbachReset` work directly in that Server Component tree with no wrapper of your own needed.
-
-## React Router
-
-**Framework mode (v7+, SSR by default):** `@react-router/dev`'s own `reactRouter()` Vite plugin already includes its own React JSX transform and Fast Refresh integration — **do not also add `@vitejs/plugin-react`.** Having both active makes each one inject its own Fast Refresh preamble into the same module, which crashes the page at runtime (`Identifier 'RefreshRuntime' has already been declared`) before React ever hydrates — every class on the page will silently fail to style because the app never actually mounts. The correct setup is just:
+**React Router framework mode:** don't add `@vitejs/plugin-react` — `reactRouter()` already provides JSX handling, and both together crash the page (`Identifier 'RefreshRuntime' has already been declared`).
 
 ```ts
 // vite.config.ts
 import { reactRouter } from '@react-router/dev/vite';
 import { defineConfig } from 'vite';
-import { kbach } from '@kbach/react/vite'; // omit if you're not using static CSS
+import { kbach } from '@kbach/react/vite'; // omit if using Quick setup instead
 
-export default defineConfig({
-  plugins: [kbach(), reactRouter()],
-});
+export default defineConfig({ plugins: [kbach(), reactRouter()] });
 ```
 
-`jsxImportSource` in `tsconfig.json` (step 1 above) is all that's needed for the JSX runtime — React Router's Vite plugin reads it the same way plain Vite does. `include`'s default scan dirs (`['src', 'app', 'pages', 'components', 'views', 'layouts']`) already cover React Router's `app/` routes convention if you're using the static-CSS plugin.
+(React Router library mode — `createBrowserRouter`, no SSR — has no such conflict; set it up like any Vite + React app.)
 
-If you do add `kbach()` to `vite.config.ts` and it detects both plugins active together, it prints a warning explaining exactly this at dev-server startup — so this doesn't have to be a silent, hard-to-diagnose blank page.
+## Dark mode
 
-Framework mode is SSR, so skipping the static-CSS plugin (2b) in favor of Quick setup (2a) means the initial server-rendered HTML has no CSS at all until hydration — render `<KbachReset />` in `root.tsx`'s `<Layout>` (inside `<head>`, alongside `<Links />`/`<Meta />`) if you go that route, otherwise expect raw browser defaults (e.g. the native `<button>` border) on first paint.
+`<ThemeProvider>` powers every `dark:` class — detects OS color scheme, persists the user's choice, re-renders on change.
 
-**Library mode (client-only, `createBrowserRouter`/`<BrowserRouter>`):** no SSR involved — set it up exactly like any other Vite + React app. Since there's no meta-framework Vite plugin providing JSX handling here, you likely do need `@vitejs/plugin-react({ jsxImportSource: '@kbach/react' })` (or rely on tsconfig alone — Vite's default esbuild-based transform reads it too).
+```jsx
+<ThemeProvider
+  defaultMode="system"        // 'light' | 'dark' | 'system'
+  disablePersistence={false}  // true = don't remember across reloads
+>
+  <App />
+</ThemeProvider>
+```
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `defaultMode` | `'light' \| 'dark' \| 'system'` | `'system'` | Starting mode |
+| `disablePersistence` | `boolean` | `false` | Skip saving to `localStorage` |
+| `config` | `FrameworkConfig` | global config | Scope a different config to this subtree |
+
+`darkMode` in `kbach.config.js` picks the matching strategy: `'attribute'` (default), `'class'`, or `'media'` (system-only). Toggle it with `useTheme()`'s `toggle()`/`setMode()` — see [API](#api).
 
 ## API
 
-### className / kb prop
+### className / kb
 
-Works on any HTML element or React component once the JSX runtime is configured. `kb` is an alias for `className`.
+`kb` is an alias for `className` — works on any element.
 
 ```jsx
-<div className="bg-white dark:bg-gray-10 p-4 rounded-xl" />
-<p kb="text-gray-10 dark:text-white text-lg font-bold" />
 <button className="bg-blue-7 hover:bg-blue-8 pressed:bg-blue-9 rounded-lg px-4 py-2" />
 ```
 
 ### styled(Component, classes)
 
-Pre-style any component. Returns a new component that merges the base classes with any `kb` prop passed at use time.
-
 ```jsx
 import { styled } from '@kbach/react';
 
 const Card = styled('div', 'bg-white dark:bg-gray-9 rounded-2xl p-6 shadow');
-const Button = styled(
-  'button',
-  'bg-blue-7 hover:bg-blue-8 dark:bg-indigo-6 rounded-xl px-6 py-3'
-);
+const Button = styled('button', 'bg-blue-7 hover:bg-blue-8 rounded-xl px-6 py-3');
 
 <Card kb="mt-4">
   <Button kb="w-full">Submit</Button>
 </Card>
 ```
 
+Extra classes at use time via `kb` merge with the base classes.
+
 ### cx(...classes)
 
-Conditionally join class strings. Falsy values are ignored. The Vite plugin scans `cx()` calls when building the static CSS.
-
 ```jsx
 import { cx } from '@kbach/react';
 
-<div className={cx(
-  'p-4 rounded-xl',
-  isSelected && 'border-2 border-blue-6',
-  isDisabled && 'opacity-50',
-)} />
+<div className={cx('p-4 rounded-xl', isSelected && 'border-2 border-blue-6', isDisabled && 'opacity-50')} />
 ```
 
-Pre-built style constants (also scanned by the Vite plugin):
+Falsy values ignored. Also works as pre-built style constants:
 
 ```ts
-// styles.ts
-import { cx } from '@kbach/react';
-
 export const container = cx('flex-1 bg-white dark:bg-gray-9 p-4');
-export const heading   = cx('text-2xl font-bold text-gray-10 dark:text-white');
-```
-
-```jsx
-import { container, heading } from './styles';
-
-<div className={container}>
-  <h1 className={heading}>Hello</h1>
-</div>
 ```
 
 ### useStyles(classes, state?)
 
-Resolve classes to a style object inside a component.
-
 ```jsx
-import { useStyles } from '@kbach/react';
-
 const style = useStyles('bg-blue-6 dark:bg-indigo-6 px-3 py-1 rounded-full');
-
-// Multiple strings merged left-to-right
-const style = useStyles(['bg-white p-4', 'dark:bg-gray-9 rounded-xl']);
-
-// With interaction state
-const [pressed, setPressed] = useState(false);
-const style = useStyles('bg-blue-5 pressed:bg-blue-7 rounded-lg', { pressed });
+const style2 = useStyles('bg-blue-5 pressed:bg-blue-7 rounded-lg', { pressed });
 ```
 
 ### kb(classes)
 
-Resolve classes outside a component (static contexts).
+Resolve outside a component:
 
 ```js
-import { kb } from '@kbach/react';
-
 const cardStyle = kb('bg-white p-4 rounded-xl') as React.CSSProperties;
 ```
 
 ### useTheme()
 
 ```js
-import { useTheme } from '@kbach/react';
-
 const { mode, resolvedMode, isDark, setMode, toggle, config } = useTheme();
 ```
 
@@ -238,164 +191,74 @@ const { mode, resolvedMode, isDark, setMode, toggle, config } = useTheme();
 |---|---|---|
 | `mode` | `'light' \| 'dark' \| 'system'` | User-selected mode |
 | `resolvedMode` | `'light' \| 'dark'` | Resolved after system lookup |
-| `isDark` | `boolean` | Shorthand for `resolvedMode === 'dark'` |
+| `isDark` | `boolean` | `resolvedMode === 'dark'` |
 | `setMode` | `fn` | Set mode explicitly |
-| `toggle` | `fn` | Toggle between light and dark |
+| `toggle` | `fn` | Toggle light/dark |
 | `config` | `ResolvedConfig` | Full resolved config |
 
-### useIsDark()
+### useIsDark() / useColors()
 
 ```js
-import { useIsDark } from '@kbach/react';
 const isDark = useIsDark();
-```
-
-### useColors()
-
-Returns the active theme's color palette as a smart proxy.
-
-```js
-import { useColors } from '@kbach/react';
 
 const colors = useColors();
 colors.blue[6]              // '#3b82f6'
 colors.blue['6/50']         // 'rgba(59,130,246,0.5)'
-colors.white                // '#ffffff'
-colors['white/20']          // 'rgba(255,255,255,0.2)'
 colors.alpha('#ff6b35', 60) // 'rgba(255,107,53,0.6)'
 ```
 
 ## Modifiers
 
-Chain modifiers in any order before the utility name:
+Chain in any order: `<div className="dark:sm:hover:p-4" />`
 
-```jsx
-<div className="dark:sm:hover:p-4" />
-<input className="focus:ring-2 focus:ring-blue-5 focus:outline-none" />
-```
-
-### Theme
-
-| Modifier | Trigger |
+| Category | Modifiers |
 |---|---|
-| `dark:` | Dark mode |
-| `light:` / `not-dark:` | Light mode |
-
-### Interactive
-
-| Modifier | Trigger |
-|---|---|
-| `hover:` | Mouse hover |
-| `focus:` | Element focused |
-| `pressed:` | Click / touch down |
-| `active:` | Active state |
-| `disabled:` | Disabled |
-| `checked:` | Checkbox / radio checked |
-| `visited:` | Visited link |
-| `placeholder:` | Placeholder text |
-
-Negated: `not-hover:`, `not-focus:`, `not-pressed:`, `not-active:`, `not-disabled:`, `not-checked:`
-
-### Structural
-
-`first:` `last:` `odd:` `even:` `only:` `focus-within:` `focus-visible:`
-
-### Pseudo-elements
-
-`before:` `after:` `selection:` `first-letter:` `first-line:` `marker:` `placeholder:`
+| Theme | `dark:` `light:` / `not-dark:` |
+| Interactive | `hover:` `focus:` `pressed:` `active:` `disabled:` `checked:` `visited:` `placeholder:` (all have `not-` variants) |
+| Structural | `first:` `last:` `odd:` `even:` `only:` `focus-within:` `focus-visible:` |
+| Pseudo-elements | `before:` `after:` `selection:` `first-letter:` `first-line:` `marker:` |
+| Responsive | `sm:`(576px) `md:`(768px) `lg:`(1024px) `xl:`(1280px) `2xl:`(1536px) |
+| Other | `print:` `landscape:`/`portrait:` `motion-reduce:`/`motion-safe:` `contrast-more:`/`contrast-less:` `rtl:`/`ltr:` `!` (important) |
 
 ```jsx
 <div className="before:content-['*'] before:text-red-6 relative" />
-<p className="selection:bg-blue-3" />
-<input className="placeholder:text-gray-5" />
 ```
 
-### Group / peer
+**Group / peer:**
 
 ```jsx
 <div className="group">
   <span className="opacity-0 group-hover:opacity-100 transition" />
 </div>
-<input className="peer" />
-<p className="peer-focus:text-blue-6" />
 ```
 
-Nested groups need names, or the inner element reacts to whichever `.group` is nearest — not necessarily the one you meant:
-
-```jsx
-<div className="group/card">
-  <div className="group/icon">
-    <span className="group-hover/icon:opacity-100" /> {/* only the inner group */}
-  </div>
-  <span className="group-hover/card:underline" />      {/* only the outer group */}
-</div>
-```
-
-### Responsive
-
-| Modifier | Min-width |
-|---|---|
-| `sm:` | 576 px |
-| `md:` | 768 px |
-| `lg:` | 1024 px |
-| `xl:` | 1280 px |
-| `2xl:` | 1536 px |
-
-### Other
-
-| Modifier | Effect |
-|---|---|
-| `print:hidden` | Visible only on screen |
-| `landscape:` `portrait:` | Orientation |
-| `motion-reduce:` `motion-safe:` | Reduced-motion preference |
-| `contrast-more:` `contrast-less:` | Contrast preference |
-| `rtl:` `ltr:` | Text direction |
-| `!p-0` | `!important` on every declaration |
+Nested groups need names (`group/card`, `group-hover/card:`) or the inner element reacts to whichever `.group` is nearest, not necessarily the one you meant.
 
 ## Arbitrary values
 
 ```jsx
-<div className="bg-[#6366f1]" />
-<div className="p-[14px]" />
-<div className="w-[calc(100%-2rem)]" />
-<div className="bg-[rgba(99,102,241,0.15)]" />
-<div className="text-[18px]" />
+<div className="bg-[#6366f1] p-[14px] w-[calc(100%-2rem)] text-[18px]" />
 ```
 
-### Arbitrary properties (web only)
-
-For the rare CSS property with no named utility, write `[property:value]` directly — no utility prefix:
-
-```jsx
-<div className="[mask-type:luminance]" />
-<div className="[-webkit-line-clamp:3]" />
-<div className="[--my-var:10px]" />       {/* CSS custom property */}
-```
-
-Underscores become spaces, same as any other arbitrary value: `[background:url(/a.png)_no-repeat]`. Only the first `:` splits the property from the value, so a value that itself contains a colon (a URL's `http://`) still comes through intact.
+For a property with no named utility: `[property:value]` — e.g. `[mask-type:luminance]`, `[--my-var:10px]`. Underscores become spaces: `[background:url(/a.png)_no-repeat]`.
 
 ## Color system
 
-12-shade scale — 1 lightest, 12 darkest. Use as `bg-blue-6`, `text-gray-10`, `border-red-4/50`.
+12-shade scale, 1 lightest → 12 darkest: `bg-blue-6`, `text-gray-10`, `border-red-4/50`.
 
-Families: `slate gray zinc neutral stone red orange amber yellow lime green emerald teal cyan sky blue indigo violet purple fuchsia pink rose`  
+Families: `slate gray zinc neutral stone red orange amber yellow lime green emerald teal cyan sky blue indigo violet purple fuchsia pink rose`
 Special: `transparent` `current` `black` `white`
-
-Opacity modifier: `bg-blue-6/50` (50% alpha), `bg-blue-6/[0.15]` (arbitrary)
+Opacity: `bg-blue-6/50` or `bg-blue-6/[0.15]`
 
 ## CSS resets
 
-Included automatically in `kbach.css`, in runtime injection, and in `<KbachReset />` (all three render the exact same rules — pick whichever setup you're using from [Setup](#setup) above):
+Included in `kbach.css`, runtime injection, and `<KbachReset />` alike:
 
-- `*, *::before, *::after { box-sizing: border-box; border-width: 0; border-style: solid; border-color: currentColor }` — border utilities like `border-2 border-gray-4` work on any element without also needing `border-solid`
-- `body { margin: 0; padding: 0 }`
-- `h1–h6` — margin, font-size, font-weight cleared (inherit from parent)
-- `p`, `ul`, `ol` — margin and list style cleared
-- `a` — color and underline cleared (inherit from parent)
-- `img`, `video`, `svg` — `display: block; max-width: 100%`
-- `button`, text-like `input`s (not checkbox/radio), `textarea` — appearance, border, padding cleared, so `border-`/`bg-`/`rounded-`/`p-` utilities fully restyle them
-- `input[type=checkbox]`, `input[type=radio]`, `select` — native rendering kept (stripping it would hide the checkmark/dot/dropdown-arrow with nothing to replace them); only typography and spacing are normalized, and checkbox/radio/range get `accent-color: currentColor` so they still pick up your text color instead of the OS default blue
-- `fieldset`, `table` — padding/margin/border-collapse cleared
+- Border-box everywhere; `border-*` utilities work without needing `border-solid`
+- `body` margin/padding cleared; headings/`p`/`ul`/`ol`/`a` styling cleared to inherit
+- `img`/`video`/`svg` block + max-width 100%
+- `button`/text inputs/`textarea` stripped of native appearance so `bg-`/`rounded-`/`p-` fully restyle them
+- Checkbox/radio/`select` keep native rendering (just typography/spacing normalized + `accent-color: currentColor`)
 
 ## Configuration
 
@@ -405,71 +268,36 @@ module.exports = {
   darkMode: 'attribute', // 'attribute' | 'class' | 'media'
 
   theme: {
-    // Replace a section entirely
-    colors: { brand: { 1: '#eff6ff', 6: '#3b82f6', 10: '#1e3a5f' } },
+    colors: { brand: { 1: '#eff6ff', 6: '#3b82f6', 10: '#1e3a5f' } }, // replaces the section
   },
 
   extend: {
-    // Add to defaults
-    colors: { brand: { 6: '#6366f1' } },
+    colors: { brand: { 6: '#6366f1' } }, // adds to defaults
     spacing: { 18: '72px' },
     screens: { '3xl': '1920px' },
-    fontFamily: {
-      sans:        'Inter, sans-serif',
-      'sans-bold': 'Inter_700Bold, sans-serif',
-    },
-    // Custom @keyframes (web only) — reference by name from `animation`,
-    // then use that name as animate-{name}. Declaration values are plain
-    // CSS strings, same idea as a style object but for a keyframe step.
+    fontFamily: { sans: 'Inter, sans-serif' },
     keyframes: {
       wiggle: { '0%, 100%': { transform: 'rotate(-3deg)' }, '50%': { transform: 'rotate(3deg)' } },
     },
-    animation: {
-      wiggle: 'wiggle 1s ease-in-out infinite',
-    },
+    animation: { wiggle: 'wiggle 1s ease-in-out infinite' },
   },
 
   plugins: [
     ({ addUtility, addVariant, theme }) => {
-      addUtility('border-brand', {
-        borderColor: theme('colors.brand.6'),
-        borderWidth: 2,
-      });
+      addUtility('border-brand', { borderColor: theme('colors.brand.6'), borderWidth: 2 });
       addVariant('hocus', ':hover, :focus');
     },
   ],
 };
 ```
 
-Setting `fontFamily.sans` to anything other than `'System'` auto-injects `body { font-family: … }`.
-
-```jsx
-<div className="animate-wiggle" />
-{/* Override duration/timing/repeat inline, keeps the same wiggle @keyframes: */}
-<div className="animate-[wiggle_2s_ease-in-out]" />
-```
-
-Color aliases:
-
-```js
-extend: {
-  colors: {
-    primary: 'blue-6',       // resolves to blue shade 6's hex
-    brand: { 6: 'primary' }, // follows through to blue-6's hex
-  },
-},
-```
-
-Runtime update:
-
-```js
-import { updateConfig, clearCache } from '@kbach/react';
-updateConfig({ extend: { colors: { brand: { 6: '#6366f1' } } } });
-clearCache();
-```
+- `fontFamily.sans` set to anything but `'System'` auto-injects `body { font-family: … }`
+- Custom `@keyframes` are used as `animate-{name}`, and can be overridden inline: `animate-[wiggle_2s_ease-in-out]`
+- Colors can alias each other: `primary: 'blue-6'`, `brand: { 6: 'primary' }`
+- Runtime update: `updateConfig({ extend: { ... } }); clearCache();`
 
 ## Full reference
 
-See [kbach-react.md](./kbach-react.md) for the complete utility reference, all modifier tables, and configuration options.
+[kbach-react.md](./kbach-react.md) — complete utility list, every modifier, all config options.
 
-For React Native / Expo, see [`@kbach/native`](https://www.npmjs.com/package/@kbach/native).
+React Native / Expo: [`@kbach/native`](https://www.npmjs.com/package/@kbach/native).

@@ -8,8 +8,6 @@
  * Used by: jsx-runtime (bare JSX), styled(), DarkWrapper, InteractiveWrapper.
  */
 
-import { isWeb } from './core';
-
 // ─── Built-in substitution table ─────────────────────────────────────────────
 
 const _rnToHtml: Record<string, string> = {
@@ -281,21 +279,4 @@ export function transformToWebProps(
   if (isImage && tag === 'img' && out.alt == null) out.alt = '';
 
   return out;
-}
-
-// ─── Convenience helper ───────────────────────────────────────────────────────
-
-/**
- * Resolve the effective component type and (if substituted) transform props.
- * Returns the original type unchanged when not on web or when no match found.
- */
-export function resolveForWeb(
-  type: unknown,
-  props: Record<string, unknown>,
-): { effectiveType: unknown; workingProps: Record<string, unknown> } {
-  if (!isWeb) return { effectiveType: type, workingProps: props };
-  const tag = getWebTag(type, props);
-  if (!tag) return { effectiveType: type, workingProps: props };
-  const name: string = (type as any)?.displayName ?? (type as any)?.name ?? '';
-  return { effectiveType: tag, workingProps: transformToWebProps(name, tag, props) };
 }

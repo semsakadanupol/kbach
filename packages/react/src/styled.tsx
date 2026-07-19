@@ -7,9 +7,9 @@ import React, {
   type ForwardRefExoticComponent,
   type ReactElement,
 } from 'react';
-import { resolve, flatten, isWeb, isNative, normalizeClassString, getActiveBreakpoints, type StyleValue, type ResolvedStyle } from './core';
+import { resolve, flatten, isNative, getEffectiveIsWeb, normalizeClassString, getActiveBreakpoints, type StyleValue, type ResolvedStyle } from './core';
 import { useTheme } from './context';
-import { useGlobalDarkMode } from './useGlobalDarkMode';
+import { useConditionalGlobalDarkMode } from './useGlobalDarkMode';
 import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
 import { hasResponsiveBuckets, hasInteractiveBuckets, chain } from './shared-utils';
 import { getWebTag, transformToWebProps } from './web-substitute';
@@ -68,24 +68,40 @@ export function styled<T extends ComponentType<any>>(
       const checked: boolean = !!(props as any).checked;
 
       const { config } = useTheme();
-      const isDark = useGlobalDarkMode();
+
+      // Computed once per render; stable for the app's whole lifetime (platform
+      // never changes at runtime), so it's safe to gate hook subscriptions and
+      // state setters on it below without violating rules of hooks (every hook
+      // below is still called unconditionally, every render).
+      const isWebPlatform = getEffectiveIsWeb();
+
+      // On web, subscribing to the dark-mode store would re-render on every theme
+      // toggle purely to recompute computedStyle — which is always {} on web (see
+      // below), so the value is never actually used there.
+      const isDark = useConditionalGlobalDarkMode(!isWebPlatform);
 
       // ── Interaction state ───────────────────────────────────────────────────
       const [pressed, setPressed] = useState(false);
       const [hovered, setHovered] = useState(false);
       const [focused, setFocused] = useState(false);
 
-      const handlePressIn = useCallback(chain(onPressIn, () => setPressed(true)), [onPressIn]);
-      const handlePressOut = useCallback(chain(onPressOut, () => setPressed(false)), [onPressOut]);
+      // On web, real CSS :hover/:focus/:active pseudo-classes already handle the
+      // visual change — this state only feeds computedStyle, which is discarded
+      // on web. Skipping the setState call there avoids re-rendering on every
+      // hover/focus/press on hover-heavy UIs for zero visible effect.
+      // isWebPlatform is a stable primitive, so including it in a useCallback dep
+      // array (alongside the user's handler) doesn't defeat the memoization.
+      const handlePressIn = useCallback(chain(onPressIn, () => { if (!isWebPlatform) setPressed(true); }), [onPressIn, isWebPlatform]);
+      const handlePressOut = useCallback(chain(onPressOut, () => { if (!isWebPlatform) setPressed(false); }), [onPressOut, isWebPlatform]);
       // Web equivalents of onPressIn/onPressOut (covers mouse + touch via Pointer Events)
-      const handlePointerDown = useCallback(chain(onPointerDown, () => setPressed(true)), [onPointerDown]);
-      const handlePointerUp = useCallback(chain(onPointerUp, () => setPressed(false)), [onPointerUp]);
-      const handlePointerLeave = useCallback(chain(onPointerLeave, () => setPressed(false)), [onPointerLeave]);
-      const handlePointerCancel = useCallback(chain(onPointerCancel, () => setPressed(false)), [onPointerCancel]);
-      const handleMouseEnter = useCallback(chain(onMouseEnter, () => setHovered(true)), [onMouseEnter]);
-      const handleMouseLeave = useCallback(chain(onMouseLeave, () => setHovered(false)), [onMouseLeave]);
-      const handleFocus = useCallback(chain(onFocus, () => setFocused(true)), [onFocus]);
-      const handleBlur = useCallback(chain(onBlur, () => setFocused(false)), [onBlur]);
+      const handlePointerDown = useCallback(chain(onPointerDown, () => { if (!isWebPlatform) setPressed(true); }), [onPointerDown, isWebPlatform]);
+      const handlePointerUp = useCallback(chain(onPointerUp, () => { if (!isWebPlatform) setPressed(false); }), [onPointerUp, isWebPlatform]);
+      const handlePointerLeave = useCallback(chain(onPointerLeave, () => { if (!isWebPlatform) setPressed(false); }), [onPointerLeave, isWebPlatform]);
+      const handlePointerCancel = useCallback(chain(onPointerCancel, () => { if (!isWebPlatform) setPressed(false); }), [onPointerCancel, isWebPlatform]);
+      const handleMouseEnter = useCallback(chain(onMouseEnter, () => { if (!isWebPlatform) setHovered(true); }), [onMouseEnter, isWebPlatform]);
+      const handleMouseLeave = useCallback(chain(onMouseLeave, () => { if (!isWebPlatform) setHovered(false); }), [onMouseLeave, isWebPlatform]);
+      const handleFocus = useCallback(chain(onFocus, () => { if (!isWebPlatform) setFocused(true); }), [onFocus, isWebPlatform]);
+      const handleBlur = useCallback(chain(onBlur, () => { if (!isWebPlatform) setFocused(false); }), [onBlur, isWebPlatform]);
 
       // ── Style resolution ────────────────────────────────────────────────────
       const combined = extraClasses ? `${baseClasses} ${extraClasses}` : baseClasses;
@@ -93,13 +109,20 @@ export function styled<T extends ComponentType<any>>(
       const resolved = useMemo(() => resolve(combined, config.theme, config.darkMode), [combined, config.theme, config.darkMode]);
 
       const hasInteractive = useMemo(() => hasInteractiveBuckets(resolved), [resolved]);
+      // Only subscribe to width when this element has responsive classes AND
+      // isn't on web (computedStyle is discarded on web regardless of breakpoints).
       const needsWidth = hasResponsiveBuckets(resolved);
-      const width = useConditionalWidth(needsWidth);
+      const width = useConditionalWidth(needsWidth && !isWebPlatform);
       const breakpoints = needsWidth ? getActiveBreakpoints(width) : EMPTY_BREAKPOINTS;
 
-      // On web, CSS classes carry all styles — flatten() output is never applied as inline style.
+      // On web (browser and SSR alike), CSS classes carry all styles — flatten()
+      // output is never applied as inline style. isWebPlatform comes from
+      // getEffectiveIsWeb() (not raw `isWeb`) so SSR and the browser make the
+      // identical choice on the same markup — otherwise one side renders a
+      // `style` attribute the other omits, which React reports as a hydration
+      // mismatch.
       const computedStyle = useMemo(
-        () => isWeb ? ({} as StyleValue) : flatten(resolved, isDark, { pressed, hover: hovered, focus: focused, disabled, checked }, breakpoints),
+        () => isWebPlatform ? ({} as StyleValue) : flatten(resolved, isDark, { pressed, hover: hovered, focus: focused, disabled, checked }, breakpoints),
         [resolved, isDark, pressed, hovered, focused, disabled, checked, width], // eslint-disable-line react-hooks/exhaustive-deps
       );
 
@@ -108,15 +131,18 @@ export function styled<T extends ComponentType<any>>(
         ? Object.assign({}, ...styleProp)
         : styleProp;
 
-      // On web, CSS classes carry all Kbach styles — only forward the user's explicit style prop.
-      // On native, merge computed styles with the user's style prop.
-      const finalStyle: StyleValue = isWeb
+      // On web (browser and SSR alike), CSS classes carry all Kbach styles — only
+      // forward the user's explicit style prop. On native, merge computed styles
+      // with the user's style prop.
+      const finalStyle: StyleValue = isWebPlatform
         ? (extraStyle ?? undefined)
         : (extraStyle ? { ...computedStyle, ...extraStyle } : computedStyle);
 
-      // On web, substitute RN component types with HTML elements so the DOM shows
-      // clean Kbach class names instead of React Native Web's css-view-* hashes.
-      const webTag = isWeb ? getWebTag(Component, rest) : null;
+      // On web (browser and SSR alike), substitute RN component types with HTML
+      // elements so the DOM shows clean Kbach class names instead of React Native
+      // Web's css-view-* hashes. Must match on both sides of hydration — see the
+      // computedStyle comment above.
+      const webTag = isWebPlatform ? getWebTag(Component, rest) : null;
       const effectiveComponent: unknown = webTag ?? Component;
       const componentName: string = (Component as any).displayName ?? (Component as any).name ?? '';
       const effectiveRest: Record<string, unknown> = (webTag && componentName)
@@ -128,7 +154,7 @@ export function styled<T extends ComponentType<any>>(
         ...effectiveRest,
         style: finalStyle,
         // className lets injected CSS rules (group-hover:, before:, print:, etc.) match the element.
-        ...(isWeb && combined ? { className: normalizeClassString(combined) } : {}),
+        ...(isWebPlatform && combined ? { className: normalizeClassString(combined) } : {}),
         // Only attach state-tracking handlers when interactive modifiers are present.
         // Always forward user-provided handlers to avoid silently swallowing them.
         // Gated on isNative, not isWeb: isWeb is false during SSR too (no `window` there),

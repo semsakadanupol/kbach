@@ -1,4 +1,4 @@
-import { resolve, flatten, getConfig, isWeb, type StyleValue, type ResolvedStyle } from './core';
+import { resolve, flatten, getConfig, getEffectiveIsWeb, type StyleValue, type ResolvedStyle } from './core';
 
 // ─── kb() ─────────────────────────────────────────────────────────────────────
 
@@ -27,8 +27,13 @@ export function kb(classString: string, isDark = false): StyleValue | string {
   const config = getConfig();
   const resolved: ResolvedStyle = resolve(classString, config.theme, config.darkMode);
 
-  if (isWeb) {
-    // CSS was injected as a side effect of resolve(). Return the class string.
+  if (getEffectiveIsWeb()) {
+    // On a real browser, CSS was injected as a side effect of resolve() above.
+    // On SSR, resolve() skips injection (no `document`), but the return type must
+    // still be the class string here — a web app calling kb() during SSR expects
+    // a className string back (per the doc comment above), not a native style
+    // object; using raw `isWeb` (false in Node) would silently return the wrong
+    // type for every SSR call.
     return classString;
   }
 

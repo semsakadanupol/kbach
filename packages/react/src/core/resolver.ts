@@ -75,14 +75,25 @@ let _styleEl: HTMLStyleElement | null = null;
 // evicted entry's CSS rule is also removed from the live <style> sheet here —
 // otherwise re-injecting a class that cycled out of the tracking cache would
 // duplicate its rule in the CSSOM and grow the sheet without bound.
+//
+// Rules are matched by tracked index, not by re-comparing cssText: the browser
+// reserializes cssText with its own formatting (e.g. a trailing ";" this codebase
+// never emits), so a string-equality scan against sheet.cssRules[i].cssText would
+// essentially never match, leaving the CSSOM rule behind even after eviction.
+// injectRule() always appends (insertRule at cssRules.length), so this map's
+// recorded indices exactly mirror the live sheet as long as every deletion also
+// shifts down the recorded index of every rule that came after it.
+const _ruleIndexByKey = new Map<string, number>();
+
 function evictInjectedRule(rule: string): void {
+  const idx = _ruleIndexByKey.get(rule);
+  _ruleIndexByKey.delete(rule);
+  if (idx === undefined) return;
   const sheet = _styleEl?.sheet;
   if (!sheet) return;
-  for (let i = 0; i < sheet.cssRules.length; i++) {
-    if (sheet.cssRules[i].cssText === rule) {
-      try { sheet.deleteRule(i); } catch { /* ignore */ }
-      return;
-    }
+  try { sheet.deleteRule(idx); } catch { return; }
+  for (const [key, i] of _ruleIndexByKey) {
+    if (i > idx) _ruleIndexByKey.set(key, i - 1);
   }
 }
 
@@ -109,13 +120,21 @@ function getStyleEl(): HTMLStyleElement {
 
 function injectRule(rule: string): void {
   if (isRuntimeCSSDisabled()) return;
-  if (_injectedRules.has(rule)) return;
-  _injectedRules.set(rule, true);
+  // .get() (not .has()) so a reused rule is refreshed to "most recently used" —
+  // otherwise a class injected once but referenced for the app's whole lifetime
+  // would still be evicted by unrelated churn from newer distinct classes.
+  if (_injectedRules.get(rule)) return;
   try {
     const sheet = getStyleEl().sheet;
-    if (sheet) sheet.insertRule(rule, sheet.cssRules.length);
+    if (sheet) {
+      const idx = sheet.cssRules.length;
+      sheet.insertRule(rule, idx);
+      _ruleIndexByKey.set(rule, idx);
+      _injectedRules.set(rule, true);
+    }
   } catch {
-    // Rule failed CSS validation — skip silently
+    // Rule failed CSS validation — skip silently, and don't mark it injected
+    // so a later, valid re-attempt isn't short-circuited by the cache.
   }
 }
 
@@ -480,6 +499,7 @@ export function flatten(
  */
 export function clearCache(): void {
   _injectedRules.clear();
+  _ruleIndexByKey.clear();
   if (_styleEl) {
     _styleEl.remove();
     _styleEl = null;

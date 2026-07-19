@@ -17,7 +17,7 @@ export type {
 export { defaultTheme, defaultColors } from './theme';
 export { BASE_RESET, RESET_STYLE_ID } from './reset';
 export { LRUCache } from './cache';
-export { isWeb, isNative, toNativeValue, escapeCSSSelector, setResolveTarget } from './platform';
+export { isWeb, isNative, getEffectiveIsWeb, toNativeValue, escapeCSSSelector, setResolveTarget } from './platform';
 export { parseClass, parseClasses, splitClassTokens, normalizeClassString } from './parser';
 export {
   registerModifier,

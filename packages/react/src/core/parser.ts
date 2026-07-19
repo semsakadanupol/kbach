@@ -8,6 +8,25 @@ import { kbachWarn } from './devWarn';
 // They are derived from registry.ts (modifiers) and utilities.ts (utility names)
 // so that adding a new modifier or utility only requires editing ONE file.
 
+// Characters that would let an arbitrary-value string escape the CSS declaration/rule
+// it gets interpolated into when injected via sheet.insertRule() (see resolver.ts):
+// "{"/"}" can close the current block early and open a new selector, ";" can smuggle
+// an extra declaration into the current block, "/*"/"*/" can open or close a comment
+// to swallow or reveal adjacent CSS, and a bare backslash can smuggle any of the above
+// past a naive filter via a CSS numeric escape (e.g. "\7b" for "{"). None of the
+// documented arbitrary-value patterns (calc(), rgba(), url(), grid templates, quoted
+// content) need any of these, so classes carrying them are rejected outright rather
+// than passed through partially sanitized.
+const UNSAFE_ARBITRARY_VALUE = /[{};\\]|\/\*|\*\//;
+
+function isSafeArbitraryValue(value: string): boolean {
+  if (!UNSAFE_ARBITRARY_VALUE.test(value)) return true;
+  if (process.env.NODE_ENV !== 'production') {
+    kbachWarn(`Unsafe arbitrary value rejected: "${value}"`);
+  }
+  return false;
+}
+
 export function parseClass(className: string): ParsedClass | null {
   const trimmed = className.trim();
   if (!trimmed) return null;
@@ -53,6 +72,7 @@ export function parseClass(className: string): ParsedClass | null {
   if (bracketStart > 0 && remaining[bracketStart - 1] === '-' && remaining.endsWith(']')) {
     const utility = remaining.slice(0, bracketStart - 1);
     const value = remaining.slice(bracketStart + 1, -1).replace(/_/g, ' ');
+    if (!isSafeArbitraryValue(value)) return null;
     return { original: trimmed, modifiers, negative, important, utility, value, isArbitrary: true };
   }
   if (remaining.endsWith(']') && bracketStart === -1) {
@@ -65,6 +85,7 @@ export function parseClass(className: string): ParsedClass | null {
   // resolver can return null instead of the fallback first-dash split producing garbage.
   if (remaining.startsWith('[') && remaining.endsWith(']')) {
     const value = remaining.slice(1, -1).replace(/_/g, ' ');
+    if (!isSafeArbitraryValue(value)) return null;
     return { original: trimmed, modifiers, negative, important, utility: '', value, isArbitrary: true };
   }
 

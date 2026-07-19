@@ -1,13 +1,13 @@
 import React, { forwardRef, useState, useCallback, useMemo } from 'react';
 import {
   flatten,
-  isWeb,
   isNative,
+  getEffectiveIsWeb,
   getActiveBreakpoints,
   type ResolvedStyle,
   type StyleValue,
 } from './core';
-import { useGlobalDarkMode } from './useGlobalDarkMode';
+import { useConditionalGlobalDarkMode } from './useGlobalDarkMode';
 import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
 import { hasResponsiveBuckets, stripInternalMarkers, stripWebOnlyProps, chain } from './shared-utils';
 
@@ -69,36 +69,58 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
     },
     ref,
   ) {
-    const isDark = useGlobalDarkMode();
+    // Computed once per render, not once per app — but stable for the app's whole
+    // lifetime (platform never changes at runtime), so it's safe to gate hook
+    // *subscriptions* and state *setters* on it below without violating rules of
+    // hooks (every hook below is still called unconditionally, every render).
+    const isWebPlatform = getEffectiveIsWeb();
 
-    // Only subscribe to width when this element actually has responsive classes.
-    // Pure hover:/pressed:/focus: elements get NOOP_SUB — no resize re-renders.
+    // On web, subscribing to the dark-mode store would re-render this element on
+    // every theme toggle purely to recompute computedStyle — which is always {}
+    // on web (see below), so the value is never actually used there.
+    const isDark = useConditionalGlobalDarkMode(!isWebPlatform);
+
+    // Only subscribe to width when this element actually has responsive classes
+    // AND isn't on web (same reasoning as isDark above — computedStyle is
+    // discarded on web regardless of breakpoints). Pure hover:/pressed:/focus:
+    // elements, or any element on web, get NOOP_SUB — no resize re-renders.
     const needsWidth = hasResponsiveBuckets(resolvedStyle);
-    const width = useConditionalWidth(needsWidth);
+    const width = useConditionalWidth(needsWidth && !isWebPlatform);
     const breakpoints = needsWidth ? getActiveBreakpoints(width) : EMPTY_BREAKPOINTS;
 
     const [pressed, setPressed] = useState(false);
     const [hovered, setHovered] = useState(false);
     const [focused, setFocused] = useState(false);
 
-    const handlePressIn = useCallback(chain(onPressIn, () => setPressed(true)), [onPressIn]);
-    const handlePressOut = useCallback(chain(onPressOut, () => setPressed(false)), [onPressOut]);
+    // On web, real CSS :hover/:focus/:active pseudo-classes already handle the
+    // visual change — this wrapper's own pressed/hovered/focused state only
+    // feeds computedStyle, which is discarded on web. Skipping the setState call
+    // there avoids re-rendering on every hover/focus/press on hover-heavy UIs
+    // (tables, nav, lists) for zero visible effect. isWebPlatform is a primitive
+    // boolean that's stable for the app's whole lifetime, so including it in a
+    // useCallback dep array (alongside the user's handler) doesn't defeat the
+    // memoization the way a freshly-allocated function reference would.
+    const handlePressIn = useCallback(chain(onPressIn, () => { if (!isWebPlatform) setPressed(true); }), [onPressIn, isWebPlatform]);
+    const handlePressOut = useCallback(chain(onPressOut, () => { if (!isWebPlatform) setPressed(false); }), [onPressOut, isWebPlatform]);
     // Web: onPointerDown/onPointerUp drive the same pressed state (covers mouse + touch)
-    const handlePointerDown = useCallback(chain(onPointerDown, () => setPressed(true)), [onPointerDown]);
-    const handlePointerUp = useCallback(chain(onPointerUp, () => setPressed(false)), [onPointerUp]);
-    const handlePointerLeave = useCallback(chain(onPointerLeave, () => setPressed(false)), [onPointerLeave]);
-    const handlePointerCancel = useCallback(chain(onPointerCancel, () => setPressed(false)), [onPointerCancel]);
-    const handleMouseEnter = useCallback(chain(onMouseEnter, () => setHovered(true)), [onMouseEnter]);
-    const handleMouseLeave = useCallback(chain(onMouseLeave, () => setHovered(false)), [onMouseLeave]);
-    const handleFocus = useCallback(chain(onFocus, () => setFocused(true)), [onFocus]);
-    const handleBlur = useCallback(chain(onBlur, () => setFocused(false)), [onBlur]);
+    const handlePointerDown = useCallback(chain(onPointerDown, () => { if (!isWebPlatform) setPressed(true); }), [onPointerDown, isWebPlatform]);
+    const handlePointerUp = useCallback(chain(onPointerUp, () => { if (!isWebPlatform) setPressed(false); }), [onPointerUp, isWebPlatform]);
+    const handlePointerLeave = useCallback(chain(onPointerLeave, () => { if (!isWebPlatform) setPressed(false); }), [onPointerLeave, isWebPlatform]);
+    const handlePointerCancel = useCallback(chain(onPointerCancel, () => { if (!isWebPlatform) setPressed(false); }), [onPointerCancel, isWebPlatform]);
+    const handleMouseEnter = useCallback(chain(onMouseEnter, () => { if (!isWebPlatform) setHovered(true); }), [onMouseEnter, isWebPlatform]);
+    const handleMouseLeave = useCallback(chain(onMouseLeave, () => { if (!isWebPlatform) setHovered(false); }), [onMouseLeave, isWebPlatform]);
+    const handleFocus = useCallback(chain(onFocus, () => { if (!isWebPlatform) setFocused(true); }), [onFocus, isWebPlatform]);
+    const handleBlur = useCallback(chain(onBlur, () => { if (!isWebPlatform) setFocused(false); }), [onBlur, isWebPlatform]);
 
     const { children, disabled, checked, ...restForComponent } = rest as any;
 
     const computedStyle = useMemo(
       () => {
-        // On web, CSS classes carry all styles — flatten() output is never applied as inline style.
-        if (isWeb) return {} as Record<string, unknown>;
+        // On web (browser and SSR alike), CSS classes carry all styles — flatten()
+        // output is never applied as inline style. isWebPlatform comes from
+        // getEffectiveIsWeb() (not raw `isWeb`) so SSR and the browser make the
+        // identical choice on the same markup, avoiding a hydration mismatch.
+        if (isWebPlatform) return {} as Record<string, unknown>;
         const s = flatten(resolvedStyle, isDark, { pressed, hover: hovered, focus: focused, disabled: !!disabled, checked: !!checked }, breakpoints) as Record<string, unknown>;
         // Only strip web-only props for RN components. Native HTML elements ('div' etc.)
         // handle display:grid, gridTemplateColumns, and position:sticky as inline styles.
@@ -109,9 +131,9 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
       [resolvedStyle, isDark, pressed, hovered, focused, width, disabled, checked],
     );
 
-    // On web (browser), CSS classes handle all Kbach styles — only forward user's explicit style.
-    // On native, merge computedStyle with user's style prop.
-    const skipComputedInline = isWeb || (!isNative && typeof Component === 'string');
+    // On web (browser and SSR alike), CSS classes handle all Kbach styles — only
+    // forward user's explicit style. On native, merge computedStyle with user's style prop.
+    const skipComputedInline = isWebPlatform;
     const finalStyle: StyleValue = skipComputedInline
       ? (styleProp ?? undefined)
       : styleProp

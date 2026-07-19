@@ -29,28 +29,14 @@ export function resolveColor(value: string, colors: ThemeColors, isArbitrary: bo
     }
   }
 
-  // Dereference palette aliases: e.g. "orange-6" → "#f47c0c"
-  // Users can set a color to a built-in reference in their config.
-  if (hex && !hex.startsWith('#') && !hex.startsWith('rgb') &&
-      hex !== 'transparent' && hex !== 'currentColor') {
-    if (hex in colors) {
-      const alias = colors[hex];
-      if (typeof alias === 'string') hex = alias;
-      else if (typeof alias === 'object' && '6' in alias) hex = (alias as Record<string, string>)['6'] ?? hex;
-    } else {
-      const aliasLastDash = hex.lastIndexOf('-');
-      if (aliasLastDash > 0) {
-        const aliasColorName = hex.slice(0, aliasLastDash);
-        const aliasShade = hex.slice(aliasLastDash + 1);
-        const aliasScale = colors[aliasColorName];
-        if (aliasScale && typeof aliasScale === 'object') {
-          hex = (aliasScale as Record<string, string>)[aliasShade] ?? null;
-        } else if (typeof aliasScale === 'string') {
-          hex = aliasScale;
-        }
-      }
-    }
-  }
+  // Palette aliases (e.g. a theme color set to "orange-6") are already fully
+  // dereferenced by config.ts's resolveColorRefs() when buildConfig() produces
+  // the theme this function is always called with — so `hex`, once found in
+  // `colors` above, is already a real hex/rgb value or a special keyword
+  // ('transparent', 'currentColor'), never an unresolved alias. (Previously
+  // this function re-dereferenced one hop of alias here too, duplicating
+  // resolveColorRefs()'s job in a way that could silently drift from it —
+  // removed rather than kept as a second implementation of the same behavior.)
 
   if (!hex) return null;
   if (!opacityPart) {
@@ -70,6 +56,12 @@ export function resolveColor(value: string, colors: ThemeColors, isArbitrary: bo
     alpha = parseFloat(opacityPart) / 100;
   }
   if (isNaN(alpha)) return hex;
+  // Clamp out-of-range input (e.g. "bg-blue-6/150", "bg-blue-6/-20") instead of
+  // handing an invalid alpha straight to rgba() — CSS itself would clamp it
+  // silently, but doing it here keeps the resolved value well-formed everywhere
+  // this StyleValue is read (e.g. React Native's style validation, useColors()).
+  if (alpha < 0) alpha = 0;
+  else if (alpha > 1) alpha = 1;
 
   return hexToRgba(hex, alpha);
 }

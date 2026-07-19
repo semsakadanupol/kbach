@@ -23,9 +23,22 @@ import {
   type ResolvedConfig,
 } from './core';
 import { ThemeContext, type ThemeContextValue } from './context';
+import { kbachWarn } from './core/devWarn';
 
 // ─── Storage key ─────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'kbach-theme';
+
+// ─── Multi-provider dev warning ────────────────────────────────────────────
+// isDark/width/screens live in a single process-wide store (see darkModeStore.ts
+// for why: it solves React's "same-props bailout" stale-style problem, which a
+// per-tree React Context store could not). That means two mounted
+// ThemeProviders — nested per-section themes, Storybook, concurrent test
+// renders — write over the same store: whichever committed most recently wins
+// for every consumer, not the nearest ancestor. There's no supported way to
+// scope the store per-tree without losing the bailout fix, so this only warns
+// once so the failure mode isn't silent.
+let _mountedProviderCount = 0;
+let _warnedMultipleProviders = false;
 
 // ─── Persist helpers ──────────────────────────────────────────────────────────
 function loadPersistedMode(): ThemeMode | null {
@@ -128,6 +141,29 @@ export function ThemeProvider({
     configOverride ? buildConfig(configOverride) : getConfig(),
   );
 
+  // Dev-only: warn (once) if more than one ThemeProvider is ever mounted at the
+  // same time — see the _mountedProviderCount comment above for why this can't
+  // just be silently made to work correctly.
+  useEffect(() => {
+    _mountedProviderCount++;
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      _mountedProviderCount > 1 &&
+      !_warnedMultipleProviders
+    ) {
+      _warnedMultipleProviders = true;
+      kbachWarn(
+        'Multiple <ThemeProvider> instances are mounted at once. Dark mode and ' +
+        'responsive width are shared through one global store, so whichever ' +
+        'provider rendered most recently wins for every consumer — nested or ' +
+        'per-section theming is not isolated between providers.',
+      );
+    }
+    return () => {
+      _mountedProviderCount--;
+    };
+  }, []);
+
   // ── Responsive width ───────────────────────────────────────────────────────
   // Web: track window.innerWidth in state so children re-render on resize.
   // Native: windowWidthProp comes from NativeThemeProvider via useWindowDimensions().
@@ -223,6 +259,23 @@ export function ThemeProvider({
     // defaultMode/disablePersistence shouldn't override user interaction.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Cross-tab sync: the `storage` event fires in every OTHER tab/window sharing
+  // the same localStorage origin when one of them writes STORAGE_KEY (persistMode
+  // above) — it never fires in the tab that made the write. Without this, toggling
+  // the theme in one tab leaves every other open tab showing the stale mode until
+  // it's reloaded.
+  useEffect(() => {
+    if (disablePersistence || !isWeb || typeof window === 'undefined') return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEY || e.newValue == null) return;
+      if (e.newValue === 'light' || e.newValue === 'dark' || e.newValue === 'system') {
+        _setMode(e.newValue);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [disablePersistence]);
 
   const setMode = useCallback((next: ThemeMode) => {
     _setMode(next);

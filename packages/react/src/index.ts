@@ -9,6 +9,9 @@ export type { ColorsAPI, ColorScale } from './useColors';
 export { ThemeProvider } from './ThemeProvider';
 export type { ThemeProviderProps } from './ThemeProvider';
 
+// Base browser-default reset as a renderable <style> tag — see KbachReset.tsx
+export { KbachReset } from './KbachReset';
+
 // styled() HOC
 export { styled } from './styled';
 export type { StyledProps } from './styled';

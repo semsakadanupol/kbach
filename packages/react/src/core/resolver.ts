@@ -1,5 +1,5 @@
 import type { ResolvedStyle, StyleValue, ThemeConfig } from './types';
-import { BASE_RESET } from './reset';
+import { BASE_RESET, RESET_STYLE_ID } from './reset';
 import { parseClasses } from './parser';
 import { resolveUtility, isKnownUtility } from './utilities';
 import { LRUCache } from './cache';
@@ -133,7 +133,11 @@ function getGlobalStyleEl(): HTMLStyleElement {
 
 export function injectGlobalStyles(theme: ThemeConfig): void {
   if (typeof document === 'undefined' || isRuntimeCSSDisabled()) return;
-  const rules: string[] = [BASE_RESET];
+  // <KbachReset /> (or a static kbach.css, which also inlines BASE_RESET) may
+  // have already put these rules on the page — skip re-adding them so a
+  // runtime-only app that also renders <KbachReset /> doesn't end up with the
+  // same rule set twice.
+  const rules: string[] = document.getElementById(RESET_STYLE_ID) ? [] : [BASE_RESET];
   const ff = theme.fontFamily;
   if (ff?.sans && ff.sans !== 'System') {
     const family = Array.isArray(ff.sans) ? ff.sans.join(', ') : ff.sans;

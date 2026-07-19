@@ -20,7 +20,7 @@ npm install @kbach/react
 
 ## Setup
 
-Two steps, and you're done — styles work immediately via runtime CSS injection, no build plugin required:
+Step 1 is always required. After that, pick **one** of the two setups below — Quick if you just want styles working, Static CSS if you're shipping to production and/or using SSR.
 
 ### 1. Configure the JSX runtime
 
@@ -39,25 +39,30 @@ Don't also pass `jsxImportSource` to `@vitejs/plugin-react` (or any other bundle
 
 Alternatives if you can't use tsconfig: a per-file `/** @jsxImportSource @kbach/react */` pragma comment, or `['@babel/preset-react', { runtime: 'automatic', importSource: '@kbach/react' }]` in `babel.config.js` for non-Vite/non-SWC toolchains.
 
-### 2. Wrap your app
+### 2a. Quick setup (runtime CSS injection)
+
+No build plugin, works with any bundler (Vite, webpack, Turbopack, Metro-for-web, …). Styles are generated and injected into a `<style>` tag by client-side JS the moment `ThemeProvider` mounts.
 
 ```jsx
-import { ThemeProvider } from '@kbach/react';
+import { ThemeProvider, KbachReset } from '@kbach/react';
 
 export default function Root() {
   return (
     <ThemeProvider defaultMode="system">
+      <KbachReset />
       <App />
     </ThemeProvider>
   );
 }
 ```
 
-That's the whole setup. `@kbach/react` ships its own `"use client"` directive, so this works directly in a Next.js App Router Server Component tree too — no manual client wrapper needed.
+`<KbachReset />` renders Kbach's base browser-default reset (borderless buttons/inputs, visible checkboxes/radios, no arrow-less `<select>`, etc. — see [CSS resets](#css-resets) below) as a plain `<style>` tag instead of waiting for the client-side injector. On a plain client-rendered app (Vite CSR, Create React App, …) it's a nice-to-have, since the injector already runs before first paint there. **On SSR** (Next.js, React Router framework mode, Remix, …) it's the difference between correct styling from the first byte and a flash of raw browser defaults (default button border, unstyled `<select>`, serif-ish fonts, …) that only clears up once hydration finishes — the server has no JS to run the injector, but it *can* render this component, since it's just JSX. Put it as high in `<head>` as your framework allows; the snippet above (right after `ThemeProvider` opens) works everywhere `<head>` isn't directly reachable.
 
-### Optional: static CSS for production (Vite only)
+That's the whole setup. `@kbach/react` ships its own `"use client"` directive, so both of these work directly in a Next.js App Router Server Component tree — no manual client wrapper needed.
 
-By default, styles are generated and injected into a `<style>` tag by client-side JS at runtime — simple, but it means server-rendered HTML has no matching CSS until hydration runs (a brief flash of unstyled content on first paint). If you're on a Vite-based project and want zero-runtime-cost CSS instead, add the `@kbach/react/vite` plugin:
+### 2b. Static CSS setup (recommended for production / SSR, Vite only)
+
+Zero runtime cost: a Vite plugin scans your source at build time and writes real CSS into a file you import, so styles ship as an ordinary stylesheet with no client-side generation step at all — nothing to flash-of-unstyled before. This is the better choice for any Vite-based SSR framework (React Router, SvelteKit-style meta-frameworks, etc.) over the Quick setup + `<KbachReset />` combination, since it covers *every* class, not just the base reset.
 
 ```ts
 // vite.config.ts
@@ -88,15 +93,26 @@ Then create an empty `kbach.css` anywhere in your project and import it once in 
 import './kbach.css';
 ```
 
+```jsx
+import { ThemeProvider } from '@kbach/react';
+// No <KbachReset /> needed — kbach.css already includes the same base reset.
+
+export default function Root() {
+  return (
+    <ThemeProvider defaultMode="system">
+      <App />
+    </ThemeProvider>
+  );
+}
+```
+
 The plugin scans your source files and writes generated CSS between the `/* kbach:start */`/`/* kbach:end */` markers. Importing `kbach.css` automatically disables runtime injection — all styles come from the file instead. On HMR, only the changed file is rescanned; unchanged tokens reuse cached CSS.
 
 While it's scanning, the plugin also indexes every `.css`/`.scss`/`.sass`/`.less` file under the same directories and warns in the terminal (not the browser console) for any class that's neither a real Kbach utility nor defined anywhere in those stylesheets — likely a typo. A class you've defined yourself elsewhere (CSS Modules, styled-components, a third-party component's class) is recognized as soon as something in the project literally has a `.that-class-name` rule, so it won't get flagged just because Kbach itself doesn't know it. Each warning includes a `file:line:column` location that most terminals (VS Code's integrated terminal included) turn into a clickable link straight to that class.
 
 ## Next.js
 
-Step 1 (tsconfig `jsxImportSource`) and step 2 (`ThemeProvider`) above apply as-is — Next.js's SWC compiler reads `jsxImportSource` from `tsconfig.json` the same way Vite does, and `@kbach/react` shipping its own `"use client"` directive means `ThemeProvider` works directly in a Server Component tree (e.g. the App Router root `layout.tsx`) with no wrapper of your own needed.
-
-The "Optional: static CSS" step above doesn't apply — Next.js builds with webpack/Turbopack, not Vite, so there's currently no static-CSS build step for it. Styles fall back to runtime injection, which means the same first-paint FOUC note above applies: expect a brief flash of unstyled content before hydration completes. This is a known limitation, not a per-project bug to work around.
+Step 1 (tsconfig `jsxImportSource`) above applies as-is — Next.js's SWC compiler reads `jsxImportSource` from `tsconfig.json` the same way Vite does. For step 2, use **Quick setup (2a)** — Next.js builds with webpack/Turbopack, not Vite, so the static-CSS plugin (2b) doesn't apply. Render `<KbachReset />` once in the root App Router `layout.tsx` (inside `<head>`, or right after `<ThemeProvider>` opens) so Server Component HTML gets the base reset without waiting on hydration; `@kbach/react` shipping its own `"use client"` directive means both `ThemeProvider` and `KbachReset` work directly in that Server Component tree with no wrapper of your own needed.
 
 ## React Router
 
@@ -116,6 +132,8 @@ export default defineConfig({
 `jsxImportSource` in `tsconfig.json` (step 1 above) is all that's needed for the JSX runtime — React Router's Vite plugin reads it the same way plain Vite does. `include`'s default scan dirs (`['src', 'app', 'pages', 'components', 'views', 'layouts']`) already cover React Router's `app/` routes convention if you're using the static-CSS plugin.
 
 If you do add `kbach()` to `vite.config.ts` and it detects both plugins active together, it prints a warning explaining exactly this at dev-server startup — so this doesn't have to be a silent, hard-to-diagnose blank page.
+
+Framework mode is SSR, so skipping the static-CSS plugin (2b) in favor of Quick setup (2a) means the initial server-rendered HTML has no CSS at all until hydration — render `<KbachReset />` in `root.tsx`'s `<Layout>` (inside `<head>`, alongside `<Links />`/`<Meta />`) if you go that route, otherwise expect raw browser defaults (e.g. the native `<button>` border) on first paint.
 
 **Library mode (client-only, `createBrowserRouter`/`<BrowserRouter>`):** no SSR involved — set it up exactly like any other Vite + React app. Since there's no meta-framework Vite plugin providing JSX handling here, you likely do need `@vitejs/plugin-react({ jsxImportSource: '@kbach/react' })` (or rely on tsconfig alone — Vite's default esbuild-based transform reads it too).
 
@@ -355,7 +373,7 @@ Opacity modifier: `bg-blue-6/50` (50% alpha), `bg-blue-6/[0.15]` (arbitrary)
 
 ## CSS resets
 
-Included automatically in `kbach.css` and in runtime injection:
+Included automatically in `kbach.css`, in runtime injection, and in `<KbachReset />` (all three render the exact same rules — pick whichever setup you're using from [Setup](#setup) above):
 
 - `*, *::before, *::after { box-sizing: border-box; border-width: 0; border-style: solid; border-color: currentColor }` — border utilities like `border-2 border-gray-4` work on any element without also needing `border-solid`
 - `body { margin: 0; padding: 0 }`
@@ -363,8 +381,9 @@ Included automatically in `kbach.css` and in runtime injection:
 - `p`, `ul`, `ol` — margin and list style cleared
 - `a` — color and underline cleared (inherit from parent)
 - `img`, `video`, `svg` — `display: block; max-width: 100%`
-- `input`, `textarea`, `select`, `button`, `fieldset` — appearance, border, padding cleared
-- `table` — `border-collapse: collapse`
+- `button`, text-like `input`s (not checkbox/radio), `textarea` — appearance, border, padding cleared, so `border-`/`bg-`/`rounded-`/`p-` utilities fully restyle them
+- `input[type=checkbox]`, `input[type=radio]`, `select` — native rendering kept (stripping it would hide the checkmark/dot/dropdown-arrow with nothing to replace them); only typography and spacing are normalized, and checkbox/radio/range get `accent-color: currentColor` so they still pick up your text color instead of the OS default blue
+- `fieldset`, `table` — padding/margin/border-collapse cleared
 
 ## Configuration
 

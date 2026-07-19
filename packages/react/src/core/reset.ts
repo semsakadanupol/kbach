@@ -1,3 +1,8 @@
+// Shared between <KbachReset /> (renders it as a real DOM id during SSR/CSR)
+// and the runtime injector (resolver.ts skips re-injecting BASE_RESET when it
+// finds this id already in the document, so the two setups don't double it up).
+export const RESET_STYLE_ID = 'kbach-reset';
+
 export const BASE_RESET = [
   // border-style: solid means border-N utilities show a visible border without an extra border-solid class.
   // border-width: 0 keeps all elements borderless by default.

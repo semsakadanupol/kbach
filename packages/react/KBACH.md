@@ -29,14 +29,15 @@ export default { plugins: [react({ jsxImportSource: '@kbach/react' })] };
 
 ### Wrap app
 ```jsx
-import { ThemeProvider } from '@kbach/react';
-<ThemeProvider defaultMode="system"><App /></ThemeProvider>
+import { ThemeProvider, KbachReset } from '@kbach/react';
+<ThemeProvider defaultMode="system"><KbachReset /><App /></ThemeProvider>
 ```
+`<KbachReset />` renders Kbach's base browser-default reset (borderless button/input, visible checkbox/radio, no arrow-less `<select>`, `a`/`h1-h6`/`p`/`ul`/`ol`/`img` normalized, etc.) as a real `<style>` tag — needed for SSR under runtime-only setups (no JS runs server-side, but this is just JSX so it still renders), a no-op-but-harmless nice-to-have for plain CSR. Skip it if using static `kbach.css` (below) — that file already includes the same reset, and the runtime injector auto-detects `<KbachReset />` and skips re-adding it either way, so having both is harmless too.
 
 ### Next.js
 - tsconfig `jsxImportSource` setup above applies as-is (SWC reads it like Vite does).
-- No Vite plugin / static `kbach.css` for Next.js (webpack/Turbopack, not Vite) — falls back to runtime CSS injection, which only runs in the browser, so expect a brief flash of unstyled content on first paint before hydration. Known limitation.
-- `@kbach/react`'s compiled output ships its own `"use client"` directive (`dist/index.js`, `dist/jsx-runtime.js`, `dist/jsx-dev-runtime.js`), so App Router Server Components can use `className`, `styled()`, hooks, and `<ThemeProvider>` directly — no manual `'use client'` wrapper needed.
+- No Vite plugin / static `kbach.css` for Next.js (webpack/Turbopack, not Vite) — always runtime-only. Render `<KbachReset />` once in the root App Router `layout.tsx` (in `<head>`, or right after `<ThemeProvider>` opens) so Server Component HTML has the base reset without waiting on hydration; without it, expect a flash of raw browser defaults (native button border, arrow-less `<select>`, etc.) on first paint until hydration completes. Utility classes beyond the base reset still wait on hydration either way — this is a known limitation of the runtime-only path, not a per-project bug.
+- `@kbach/react`'s compiled output ships its own `"use client"` directive (`dist/index.js`, `dist/jsx-runtime.js`, `dist/jsx-dev-runtime.js`), so App Router Server Components can use `className`, `styled()`, hooks, `<ThemeProvider>`, and `<KbachReset>` directly — no manual `'use client'` wrapper needed.
 
 ### React Router
 - Framework mode (v7+, SSR): do NOT add `@vitejs/plugin-react` — `reactRouter()` already includes its own JSX transform + Fast Refresh integration. Adding both makes each inject its own Fast Refresh preamble into the same module, crashing the page (`Identifier 'RefreshRuntime' has already been declared`) before React hydrates — every class on the page silently fails to style because the app never mounts. tsconfig `jsxImportSource` alone is enough; `reactRouter()` reads it the same way plain Vite does:
@@ -45,7 +46,7 @@ import { ThemeProvider } from '@kbach/react';
   import { kbach } from '@kbach/react/vite'; // omit if not using static CSS
   export default { plugins: [kbach(), reactRouter()] };
   ```
-  Default scan dirs already include `app/`. Static `kbach.css` avoids the Next.js FOUC issue since there's no runtime-injection gap.
+  Default scan dirs already include `app/`. Static `kbach.css` (2b) is the recommended setup here since it's SSR — it avoids the runtime-injection FOUC gap entirely, for every class, not just the base reset. If skipping it in favor of runtime-only, render `<KbachReset />` in `root.tsx`'s `<Layout>` at minimum.
 - Library mode (client-only, no meta-framework Vite plugin involved): identical to any Vite + React app — the vite.config.ts section above.
 
 ---

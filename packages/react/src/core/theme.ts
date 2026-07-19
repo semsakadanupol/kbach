@@ -355,4 +355,11 @@ export const defaultTheme: ThemeConfig = {
     xl: 1280,  // desktop
     '2xl': 1536,
   },
+
+  // Empty by default — the 4 built-in presets (spin/ping/pulse/bounce) are handled
+  // directly in the `animate` resolver, not through this theme table. This exists so
+  // user-defined ones (kbach.config.js theme.extend.keyframes/animation) merge in
+  // alongside them without needing to redeclare the built-ins.
+  keyframes: {},
+  animation: {},
 };

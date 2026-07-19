@@ -58,6 +58,23 @@ export interface ThemeConfig {
   flex: Record<string, number | string>;
   shadow: Record<string, StyleValue>;
   screens: Record<string, string | number>;
+  /**
+   * Custom @keyframes, web only. Each key is a keyframe name, its value maps
+   * percentage/from/to selectors to a plain CSS declaration object (camelCase
+   * properties, same shape as an inline style object):
+   *   keyframes: { wiggle: { '0%, 100%': { transform: 'rotate(-3deg)' }, '50%': { transform: 'rotate(3deg)' } } }
+   * Referenced from `animation` below, or directly via animate-[wiggle_1s_ease-in-out].
+   */
+  keyframes: Record<string, Record<string, StyleValue>>;
+  /**
+   * Named animation shorthands built on `keyframes` above, referenced via
+   * animate-{name} (e.g. animate-wiggle):
+   *   animation: { wiggle: 'wiggle 1s ease-in-out infinite' }
+   * The first word must match a `keyframes` key so its @keyframes rule can be
+   * injected alongside the animation — a name with no matching keyframes entry
+   * still sets the `animation` CSS property, it just won't animate anything.
+   */
+  animation: Record<string, string>;
   [key: string]: unknown;
 }
 

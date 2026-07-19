@@ -318,6 +318,14 @@ Wrap any value in `[]` to use it directly.
 <div className="will-change-[transform,opacity]" />
 ```
 
+### Arbitrary properties (web only)
+No utility prefix — `[property:value]` on its own, for a CSS property with no named utility:
+```jsx
+<div className="[mask-type:luminance]" />
+<div className="[--my-var:10px]" />   {/* custom property */}
+```
+Underscores → spaces like any other arbitrary value. Only the FIRST `:` splits property from value, so `[background:url(http://x/a.png)]` keeps the URL's own `:` intact.
+
 ---
 
 ## Negative Values
@@ -667,6 +675,9 @@ animate-spin        rotate 360deg loop
 animate-ping        scale + fade ping
 animate-pulse       opacity pulse
 animate-bounce      translate-y bounce
+animate-{name}      custom, from theme.extend.animation (see Theme Configuration)
+animate-[value]     arbitrary animation shorthand, e.g. animate-[wiggle_2s_ease-in-out]
+                    — auto-injects theme.extend.keyframes[name] if the first word matches one
 
 transition          transition: all 150ms ease (web only)
 duration-{n}        transitionDuration: 75 100 150 200 300 500 700 1000
@@ -867,6 +878,14 @@ module.exports = {
       colors: { brand: { 6: '#6366f1' } },
       spacing: { 18: 72, 22: 88 },
       fontSize: { '10xl': 160 },
+      // Custom @keyframes (web only) — declaration values are plain CSS strings.
+      // Reference by name from `animation`, then use that name as animate-{name}.
+      keyframes: {
+        wiggle: { '0%, 100%': { transform: 'rotate(-3deg)' }, '50%': { transform: 'rotate(3deg)' } },
+      },
+      animation: {
+        wiggle: 'wiggle 1s ease-in-out infinite',
+      },
     },
   },
 

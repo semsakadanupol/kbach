@@ -362,6 +362,18 @@ Nested groups need names, or the inner element reacts to whichever `.group` is n
 <div className="text-[18px]" />
 ```
 
+### Arbitrary properties (web only)
+
+For the rare CSS property with no named utility, write `[property:value]` directly — no utility prefix:
+
+```jsx
+<div className="[mask-type:luminance]" />
+<div className="[-webkit-line-clamp:3]" />
+<div className="[--my-var:10px]" />       {/* CSS custom property */}
+```
+
+Underscores become spaces, same as any other arbitrary value: `[background:url(/a.png)_no-repeat]`. Only the first `:` splits the property from the value, so a value that itself contains a colon (a URL's `http://`) still comes through intact.
+
 ## Color system
 
 12-shade scale — 1 lightest, 12 darkest. Use as `bg-blue-6`, `text-gray-10`, `border-red-4/50`.
@@ -406,6 +418,15 @@ module.exports = {
       sans:        'Inter, sans-serif',
       'sans-bold': 'Inter_700Bold, sans-serif',
     },
+    // Custom @keyframes (web only) — reference by name from `animation`,
+    // then use that name as animate-{name}. Declaration values are plain
+    // CSS strings, same idea as a style object but for a keyframe step.
+    keyframes: {
+      wiggle: { '0%, 100%': { transform: 'rotate(-3deg)' }, '50%': { transform: 'rotate(3deg)' } },
+    },
+    animation: {
+      wiggle: 'wiggle 1s ease-in-out infinite',
+    },
   },
 
   plugins: [
@@ -421,6 +442,12 @@ module.exports = {
 ```
 
 Setting `fontFamily.sans` to anything other than `'System'` auto-injects `body { font-family: … }`.
+
+```jsx
+<div className="animate-wiggle" />
+{/* Override duration/timing/repeat inline, keeps the same wiggle @keyframes: */}
+<div className="animate-[wiggle_2s_ease-in-out]" />
+```
 
 Color aliases:
 

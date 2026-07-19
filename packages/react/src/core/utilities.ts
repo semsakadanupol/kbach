@@ -661,6 +661,41 @@ const BORDER_SIDE_PROPS: Record<string, [string, string]> = {
   'border-l': ['borderLeftWidth', 'borderLeftColor'],
 };
 
+// ── Custom @keyframes support (kbach.config.js theme.extend.keyframes) ────────
+// A small, self-contained camelCase → kebab-case declaration formatter — NOT the
+// shared one in resolver.ts, since resolver.ts already imports FROM this file and
+// importing back would be circular. Keyframe step values are expected as plain
+// strings (theme.extend.keyframes' own JSDoc documents this) — unlike resolver.ts's
+// styleValueToCSS, this does not guess a "px" suffix for bare numbers, since most
+// keyframe declarations (transform, opacity, color) don't want one anyway; write
+// `top: '10px'` explicitly for the rare property that does.
+function keyframeDeclToCSS(decl: Record<string, string | number>): string {
+  return Object.entries(decl)
+    .map(([prop, val]) => `${prop.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${val}`)
+    .join('; ');
+}
+
+function buildKeyframeCSS(name: string, steps: Record<string, StyleValue>): string {
+  const body = Object.entries(steps)
+    .map(([selector, decl]) => `${selector} { ${keyframeDeclToCSS(decl as Record<string, string | number>)} }`)
+    .join(' ');
+  return `@keyframes ${name} { ${body} }`;
+}
+
+// Shared by the animate-{name} (theme.extend.animation lookup) and animate-[...]
+// (arbitrary value) branches: an animation shorthand's first word is always its
+// keyframe name (`animation: 'wiggle 1s ease-in-out infinite'` → 'wiggle'), so if
+// that name has a matching theme.extend.keyframes entry, inject its @keyframes rule
+// via the existing __keyframe marker mechanism the 4 built-in presets already use.
+// No match (a plain CSS-global keyframe name the user defined outside Kbach, or a
+// typo) just sets `animation` with nothing to animate — never a hard error, since
+// there's no reliable way to distinguish "typo" from "intentionally external" here.
+function buildAnimationValue(animation: string, keyframes: Record<string, Record<string, StyleValue>>): StyleValue {
+  const name = animation.trim().split(/\s+/, 1)[0];
+  const steps = name ? keyframes?.[name] : undefined;
+  return steps ? { animation, __keyframe: buildKeyframeCSS(name, steps) } as StyleValue : { animation } as StyleValue;
+}
+
 const RESOLVERS: Record<string, Resolver> = {
   // ── Background ─────────────────────────────────────────────────────────────
   bg: ({ value, isArbitrary }, { colors }) => {
@@ -1194,6 +1229,28 @@ const RESOLVERS: Record<string, Resolver> = {
     return value in presets ? { content: presets[value] } : null;
   },
 
+  // ── Arbitrary CSS property (web-only): [property:value] with no utility prefix ──
+  // e.g. [mask-type:luminance], [--my-var:10px]. parser.ts already isolates this case
+  // as utility: '' — it's ALSO how a stray, prefix-less negative bracket ("-[10px]",
+  // presumably a typo) parses, which is why this only fires when the arbitrary value
+  // itself contains a "property:value" pair; anything else (no colon) still resolves
+  // to null exactly as before this resolver existed, rather than guessing a property.
+  //
+  // Only the FIRST colon splits property from value — the value itself may contain
+  // more colons (a URL's "http://…") and must stay intact: [background:url(http://x/a.png)].
+  // camelToKebab() in resolver.ts is a no-op on an already-kebab-case (or "--"-prefixed
+  // custom property) key, so it can be used as the style object key as-written with no
+  // extra case conversion — it only needs to look like a plausible CSS property name.
+  '': ({ value, isArbitrary }) => {
+    if (!getEffectiveIsWeb() || !isArbitrary || !value) return null;
+    const colonIdx = value.indexOf(':');
+    if (colonIdx <= 0) return null;
+    const prop = value.slice(0, colonIdx).trim();
+    const cssValue = value.slice(colonIdx + 1).trim();
+    if (!cssValue || !/^(--[\w-]+|[a-zA-Z-]+)$/.test(prop)) return null;
+    return { [prop]: cssValue } as StyleValue;
+  },
+
   // ── Outline extended (web-only) ───────────────────────────────────────────
   outline: ({ value, isArbitrary }, { colors }) => {
     if (!getEffectiveIsWeb()) return null;
@@ -1362,9 +1419,9 @@ const RESOLVERS: Record<string, Resolver> = {
   // Each variant injects a @keyframes rule once via the __keyframe marker.
   // resolver.ts detects __keyframe, injects the rule, then strips the marker
   // so it never reaches element inline styles.
-  animate: ({ value, isArbitrary }) => {
+  animate: ({ value, isArbitrary }, theme) => {
     if (!getEffectiveIsWeb()) return null;
-    if (isArbitrary) return { animation: value.replace(/_/g, ' ') } as StyleValue;
+    if (isArbitrary) return buildAnimationValue(value.replace(/_/g, ' '), theme.keyframes);
 
     type AnimDef = { animation: string; __keyframe?: string };
     const defs: Record<string, AnimDef> = {
@@ -1386,8 +1443,12 @@ const RESOLVERS: Record<string, Resolver> = {
         __keyframe:  '@keyframes kb-bounce { 0%, 100% { transform: translateY(-25%); animation-timing-function: cubic-bezier(0.8,0,1,1) } 50% { transform: none; animation-timing-function: cubic-bezier(0,0,0.2,1) } }',
       },
     };
-    const def = defs[value];
-    return def ? def as StyleValue : null;
+    if (value in defs) return defs[value] as StyleValue;
+
+    // Custom animation from kbach.config.js theme.extend.animation, e.g.
+    // animation: { wiggle: 'wiggle 1s ease-in-out infinite' } — referenced as animate-wiggle.
+    const custom = theme.animation?.[value];
+    return custom ? buildAnimationValue(custom, theme.keyframes) : null;
   },
 
   // ── Line-clamp (web-only) ─────────────────────────────────────────────────

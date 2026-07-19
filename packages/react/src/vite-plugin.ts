@@ -626,9 +626,24 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
 
     // When any JS/TS file imports kbach.css, prepend a disableRuntimeCSS() call
     // so styles come solely from the static stylesheet — no duplicate injection.
+    //
+    // Anchored to the START of a source line (^\s*, with the m flag) rather than a
+    // bare \bimport\b anywhere in the file — disableRuntimeCSS() sets a globalThis
+    // flag with no way to re-enable it, so a false match here doesn't just misfire
+    // once, it silently kills ALL runtime CSS injection for the rest of that page's
+    // JS lifetime, including on completely unrelated components. A real import
+    // statement is always the first token on its line (give or take whitespace);
+    // this same text appearing as part of a STRING — e.g. a docs site's own code
+    // sample literally showing `import "./kbach.css";` as example text, which is
+    // exactly what happened here — is never positioned that way, since something
+    // always precedes it syntactically (a quote, JSX braces, an array bracket, …).
     transform(code, id) {
       if (!/\.(tsx?|jsx?|mjs?)$/.test(id)) return;
-      if (!/\bimport\b[^;]*['"].*kbach\.css['"]/i.test(code)) return;
+      if (!/^\s*import\b[^;]*['"][^'"]*kbach\.css['"]/im.test(code)) return;
+      // Logged unconditionally (not just on a suspected false match) since this flag
+      // has no re-enable path — if runtime CSS ever mysteriously stops working, this
+      // line in the dev server's own terminal output is the trail back to why.
+      warn(`disableRuntimeCSS() auto-triggered by an import in ${id.replace(/\\/g, '/')}`);
       return {
         code: `import { disableRuntimeCSS } from '@kbach/react';\ndisableRuntimeCSS();\n${code}`,
         map: null,

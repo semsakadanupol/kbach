@@ -1735,7 +1735,17 @@ const RESOLVERS: Record<string, Resolver> = {
   'translate-x': ({ value, negative, isArbitrary }, { spacing }) => {
     const v = resolveSpacing(value, negative, spacing, isArbitrary);
     if (v === null) return null;
-    if (getEffectiveIsWeb()) return { transform: `translateX(${v})` };
+    // resolveSpacing() returns a bare number for anything on the theme spacing
+    // scale (translate-x-2 -> 8), meant to be set as a top-level style property —
+    // styleValueToCSS() appends "px" to those automatically. Interpolating straight
+    // into a transform function string instead skips that step entirely: the raw
+    // number renders as unitless CSS ("translateX(8)"), which browsers treat as an
+    // invalid value and drop the WHOLE transform declaration, not just this part of
+    // it — every translate-x on the numeric spacing scale, positive or negative
+    // (anything but 0, which happens to already be valid either way), silently did
+    // nothing. Only a string value (a %, an arbitrary "calc(...)", etc.) is already
+    // valid CSS text and can be used as-is.
+    if (getEffectiveIsWeb()) return { transform: `translateX(${typeof v === 'number' ? `${v}px` : v})` };
     if (typeof v === 'string') {
       const n = parseFloat(v);
       return isNaN(n) ? null : { transform: [{ translateX: n }] };
@@ -1745,7 +1755,8 @@ const RESOLVERS: Record<string, Resolver> = {
   'translate-y': ({ value, negative, isArbitrary }, { spacing }) => {
     const v = resolveSpacing(value, negative, spacing, isArbitrary);
     if (v === null) return null;
-    if (getEffectiveIsWeb()) return { transform: `translateY(${v})` };
+    // See translate-x above for why the number->px conversion is needed here.
+    if (getEffectiveIsWeb()) return { transform: `translateY(${typeof v === 'number' ? `${v}px` : v})` };
     if (typeof v === 'string') {
       const n = parseFloat(v);
       return isNaN(n) ? null : { transform: [{ translateY: n }] };

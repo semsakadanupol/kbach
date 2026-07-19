@@ -262,6 +262,60 @@ function toNumericScreens(screens: Record<string, string | number>): Record<stri
 // Bug #15 fix: handle ternaries, template literals, clsx/cn call patterns,
 // and array-of-strings in addition to plain string literals.
 
+/**
+ * Handle the body of a template literal (the text between its backticks):
+ * scan quoted strings INSIDE each ${...} interpolation too — a ternary or
+ * `cond && '…'` there commonly holds real class names, e.g.
+ * `${isActive ? 'active' : ''}` — then push the static parts outside any
+ * ${...} as a plain class string. Recurses through pushClassLikeStrings so a
+ * quoted string (or another template literal) nested inside an interpolation
+ * is scanned the same way, at any depth.
+ *
+ * Regexes are created fresh on every call rather than hoisted to module
+ * scope — pushClassLikeStrings and pushTemplateLiteralBody call each other
+ * recursively, and a shared `g`-flagged RegExp's mutable lastIndex would get
+ * clobbered by the inner call before the outer call's own while-loop reads
+ * it again, corrupting the iteration into an infinite loop.
+ */
+function pushTemplateLiteralBody(body: string, into: Set<string>): void {
+  const interpolationRe = /\$\{(?:[^{}]|\{[^{}]*\})*\}/g;
+  let im: RegExpExecArray | null;
+  while ((im = interpolationRe.exec(body)) !== null) {
+    pushClassLikeStrings(im[0], into);
+  }
+  pushTokens(body.replace(/\$\{(?:[^{}]|\{[^{}]*\})*\}/g, ' '), into);
+}
+
+/**
+ * Push every class-like string found in `text` into `into`. Scans for quoted
+ * segments requiring the OPENING and CLOSING delimiter to be the SAME quote
+ * character (via the \1 backreference) — a naive /["'`]…["'`]/ pattern
+ * matches ANY quote character at both ends independently, so a template
+ * literal's backticks mixed with a nested "double-quoted" ternary branch
+ * (`${cond ? "a" : "b"}`) would pair a backtick with an unrelated quote
+ * elsewhere in the text, and everything in between (including stray
+ * `?`/`:`/`&&` punctuation) gets tokenized as garbage "class names".
+ *
+ * A backtick-delimited match is a template literal, not a plain string — its
+ * content is handled by pushTemplateLiteralBody instead of being tokenized
+ * as-is, otherwise `${...}` interpolation syntax ends up split on whitespace
+ * into more garbage tokens right alongside the real class names.
+ *
+ * Shared by JSX expression blocks, clsx()-style calls, and (via
+ * pushTemplateLiteralBody's own recursion) template literals nested inside
+ * either of those or inside each other. See pushTemplateLiteralBody's
+ * comment for why the regex is created fresh here rather than hoisted.
+ */
+function pushClassLikeStrings(text: string, into: Set<string>): void {
+  const quotedStringRe = /(["'`])((?:(?!\1).)*)\1/g;
+  let qm: RegExpExecArray | null;
+  while ((qm = quotedStringRe.exec(text)) !== null) {
+    const [, quote, content] = qm;
+    if (quote === '`') pushTemplateLiteralBody(content, into);
+    else pushTokens(content, into);
+  }
+}
+
 function extractClassStrings(code: string): string[] {
   const found = new Set<string>();
 
@@ -286,8 +340,7 @@ function extractClassStrings(code: string): string[] {
       i++;
     }
     jsxExprRe.lastIndex = i + 1;
-    const innerStrings = block.match(/["'`]([^"'`]{1,2000})["'`]/g) ?? [];
-    for (const s of innerStrings) pushTokens(s.slice(1, -1), found);
+    pushClassLikeStrings(block, found);
   }
 
   // 3. clsx / cn / classnames / cx call — paren-depth tracking handles nested calls.
@@ -305,24 +358,37 @@ function extractClassStrings(code: string): string[] {
       i++;
     }
     clsxCallRe.lastIndex = i + 1;
-    const innerStrings = block.match(/["'`]([^"'`]{1,2000})["'`]/g) ?? [];
-    for (const s of innerStrings) pushTokens(s.slice(1, -1), found);
+    pushClassLikeStrings(block, found);
   }
 
-  // 4. Template literal class strings: `bg-red-500 ${cond ? 'p-4' : 'p-2'} text-white`
+  // 4. Any other template literal in the file: `bg-red-500 ${cond ? 'p-4' : 'p-2'}`.
+  // A blanket scan, so one already inside a className={}/kb={}/clsx() block
+  // above gets processed twice — harmless, `found` is a Set. This catches
+  // template literals used some other way (e.g. assigned to a variable that's
+  // later spread into className, or a styled()-style tagged usage) that the
+  // more targeted scans above don't look for.
   const templateRe = /`([^`]{1,2000})`/g;
-  while ((m = templateRe.exec(code)) !== null) {
-    // Handle one level of nested braces in template expressions: ${a ? 'x' : 'y'}
-    const staticParts = m[1].replace(/\$\{(?:[^{}]|\{[^{}]*\})*\}/g, ' ');
-    pushTokens(staticParts, found);
-  }
+  while ((m = templateRe.exec(code)) !== null) pushTemplateLiteralBody(m[1], found);
 
   return [...found];
 }
 
+// Never a real class name, regardless of how it was extracted:
+//  - contains $, {, or } — leftover ${...} interpolation syntax the
+//    extraction couldn't fully resolve (e.g. multi-level-nested template
+//    literals, beyond what the regex-based interpolation matcher balances)
+//  - ends with a bare "-" — the static remainder of a token whose OTHER half
+//    was a ${...} interpolation (`` `nested-${size}` `` leaves "nested-"
+//    once the dynamic part is blanked out; genuinely unresolvable statically,
+//    not a typo). Only the trailing dash, not a leading one — Kbach's
+//    negative-value syntax (`-mt-4`, `-mx-2`) legitimately starts with "-".
+//  - entirely ternary/logical-operator/quote punctuation ("?", ":", "&&",
+//    `""}`) left over from a mismatched or partially-resolved expression
+const NOT_A_CLASS_NAME_RE = /[${}]|-$|^[?:&|!"'=<>]+$/;
+
 function pushTokens(str: string, into: Set<string>): void {
   for (const tok of splitClassTokens(str)) {
-    if (tok) into.add(tok);
+    if (tok && !NOT_A_CLASS_NAME_RE.test(tok)) into.add(tok);
   }
 }
 

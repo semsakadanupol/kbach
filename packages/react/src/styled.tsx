@@ -7,7 +7,7 @@ import React, {
   type ForwardRefExoticComponent,
   type ReactElement,
 } from 'react';
-import { resolve, flatten, isWeb, normalizeClassString, getActiveBreakpoints, type StyleValue, type ResolvedStyle } from './core';
+import { resolve, flatten, isWeb, isNative, normalizeClassString, getActiveBreakpoints, type StyleValue, type ResolvedStyle } from './core';
 import { useTheme } from './context';
 import { useGlobalDarkMode } from './useGlobalDarkMode';
 import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
@@ -131,23 +131,26 @@ export function styled<T extends ComponentType<any>>(
         ...(isWeb && combined ? { className: normalizeClassString(combined) } : {}),
         // Only attach state-tracking handlers when interactive modifiers are present.
         // Always forward user-provided handlers to avoid silently swallowing them.
-        // onPressIn/onPressOut are forwarded on web too (not just native) since
-        // react-native-web components rely on receiving them directly — but only
-        // when effectiveComponent is an actual component, never a literal HTML tag
-        // string ('div', 'a', …). React DOM warns "Unknown event handler property"
-        // for onPressIn/onPressOut on a host element even when the value is
-        // undefined — the check is on the prop KEY being present at all, not its
-        // value — so the key must be omitted entirely for string components.
-        ...(isWeb
+        // Gated on isNative, not isWeb: isWeb is false during SSR too (no `window` there),
+        // and onPressIn/onPressOut must stay excluded there as well — SSR is exactly where
+        // getWebTag() above is skipped (it's isWeb-gated), so effectiveComponent may still be
+        // a non-string RN-style reference server-side, and this used to forward onPressIn/
+        // onPressOut to it unconditionally in that case (isWeb ? ... : ...'s false branch
+        // covered both native AND SSR). onPressIn/onPressOut are RN-only prop names — a
+        // non-string effectiveComponent on the web/SSR side is just as likely to be an
+        // ordinary web component (React Router's <Link>, Next.js's <Link>, any custom
+        // wrapper) as an actual react-native-web primitive, and "not a string" alone isn't a
+        // reliable signal either way. Forwarding them made React DOM warn "Unknown event
+        // handler property" the moment any such component got an interactive modifier
+        // (hover:, active:, …), which is the common case, not the exception.
+        ...(!isNative
           ? (hasInteractive
               ? {
                   onPointerDown: handlePointerDown, onPointerUp: handlePointerUp,
                   onPointerLeave: handlePointerLeave, onPointerCancel: handlePointerCancel,
-                  ...(typeof effectiveComponent !== 'string' ? { onPressIn, onPressOut } : {}),
                 }
               : {
                   onPointerDown, onPointerUp, onPointerLeave, onPointerCancel,
-                  ...(typeof effectiveComponent !== 'string' ? { onPressIn, onPressOut } : {}),
                 })
           : (hasInteractive
               ? { onPressIn: handlePressIn, onPressOut: handlePressOut }

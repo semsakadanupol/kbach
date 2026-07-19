@@ -1183,6 +1183,17 @@ const RESOLVERS: Record<string, Resolver> = {
     return offsets[value] ? { textUnderlineOffset: offsets[value] } : null;
   },
 
+  // ── Content (web-only — for before:/after: pseudo-elements, which don't exist on native) ──
+  // Arbitrary value carries its own quotes from the bracket syntax (content-['*'] parses to
+  // the literal string 'you can see it' quotes included), so it passes straight through as a
+  // valid `content: '*'` CSS value with no extra wrapping needed.
+  content: ({ value, isArbitrary }) => {
+    if (!getEffectiveIsWeb()) return null;
+    if (isArbitrary) return { content: value };
+    const presets: Record<string, string> = { none: 'none' };
+    return value in presets ? { content: presets[value] } : null;
+  },
+
   // ── Outline extended (web-only) ───────────────────────────────────────────
   outline: ({ value, isArbitrary }, { colors }) => {
     if (!getEffectiveIsWeb()) return null;

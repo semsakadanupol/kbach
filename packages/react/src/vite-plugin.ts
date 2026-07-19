@@ -283,7 +283,15 @@ function pushTemplateLiteralBody(body: string, into: Set<string>): void {
   while ((im = interpolationRe.exec(body)) !== null) {
     pushClassLikeStrings(im[0], into);
   }
-  pushTokens(body.replace(/\$\{(?:[^{}]|\{[^{}]*\})*\}/g, ' '), into);
+  // Blank interpolations with a literal "$" (via a function replacer, so String.replace
+  // never treats it as a $-pattern token), not a space. A space would split a token that's
+  // fused to the interpolation on one or both sides — `` `bg-${c}-6` `` — into independent
+  // pieces ("bg-", "-6"): the trailing-dash prefix is caught by NOT_A_CLASS_NAME_RE below,
+  // but the leading-dash suffix isn't (real negative utilities, `-mt-4`, also start with
+  // "-", so a bare leading dash can't be filtered on its own). A "$" instead keeps the whole
+  // thing as ONE token ("bg-$-6"), which NOT_A_CLASS_NAME_RE already drops as a unit via its
+  // existing `$` check — no separate fragments escape.
+  pushTokens(body.replace(/\$\{(?:[^{}]|\{[^{}]*\})*\}/g, () => '$'), into);
 }
 
 /**
@@ -319,10 +327,12 @@ function pushClassLikeStrings(text: string, into: Set<string>): void {
 function extractClassStrings(code: string): string[] {
   const found = new Set<string>();
 
-  // 1. Simple string attrs: className="..." or kb="..."
-  const simpleRe = /(?:className|kb)=["']([^"']+)["']/g;
+  // 1. Simple string attrs: className="..." or kb="...". Same-quote backreference
+  // (not a bare [^"']+) so a double-quoted attribute containing an apostrophe —
+  // className="... bg-[url('a.png')] ..." — doesn't truncate at the embedded '.
+  const simpleRe = /(?:className|kb)=(["'])((?:(?!\1).)*)\1/g;
   let m: RegExpExecArray | null;
-  while ((m = simpleRe.exec(code)) !== null) pushTokens(m[1], found);
+  while ((m = simpleRe.exec(code)) !== null) pushTokens(m[2], found);
 
   // 2. JSX expression block: className={...} — brace-tracking to handle nested {}.
   // The old regex ([^}]{1,500}) stopped at the first } inside a member expression

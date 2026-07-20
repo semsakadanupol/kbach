@@ -167,18 +167,132 @@ function buildColorVarMap(
   return { replacements, declarations };
 }
 
+// CSS properties whose value comes straight from the theme's numeric spacing
+// scale (as opposed to a value that just happens to be the same number of
+// pixels for an unrelated reason, like a font-size or border-radius preset
+// landing on the same number — those are deliberately NOT included here, so
+// this only ever substitutes a spacing-scale usage, not a coincidental one).
+// translateX/translateY are handled separately below since their value lives
+// inside a transform function call, not a bare "property: value" declaration.
+const SPACING_PROPS = new Set([
+  'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+  'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+  'gap', 'column-gap', 'row-gap',
+  'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+  'top', 'right', 'bottom', 'left',
+  'flex-basis',
+]);
+
+// Same replacements/declarations shape as buildColorVarMap, for the same reason
+// (see formatKbachCSS, where both maps get merged into one substitution pass).
+// Negative spacing values (-mt-4 etc.) are deliberately left as literal
+// "-16px" rather than var()-ified — CSS can't negate a var() without wrapping
+// it in calc(-1 * var(--x)), and that's a large enough legibility trade-off
+// (against the exact "easy to read" goal this exists for) that it's left as a
+// known gap rather than implemented speculatively.
+function buildSpacingVarMap(
+  theme: ThemeConfig,
+  usedCSS: string,
+): { replacements: Map<string, string>; declarations: Map<string, string> } {
+  // First key wins if the scale ever has two names for the same pixel value —
+  // matches buildColorVarMap's equivalent (silent, deterministic) tie-break.
+  const pxToKey = new Map<number, string>();
+  for (const [key, val] of Object.entries(theme.spacing ?? {})) {
+    if (typeof val === 'number' && !pxToKey.has(val)) pxToKey.set(val, key);
+  }
+
+  const replacements = new Map<string, string>();
+  const declarations = new Map<string, string>();
+  const varNameFor = (key: string) => `--spacing-${key.replace(/\./g, '_')}`;
+
+  const declRe = /([a-z-]+): (\d+(?:\.\d+)?)px/g;
+  let m: RegExpExecArray | null;
+  while ((m = declRe.exec(usedCSS)) !== null) {
+    const [, prop, numStr] = m;
+    if (!SPACING_PROPS.has(prop!)) continue;
+    const key = pxToKey.get(parseFloat(numStr!));
+    if (key === undefined) continue;
+    const varName = varNameFor(key);
+    replacements.set(`${prop}: ${numStr}px`, `${prop}: var(${varName})`);
+    declarations.set(varName, `${numStr}px`);
+  }
+
+  const transformRe = /(translateX|translateY)\((\d+(?:\.\d+)?)px\)/g;
+  while ((m = transformRe.exec(usedCSS)) !== null) {
+    const [, fn, numStr] = m;
+    const key = pxToKey.get(parseFloat(numStr!));
+    if (key === undefined) continue;
+    const varName = varNameFor(key);
+    replacements.set(`${fn}(${numStr}px)`, `${fn}(var(${varName}))`);
+    declarations.set(varName, `${numStr}px`);
+  }
+
+  return { replacements, declarations };
+}
+
+// ── CSS pretty-printer ────────────────────────────────────────────────────────
+//
+// Every rule this file ever builds comes out of buildClassCSSRules()/
+// styleValueToCSS() as one compact line ('.flex { display: flex }') — fine for
+// sheet.insertRule() (the runtime injection path this same string doubles as
+// input for), completely unreadable as a hand-inspectable file. Reformats into
+// standard one-declaration-per-line CSS as a pure post-processing pass, so the
+// compact format (and therefore the runtime path) is untouched.
+//
+// A hand-rolled character scan rather than a real CSS parser is safe here
+// specifically because parser.ts's isSafeArbitraryValue() already rejects any
+// arbitrary value containing "{", "}", or ";" before it can ever reach a
+// resolver — every such character in this function's input is guaranteed to be
+// a real block/declaration boundary, never part of a value (e.g. content: '*'
+// can't smuggle one in either, since content is one of the properties that
+// arbitrary-value filter guards).
+function prettifyCSS(css: string): string {
+  const out: string[] = [];
+  let depth = 0;
+  let current = '';
+
+  for (const ch of css) {
+    if (ch === '{') {
+      const selector = current.trim();
+      if (selector) out.push(`${'  '.repeat(depth)}${selector} {`);
+      depth++;
+      current = '';
+    } else if (ch === '}') {
+      const decl = current.trim();
+      if (decl) out.push(`${'  '.repeat(depth)}${decl};`);
+      depth = Math.max(0, depth - 1);
+      out.push(`${'  '.repeat(depth)}}`);
+      current = '';
+    } else if (ch === ';') {
+      const decl = current.trim();
+      if (decl) out.push(`${'  '.repeat(depth)}${decl};`);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  const trailing = current.trim();
+  if (trailing) out.push(trailing);
+
+  return out.join('\n');
+}
+
 // ── CSS formatter ─────────────────────────────────────────────────────────────
 
 function formatKbachCSS(tokenCSS: Map<string, string>, theme: ThemeConfig, responsiveRe: RegExp): string {
   const allRaw = [...tokenCSS.values()].filter(Boolean).join('\n');
-  const { replacements, declarations } = buildColorVarMap(theme, allRaw);
+  const colorVars = buildColorVarMap(theme, allRaw);
+  const spacingVars = buildSpacingVarMap(theme, allRaw);
+  const replacements = new Map([...colorVars.replacements, ...spacingVars.replacements]);
+  const declarations = new Map([...colorVars.declarations, ...spacingVars.declarations]);
 
   // Replace longest patterns first — a hex value starting with '#' can only ever
   // appear as a literal substring of another as a same-position prefix (e.g. '#fff'
-  // inside '#ffffff'), and each rgba(...) prefix is anchored to its own exact
-  // "rgba(" + channel-numbers text so it can't cross-match a different color's
-  // triplet either way — but sorting longest-first costs nothing and keeps this
-  // safe even if a future color scheme introduces a case this reasoning missed.
+  // inside '#ffffff'), and each rgba(...)/property-declaration/transform-function
+  // pattern is anchored to enough surrounding structure (the "rgba(" prefix, the
+  // full "property: " text, the "translateX(" wrapper) that it can't cross-match
+  // a different value either way — but sorting longest-first costs nothing and
+  // keeps this safe even if a future case this reasoning missed slips through.
   const sortedReplacements = [...replacements].sort(([a], [b]) => b.length - a.length);
 
   function applyVars(css: string): string {
@@ -192,7 +306,7 @@ function formatKbachCSS(tokenCSS: Map<string, string>, theme: ThemeConfig, respo
     if (!css) continue;
     const label = classifyToken(token, responsiveRe);
     if (!groups.has(label)) groups.set(label, []);
-    groups.get(label)!.push(applyVars(css));
+    groups.get(label)!.push(prettifyCSS(applyVars(css)));
   }
 
   const out: string[] = ['/* Generated by Kbach — do not edit */'];
@@ -204,13 +318,13 @@ function formatKbachCSS(tokenCSS: Map<string, string>, theme: ThemeConfig, respo
   }
 
   const globalCSS = buildThemeGlobal(theme);
-  if (globalCSS) out.push(`\n/* Global */\n${globalCSS}`);
+  if (globalCSS) out.push(`\n/* Global */\n${prettifyCSS(globalCSS)}`);
 
   for (const label of GROUP_ORDER) {
     const items = groups.get(label) ?? [];
     if (!items.length) continue;
     out.push(`\n/* ${label} */`);
-    out.push(items.join('\n'));
+    out.push(items.join('\n\n'));
   }
 
   return out.join('\n');

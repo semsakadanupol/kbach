@@ -20,9 +20,9 @@ npm install @kbach/react
 
 ## Setup
 
-Two steps: configure the JSX runtime (always), then pick one styling method.
+One step is always required, then pick **one** of the two setups below — they're independent, don't mix them.
 
-### Step 1 — JSX runtime
+### Step 1 — JSX runtime (always required)
 
 **tsconfig.json:**
 
@@ -32,17 +32,17 @@ Two steps: configure the JSX runtime (always), then pick one styling method.
 
 That's the only setting needed — Vite, Next.js, and React Router all read it. Don't *also* set `jsxImportSource` on a bundler plugin (e.g. `@vitejs/plugin-react`); one source of truth avoids conflicts.
 
-### Step 2 — Styling method
-
-Not sure which? Check your framework first:
+### Which setup do I need?
 
 | Framework | Use |
 |---|---|
-| Next.js | **Quick setup** — Static CSS doesn't apply (webpack/Turbopack, not Vite) |
-| React Router, framework mode | **Static CSS setup** — and skip `@vitejs/plugin-react`, see note below |
-| Vite, React Router library mode, CRA, other | Either — Quick is faster to try, Static CSS is zero-cost for production |
+| Next.js | **[Runtime setup](#runtime-setup)** — Static CSS doesn't apply (webpack/Turbopack, not Vite) |
+| React Router, framework mode | **[Static CSS setup](#static-css-setup)** — and skip `@vitejs/plugin-react`, see note in that section |
+| Vite, React Router library mode, CRA, other | Either — Runtime is faster to try, Static CSS is zero-cost for production |
 
-#### Quick setup — any bundler, client-side CSS injection
+## Runtime setup
+
+Client-side CSS injection — works with any bundler (Vite, webpack, Turbopack, Metro-for-web, …), no build plugin. This is the whole setup:
 
 ```jsx
 import { ThemeProvider, KbachReset } from '@kbach/react';
@@ -57,11 +57,15 @@ export default function Root() {
 }
 ```
 
-Done. `<KbachReset />` renders the base reset (see [CSS resets](#css-resets)) as real markup instead of waiting on client JS — matters most for SSR, where it avoids a flash of unstyled browser defaults before hydration. `@kbach/react` ships its own `"use client"` directive, so this works in a Next.js Server Component tree with no wrapper needed — in Next.js, render it once in the root `layout.tsx`.
+That's it — done. `<KbachReset />` renders the base reset (see [CSS resets](#css-resets)) as real markup instead of waiting on client JS — matters most for SSR, where it avoids a flash of unstyled browser defaults before hydration. `@kbach/react` ships its own `"use client"` directive, so this works in a Next.js Server Component tree with no wrapper needed — in Next.js, render it once in the root `layout.tsx`.
 
-#### Static CSS setup — Vite only, zero runtime cost
+Don't also set up Static CSS below in the same app — pick one.
 
-A build-time plugin writes real CSS into a file you import — nothing generated client-side.
+## Static CSS setup
+
+Vite only. A build-time plugin writes real CSS into a file you import at build time — nothing generated client-side, zero runtime cost. Three pieces, all required:
+
+**1. Add the plugin:**
 
 ```ts
 // vite.config.ts
@@ -70,6 +74,8 @@ import { kbach } from '@kbach/react/vite';
 
 export default defineConfig({ plugins: [kbach()] });
 ```
+
+**2. Create an empty stylesheet with the markers, and import it once:**
 
 ```css
 /* src/kbach.css */
@@ -82,16 +88,17 @@ export default defineConfig({ plugins: [kbach()] });
 import './kbach.css';
 ```
 
+**3. Wrap your app — no `<KbachReset />` here, `kbach.css` already includes the reset:**
+
 ```jsx
 import { ThemeProvider } from '@kbach/react';
-// No <KbachReset /> — kbach.css already includes the reset.
 
 export default function Root() {
   return <ThemeProvider defaultMode="system"><App /></ThemeProvider>;
 }
 ```
 
-The plugin scans your source at build time and writes CSS between the markers — importing `kbach.css` auto-disables runtime injection. It also warns in the terminal (with a clickable `file:line`) for any class it doesn't recognize as a real utility or an existing CSS rule elsewhere in the project — usually a typo.
+Done. The plugin scans your source at build time and writes CSS between the markers — importing `kbach.css` auto-disables runtime injection, so there's no double-styling between this and the Runtime setup above. It also warns in the terminal (with a clickable `file:line`) for any class it doesn't recognize as a real utility or an existing CSS rule elsewhere in the project — usually a typo.
 
 **React Router framework mode:** don't add `@vitejs/plugin-react` — `reactRouter()` already provides JSX handling, and both together crash the page (`Identifier 'RefreshRuntime' has already been declared`).
 
@@ -99,7 +106,7 @@ The plugin scans your source at build time and writes CSS between the markers �
 // vite.config.ts
 import { reactRouter } from '@react-router/dev/vite';
 import { defineConfig } from 'vite';
-import { kbach } from '@kbach/react/vite'; // omit if using Quick setup instead
+import { kbach } from '@kbach/react/vite'; // omit if using Runtime setup instead
 
 export default defineConfig({ plugins: [kbach(), reactRouter()] });
 ```

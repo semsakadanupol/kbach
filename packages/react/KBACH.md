@@ -46,7 +46,7 @@ import { ThemeProvider, KbachReset } from '@kbach/react';
   import { kbach } from '@kbach/react/vite'; // omit if not using static CSS
   export default { plugins: [kbach(), reactRouter()] };
   ```
-  Default scan dirs already include `app/`. Static `kbach.css` (2b) is the recommended setup here since it's SSR — it avoids the runtime-injection FOUC gap entirely, for every class, not just the base reset. If skipping it in favor of runtime-only, render `<KbachReset />` in `root.tsx`'s `<Layout>` at minimum.
+  Default scan dirs already include `app/`. The Static CSS setup is recommended here since it's SSR — it avoids the runtime-injection FOUC gap entirely, for every class, not just the base reset. If skipping it in favor of Runtime setup, render `<KbachReset />` in `root.tsx`'s `<Layout>` at minimum.
 - Library mode (client-only, no meta-framework Vite plugin involved): identical to any Vite + React app — the vite.config.ts section above.
 
 ---

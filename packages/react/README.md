@@ -59,6 +59,8 @@ export default function Root() {
 
 That's it — done. `<KbachReset />` renders the base reset (see [CSS resets](#css-resets)) as real markup instead of waiting on client JS — matters most for SSR, where it avoids a flash of unstyled browser defaults before hydration. `@kbach/react` ships its own `"use client"` directive, so this works in a Next.js Server Component tree with no wrapper needed — in Next.js, render it once in the root `layout.tsx`.
 
+Using a custom `kbach.config.js`? Pass it to `ThemeProvider` too — see [Wiring the config in](#wiring-the-config-in--required-for-both-setups).
+
 Don't also set up Static CSS below in the same app — pick one.
 
 ## Static CSS setup
@@ -99,6 +101,8 @@ export default function Root() {
 ```
 
 Done. The plugin scans your source at build time and writes CSS between the markers — importing `kbach.css` auto-disables runtime injection, so there's no double-styling between this and the Runtime setup above. It also warns in the terminal (with a clickable `file:line`) for any class it doesn't recognize as a real utility or an existing CSS rule elsewhere in the project — usually a typo.
+
+Using a custom `kbach.config.js`? It needs to be wired in **twice** here — once to `kbach()` above (step 1) so the generated CSS reflects it, and once to `ThemeProvider` (step 3) so dark mode/`useColors()`/animations do too. See [Wiring the config in](#wiring-the-config-in--required-for-both-setups) — easy to only do one and have the other silently fall back to defaults.
 
 **React Router framework mode:** don't add `@vitejs/plugin-react` — `reactRouter()` already provides JSX handling, and both together crash the page (`Identifier 'RefreshRuntime' has already been declared`).
 
@@ -302,6 +306,35 @@ module.exports = {
 - Custom `@keyframes` are used as `animate-{name}`, and can be overridden inline: `animate-[wiggle_2s_ease-in-out]`
 - Colors can alias each other: `primary: 'blue-6'`, `brand: { 6: 'primary' }`
 - Runtime update: `updateConfig({ extend: { ... } }); clearCache();`
+
+### Wiring the config in — required for both setups
+
+`kbach.config.js` isn't picked up automatically. It has to be imported and passed in explicitly, and **where** depends on which of the two things it affects:
+
+- **Runtime** — dark mode strategy, `useColors()`, custom `@keyframes`/`animation`, and (for SSR) the default-font fallback rendered before your stylesheet takes over. Needed by **both** [Runtime setup](#runtime-setup) and [Static CSS setup](#static-css-setup) — pass it to `ThemeProvider`:
+
+  ```jsx
+  import { ThemeProvider } from '@kbach/react';
+  import kbachConfig from '../kbach.config';
+
+  <ThemeProvider defaultMode="system" config={kbachConfig}>
+    <App />
+  </ThemeProvider>
+  ```
+
+  (Equivalent to calling `updateConfig(kbachConfig)` once before anything renders — `ThemeProvider`'s `config` prop does this for you and keeps the global store in sync if it ever changes.)
+
+- **Build-time** — what the Vite plugin actually scans your source against and generates CSS for. Only relevant to [Static CSS setup](#static-css-setup) — pass it to the plugin itself:
+
+  ```ts
+  // vite.config.ts
+  import { kbach } from '@kbach/react/vite';
+  import kbachConfig from './kbach.config';
+
+  export default defineConfig({ plugins: [kbach(kbachConfig)] });
+  ```
+
+Skipping the runtime one is an easy mistake under Static CSS setup specifically — the generated `kbach.css` will look correct (it *does* have your customizations baked in), while dark mode, `useColors()`, and custom animations silently fall back to Kbach's defaults instead of your config, since nothing ever told the running app what you'd customized.
 
 ## Full reference
 

@@ -22,7 +22,7 @@ import { BASE_RESET } from './core/reset';
 import { buildConfig } from './core/config';
 import { generateClassCSS } from './core/resolver';
 import { splitClassTokens, parseClass } from './core/parser';
-import { resolveUtility } from './core/utilities';
+import { resolveUtility, parseHexRgb } from './core/utilities';
 import type { FrameworkConfig, ThemeConfig } from './core/types';
 
 // This module runs in Node.js (Vite build time). Force web mode so that
@@ -110,45 +110,80 @@ function classifyToken(token: string, responsiveRe: RegExp): string {
 // Set, then check membership in O(1) per color entry. Previous code used
 // usedCSS.includes(val) which was O(colors × cssLength).
 
-function buildColorVarMap(theme: ThemeConfig, usedCSS: string): Map<string, string> {
+// Returns two maps: `replacements` (literal text to find in the generated CSS ->
+// what to replace it with) and `declarations` (the :root variable name -> its value).
+// Kept separate because a hex value's replacement text IS its declared value
+// (`var(--color-x)` referencing `--color-x: #e5e5e5`), but the rgba() case's
+// replacement (`rgba(var(--color-x-rgb),`) and declared value (`229,229,229`) are
+// different strings — `--color-x-rgb` needs to hold the bare comma-separated
+// channel numbers so that substituting it back into `rgba(var(--color-x-rgb), 0.5)`
+// re-forms valid CSS (`rgba(229,229,229, 0.5)`), not the reverse.
+function buildColorVarMap(
+  theme: ThemeConfig,
+  usedCSS: string,
+): { replacements: Map<string, string>; declarations: Map<string, string> } {
   // Build the hex-values-in-use set in one regex pass.
   const usedHexValues = new Set<string>();
   const hexRe = /#[0-9a-fA-F]{3,8}\b/g;
   let hm: RegExpExecArray | null;
   while ((hm = hexRe.exec(usedCSS)) !== null) usedHexValues.add(hm[0].toLowerCase());
 
-  const map = new Map<string, string>();
+  const replacements = new Map<string, string>();
+  const declarations = new Map<string, string>();
   for (const [name, shades] of Object.entries(theme.colors ?? {})) {
     const entries: [string, unknown][] = typeof shades === 'string'
       ? [[name, shades]]
       : Object.entries(shades as Record<string, unknown>).map(([s, v]) => [`${name}-${s}`, v]);
     for (const [fullName, val] of entries) {
-      if (typeof val === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(val)) {
-        if (usedHexValues.has(val.toLowerCase())) {
-          map.set(val, `--color-${fullName}`);
-        }
+      if (typeof val !== 'string' || !/^#[0-9a-fA-F]{3,8}$/.test(val)) continue;
+
+      // Plain hex usage — border-color, and anything else resolveColor() returns
+      // unwrapped (no opacity composition needed). e.g. `.border-x { border-color: #e5e5e5 }`.
+      if (usedHexValues.has(val.toLowerCase())) {
+        const varName = `--color-${fullName}`;
+        replacements.set(val, `var(${varName})`);
+        declarations.set(varName, val);
+      }
+
+      // withOpacityVar()'s rgba(r,g,b,var(--bg-opacity,1)) form — bg-*/text-* utilities,
+      // which need the base color composable with a separate runtime opacity variable.
+      // resolveColor()/withOpacityVar() already converted the hex to decimal channels by
+      // the time this function ever sees the CSS text, so the hex-scan above can never
+      // find these — they need their own scan for the "r,g,b," triplet exactly as
+      // withOpacityVar() emits it (packages/react/src/core/utilities.ts), anchored to
+      // "rgba(" so an unrelated color's channel numbers can never accidentally match
+      // (each rgba( only ever starts one specific color's triplet).
+      const rgb = parseHexRgb(val);
+      if (!rgb) continue;
+      const triplet = `${rgb[0]},${rgb[1]},${rgb[2]}`;
+      const rgbaPrefix = `rgba(${triplet},`;
+      if (usedCSS.includes(rgbaPrefix)) {
+        const rgbVarName = `--color-${fullName}-rgb`;
+        replacements.set(rgbaPrefix, `rgba(var(${rgbVarName}),`);
+        declarations.set(rgbVarName, triplet);
       }
     }
   }
-  return map;
+  return { replacements, declarations };
 }
 
 // ── CSS formatter ─────────────────────────────────────────────────────────────
 
 function formatKbachCSS(tokenCSS: Map<string, string>, theme: ThemeConfig, responsiveRe: RegExp): string {
   const allRaw = [...tokenCSS.values()].filter(Boolean).join('\n');
-  const colorVars = buildColorVarMap(theme, allRaw);
+  const { replacements, declarations } = buildColorVarMap(theme, allRaw);
 
-  // Replace longest hex values first — every hex value starts with '#' followed
-  // only by hex digits, so the only way one can appear as a literal substring of
-  // another is as a same-position prefix (e.g. '#fff' inside '#ffffff'). Sorting
-  // descending by length ensures the longer value is already substituted before
-  // the shorter one's search runs, so it can no longer corrupt it.
-  const sortedColorVars = [...colorVars].sort(([a], [b]) => b.length - a.length);
+  // Replace longest patterns first — a hex value starting with '#' can only ever
+  // appear as a literal substring of another as a same-position prefix (e.g. '#fff'
+  // inside '#ffffff'), and each rgba(...) prefix is anchored to its own exact
+  // "rgba(" + channel-numbers text so it can't cross-match a different color's
+  // triplet either way — but sorting longest-first costs nothing and keeps this
+  // safe even if a future color scheme introduces a case this reasoning missed.
+  const sortedReplacements = [...replacements].sort(([a], [b]) => b.length - a.length);
 
   function applyVars(css: string): string {
-    for (const [val, varName] of sortedColorVars)
-      css = css.split(val).join(`var(${varName})`);
+    for (const [pattern, replacement] of sortedReplacements)
+      css = css.split(pattern).join(replacement);
     return css;
   }
 
@@ -162,9 +197,9 @@ function formatKbachCSS(tokenCSS: Map<string, string>, theme: ThemeConfig, respo
 
   const out: string[] = ['/* Generated by Kbach — do not edit */'];
 
-  if (colorVars.size > 0) {
+  if (declarations.size > 0) {
     out.push('\n:root {');
-    for (const [val, varName] of colorVars) out.push(`  ${varName}: ${val};`);
+    for (const [varName, val] of declarations) out.push(`  ${varName}: ${val};`);
     out.push('}');
   }
 

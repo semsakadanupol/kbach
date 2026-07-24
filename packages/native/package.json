@@ -1,16 +1,15 @@
 {
   "name": "@kbach/native",
-  "version": "0.6.20",
+  "version": "0.6.21",
   "description": "Single-package Kbach install for React Native and Expo — includes core, components, Babel plugin, and Metro config",
   "source": "./src/index.ts",
   "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "source": "./src/index.ts",
-      "import": "./dist/index.mjs",
+      "import": "./dist/index.js",
       "require": "./dist/index.js"
     },
     "./jsx-runtime": {

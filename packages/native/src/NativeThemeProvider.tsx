@@ -29,6 +29,17 @@ declare const require: (id: string) => any;
  * JS). A require() inside the function body only ever runs when
  * NativeThemeProvider actually renders — i.e. inside the real Metro/Hermes
  * runtime, where require() is always available and react-native loads fine.
+ *
+ * This is also why package.json's "." export has no separate ESM entry:
+ * tsup/esbuild can't emit a real `require()` inside ESM output — it rewrites
+ * it to a `__require` shim (`typeof require !== "undefined" ? require : …`).
+ * That shim still resolves to Metro's real require function at runtime, but
+ * Metro's bundler only registers a module's dependencies by statically
+ * finding literal `require("name")` calls in its source — `__require(...)`
+ * doesn't match, so "react-native" is never added to the compiled module's
+ * dependency map and Metro throws "Requiring unknown module" at runtime. The
+ * CJS build's plain `require('react-native')` call doesn't have this
+ * problem, so both "import" and "require" conditions point at dist/index.js.
  */
 export function NativeThemeProvider(props: ThemeProviderProps): React.JSX.Element {
   const { useColorScheme, useWindowDimensions } = require('react-native') as typeof import('react-native');

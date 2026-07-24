@@ -1,28 +1,27 @@
 {
   "name": "@kbach/react",
-  "version": "0.6.22",
+  "version": "0.6.23",
   "description": "React / React Native components and hooks for the Kbach framework",
   "source": "./src/index.ts",
   "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "source": "./src/index.ts",
-      "import": "./dist/index.mjs",
+      "import": "./dist/index.js",
       "require": "./dist/index.js"
     },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
       "source": "./src/jsx-runtime.tsx",
-      "import": "./dist/jsx-runtime.mjs",
+      "import": "./dist/jsx-runtime.js",
       "require": "./dist/jsx-runtime.js"
     },
     "./jsx-dev-runtime": {
       "types": "./dist/jsx-dev-runtime.d.ts",
       "source": "./src/jsx-dev-runtime.tsx",
-      "import": "./dist/jsx-dev-runtime.mjs",
+      "import": "./dist/jsx-dev-runtime.js",
       "require": "./dist/jsx-dev-runtime.js"
     },
     "./types": {

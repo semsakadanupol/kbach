@@ -16,6 +16,19 @@ export interface ThemeContextValue {
   config: ResolvedConfig;
 }
 
+// package.json's "." export deliberately points BOTH the "import" and
+// "require" conditions at the same dist/index.js. Metro picks the "import" vs
+// "require" condition per individual call site (based on whether that
+// specific line used `import` or `require()`, not one choice for the whole
+// bundle) — so a dual ESM/CJS build would give <ThemeProvider> (reached via
+// @kbach/native's CJS require()) and a component's own `import { useTheme }
+// from '@kbach/react'` two DIFFERENT copies of this module, each with its own
+// createContext() call. useTheme() would then read a Context that no
+// Provider in the tree ever writes to, throwing this hook's "must be called
+// inside a <ThemeProvider>" error even with a <ThemeProvider> correctly
+// wrapping the app root. Web bundlers (Vite) don't have this per-call-site
+// split, so this only costs @kbach/react's web build some ESM tree-shaking —
+// a fine trade for React Native not silently getting two Contexts.
 export const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function useTheme(): ThemeContextValue {

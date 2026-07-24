@@ -1,6 +1,6 @@
 {
   "name": "@kbach/react",
-  "version": "0.6.23",
+  "version": "0.6.24",
   "description": "React / React Native components and hooks for the Kbach framework",
   "source": "./src/index.ts",
   "main": "./dist/index.js",

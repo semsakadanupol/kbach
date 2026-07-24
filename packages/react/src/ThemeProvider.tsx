@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -9,6 +10,7 @@ import React, {
 import { useSyncExternalStore } from './useSyncExternalStoreShim';
 import {
   isWeb,
+  isNative,
   getConfig,
   buildConfig,
   updateConfig,
@@ -24,6 +26,12 @@ import {
 } from './core';
 import { ThemeContext, type ThemeContextValue } from './context';
 import { kbachWarn } from './core/devWarn';
+
+// useLayoutEffect warns "does nothing on the server" during Node.js SSR
+// (isWeb false, isNative false there — see core/platform.ts). Real browsers
+// and React Native both support it safely, so only SSR needs the useEffect
+// fallback.
+const useIsomorphicLayoutEffect = isWeb || isNative ? useLayoutEffect : useEffect;
 
 // ─── Storage key ─────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'kbach-theme';
@@ -295,7 +303,17 @@ export function ThemeProvider({
   syncGlobalDarkMode(isDark);
 
   // ── Apply to DOM and notify global store subscribers ───────────────────────
-  useEffect(() => {
+  // useLayoutEffect (not useEffect): this is what fires setGlobalDarkMode(),
+  // which notifies DarkWrapper/InteractiveWrapper's useSyncExternalStore
+  // subscribers and triggers THEIR re-render — a separate render pass from
+  // ThemeProvider's own (React Context propagates synchronously within
+  // ThemeProvider's render, so useTheme() consumers already had the new value;
+  // className/kb-styled dark:/light: elements only update once this fires).
+  // useEffect callbacks run after the browser/native paint, so with useEffect
+  // here every className-styled dark: element visibly lagged one frame behind
+  // anything reading isDark via useTheme(). useLayoutEffect runs synchronously
+  // right after commit, before that frame is presented, closing the gap.
+  useIsomorphicLayoutEffect(() => {
     applyWebTheme(resolvedMode, resolvedConfig.darkMode);
     setGlobalDarkMode(isDark);
   }, [isDark, resolvedMode, resolvedConfig.darkMode]);

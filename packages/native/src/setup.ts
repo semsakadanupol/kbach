@@ -104,7 +104,19 @@ export function withKbachBabel(
       if (opts.jsxRuntime === 'classic') {
         warn(`Forcing jsxRuntime "automatic" on ${name} (was "classic") — required for Kbach`);
       }
-      return [name, { ...opts, jsxRuntime: 'automatic', jsxImportSource: '@kbach/native' }];
+      // Deliberately NOT setting jsxImportSource here. That option would set
+      // the DEFAULT JSX pragma for every file this preset transforms — which,
+      // for babel-preset-expo, is every file Metro bundles, including
+      // node_modules and react-native's own internals (renderApplication.js,
+      // AppContainer.js, etc.). Pointing that default at @kbach/native breaks
+      // those files, since @kbach/native/jsx-runtime's jsx()/jsxDEV() run
+      // Kbach's className/kb resolution logic, which those files know nothing
+      // about. The Kbach babel plugin's pre() hook (babel-plugin/index.js)
+      // instead injects a per-FILE `@jsxImportSource @kbach/native` pragma
+      // comment, and explicitly skips node_modules — that comment overrides
+      // this preset's default (which stays 'react') only for the user's own
+      // app files, which is the only place it should apply.
+      return [name, { ...opts, jsxRuntime: 'automatic' }];
     }
     return preset;
   });
@@ -134,17 +146,23 @@ export function withKbachBabel(
  *   api.cache(true);
  *   return {
  *     presets: [
- *       ['babel-preset-expo', { jsxImportSource: '@kbach/native' }],
+ *       'babel-preset-expo',
  *       '@kbach/native/babel',
  *     ],
  *   };
  * };
  * ```
+ *
+ * Do NOT pass `jsxImportSource: '@kbach/native'` to babel-preset-expo here —
+ * that sets the default JSX pragma for every file Metro transforms, including
+ * node_modules and react-native's own internals, which breaks them. See the
+ * comment in withKbachBabel above for why the per-file pragma comment the
+ * Kbach babel plugin injects is the only place that should apply.
  */
 export function createKbachConfig(options: KbachOptions = {}): Record<string, unknown> {
   return {
     presets: [
-      ['babel-preset-expo', { jsxImportSource: '@kbach/native' }],
+      'babel-preset-expo',
       ['@kbach/native/babel', {
         configFile: options.configFile ?? 'kbach.config.js',
         attributes: options.attributes ?? ['kb', 'className'],

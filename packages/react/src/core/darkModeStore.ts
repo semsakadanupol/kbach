@@ -18,6 +18,19 @@
 
 interface KbachDarkStore {
   isDark: boolean;
+  /**
+   * Last value subscribers were actually notified with — deliberately
+   * separate from `isDark`. syncGlobalDarkMode() also writes `isDark`
+   * (synchronously, during render, before setGlobalDarkMode's effect ever
+   * runs); if setGlobalDarkMode compared against `isDark` itself, it would
+   * always find them already equal (syncGlobalDarkMode having just set it to
+   * the same value moments earlier in the same render pass) and skip
+   * notifying every single time — subscribers would never re-render on a
+   * theme toggle. Comparing against this separately-tracked value instead
+   * means the skip-if-unchanged check only fires when nothing has *actually*
+   * changed since the last real notification.
+   */
+  notifiedIsDark: boolean;
   subscribers: Set<() => void>;
 }
 
@@ -26,7 +39,7 @@ const KEY = '__kbach_dark_store__';
 function getStore(): KbachDarkStore {
   const g = globalThis as Record<string, unknown>;
   if (!g[KEY]) {
-    g[KEY] = { isDark: false, subscribers: new Set<() => void>() };
+    g[KEY] = { isDark: false, notifiedIsDark: false, subscribers: new Set<() => void>() };
   }
   return g[KEY] as KbachDarkStore;
 }
@@ -44,15 +57,17 @@ export function syncGlobalDarkMode(isDark: boolean): void {
 
 /**
  * Update isDark and notify all subscribers.
- * Called by ThemeProvider in useEffect (after render) so DarkWrapper /
+ * Called by ThemeProvider in a layout effect (after commit) so DarkWrapper /
  * InteractiveWrapper consumers re-render with the updated dark-mode value.
  * Notifications are skipped when the value hasn't changed since the last
- * broadcast to avoid spurious re-renders.
+ * broadcast to avoid spurious re-renders — see the notifiedIsDark comment
+ * above for why that comparison can't use `isDark` itself.
  */
 export function setGlobalDarkMode(isDark: boolean): void {
   const store = getStore();
-  if (store.isDark === isDark) return;
   store.isDark = isDark;
+  if (store.notifiedIsDark === isDark) return;
+  store.notifiedIsDark = isDark;
   for (const sub of store.subscribers) sub();
 }
 

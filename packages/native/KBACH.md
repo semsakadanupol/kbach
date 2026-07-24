@@ -54,8 +54,15 @@ import { ThemeProvider } from '@kbach/react';
 
 ### babel.config.js
 ```js
-const { createKbachConfig } = require('@kbach/native');
-module.exports = createKbachConfig();
+module.exports = function (api) {
+  api.cache(true);
+  return {
+    presets: [
+      ['babel-preset-expo', { jsxImportSource: '@kbach/native' }],
+      '@kbach/native/babel',
+    ],
+  };
+};
 ```
 
 ### Wrap app

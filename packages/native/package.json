@@ -1,6 +1,6 @@
 {
   "name": "@kbach/native",
-  "version": "0.6.18",
+  "version": "0.6.20",
   "description": "Single-package Kbach install for React Native and Expo — includes core, components, Babel plugin, and Metro config",
   "source": "./src/index.ts",
   "main": "./dist/index.js",

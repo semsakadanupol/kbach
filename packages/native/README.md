@@ -38,11 +38,18 @@ npm install @kbach/native
 **1. babel.config.js:**
 
 ```js
-const { createKbachConfig } = require('@kbach/native');
-module.exports = createKbachConfig();
+module.exports = function (api) {
+  api.cache(true);
+  return {
+    presets: [
+      ['babel-preset-expo', { jsxImportSource: '@kbach/native' }],
+      '@kbach/native/babel',
+    ],
+  };
+};
 ```
 
-Merging into an existing config: `withKbachBabel({ presets: [...], plugins: [...] })`. After changing this file, clear the Metro cache: `npx expo start --clear`.
+Or the one-liner helper: `const { createKbachConfig } = require('@kbach/native'); module.exports = createKbachConfig();` — identical result. Merging into an existing config: `withKbachBabel({ presets: [...], plugins: [...] })`. After changing this file, clear the Metro cache: `npx expo start --clear`.
 
 **2. Wrap your app:**
 

@@ -1,5 +1,5 @@
 import type { ResolvedStyle } from './core/types';
-import { getResponsiveModifiers, getInteractiveModifiers } from './core/registry';
+import { getResponsiveModifiers, getInteractiveModifiers } from './core';
 
 /**
  * Returns true if any bucket in a ResolvedStyle map requires responsive

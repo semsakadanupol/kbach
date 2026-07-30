@@ -20,12 +20,12 @@ import {
   syncGlobalWidth,
   syncGlobalScreens,
   setGlobalWidth,
+  kbachWarn,
   type ThemeMode,
   type FrameworkConfig,
   type ResolvedConfig,
 } from './core';
 import { ThemeContext, type ThemeContextValue } from './context';
-import { kbachWarn } from './core/devWarn';
 
 // useLayoutEffect warns "does nothing on the server" during Node.js SSR
 // (isWeb false, isNative false there — see core/platform.ts). Real browsers

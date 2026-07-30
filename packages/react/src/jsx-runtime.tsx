@@ -9,8 +9,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from 'react/jsx-runtime';
 import { Fragment } from 'react';
 import type { ReactElement } from 'react';
-import { isWeb, isNative, getEffectiveIsWeb, getConfig, onConfigChange, resolve, flatten, getDefaultFontFamily, normalizeClassString, isRuntimeCSSDisabled, type ResolvedStyle } from './core';
-import { getInteractiveModifiers, getModeModifiers, getResponsiveModifiers } from './core/registry';
+import { isWeb, isNative, getEffectiveIsWeb, getConfig, onConfigChange, resolve, flatten, getDefaultFontFamily, normalizeClassString, isRuntimeCSSDisabled, getInteractiveModifiers, getModeModifiers, getResponsiveModifiers, type ResolvedStyle } from './core';
 import { InteractiveWrapper } from './InteractiveWrapper';
 import { DarkWrapper } from './DarkWrapper';
 import { getWebTag, transformToWebProps, registerWebElement } from './web-substitute';

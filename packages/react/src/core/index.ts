@@ -18,6 +18,7 @@ export { defaultTheme, defaultColors } from './theme';
 export { BASE_RESET, RESET_STYLE_ID } from './reset';
 export { LRUCache } from './cache';
 export { isWeb, isNative, getEffectiveIsWeb, toNativeValue, escapeCSSSelector, setResolveTarget } from './platform';
+export { kbachWarn } from './devWarn';
 export { parseClass, parseClasses, splitClassTokens, normalizeClassString } from './parser';
 export {
   registerModifier,

@@ -1,5 +1,4 @@
-import { isWeb } from './core/platform';
-import { getGlobalWidth, subscribeGlobalWidth } from './core';
+import { isWeb, getGlobalWidth, subscribeGlobalWidth } from './core';
 import { useSyncExternalStore } from './useSyncExternalStoreShim';
 
 const NOOP_SUB = (_: () => void): (() => void) => () => {};

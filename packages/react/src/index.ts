@@ -5,6 +5,9 @@ export type { ThemeContextValue } from './context';
 export { useColors, wrapColors } from './useColors';
 export type { ColorsAPI, ColorScale } from './useColors';
 
+export { useSpacing, wrapSpacing } from './useSpacing';
+export type { SpacingAPI } from './useSpacing';
+
 // Provider
 export { ThemeProvider } from './ThemeProvider';
 export type { ThemeProviderProps } from './ThemeProvider';
@@ -64,4 +67,6 @@ export type {
   ResolvedConfig,
   ParsedClass,
   PluginAPI,
+  DefaultColorName,
+  DefaultSpacingKey,
 } from './core';

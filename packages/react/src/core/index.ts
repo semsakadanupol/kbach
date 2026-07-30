@@ -15,6 +15,7 @@ export type {
 } from './types';
 
 export { defaultTheme, defaultColors } from './theme';
+export type { DefaultColorName, DefaultSpacingKey } from './theme';
 export { BASE_RESET, RESET_STYLE_ID } from './reset';
 export { LRUCache } from './cache';
 export { isWeb, isNative, getEffectiveIsWeb, toNativeValue, escapeCSSSelector, setResolveTarget } from './platform';

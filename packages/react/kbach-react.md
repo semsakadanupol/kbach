@@ -189,6 +189,7 @@ colors.white              // '#ffffff'
 colors['white/20']        // 'rgba(255,255,255,0.2)'
 colors.alpha('#ff6b35', 60) // 'rgba(255,107,53,0.6)'
 ```
+Typed against the built-in theme by default — `colors.blu` (typo) is a compile error. Custom `kbach.config.js` colors aren't visible to TypeScript (runtime-loaded plain `.js`), so widen manually: `useColors<DefaultColorName | 'brand'>()`. `useSpacing()` is the same pattern for the spacing scale (`spacing[4]` → `16`, `spacing.full` → `'100%'`).
 
 ---
 

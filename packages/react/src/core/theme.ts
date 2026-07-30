@@ -2,7 +2,13 @@ import type { ThemeConfig, ThemeColors } from './types';
 
 // ─── Kbach color palette (1 = lightest, 12 = darkest) ────────────────────────
 
-export const defaultColors: ThemeColors = {
+// `satisfies` (not `:`) so `typeof defaultColors` keeps its literal keys
+// ('slate' | 'gray' | ... | 'transparent' | ...) instead of widening to
+// ThemeColors' own `Record<string, ...>` index signature — DefaultColorName
+// below (and useColors()'s default type parameter) depend on that narrowing.
+// Still checked for structural compatibility with ThemeColors exactly like a
+// `:` annotation would; purely a type-level difference, erased at compile time.
+export const defaultColors = {
   transparent: 'transparent',
   current: 'currentColor',
   black: '#000000',
@@ -119,11 +125,13 @@ export const defaultColors: ThemeColors = {
     5: '#fb7185', 6: '#f43f5e', 7: '#e11d48', 8: '#be123c',
     9: '#9f1239', 10: '#881337', 11: '#4c0519', 12: '#2d030e',
   },
-};
+} satisfies ThemeColors;
 
 // ─── Default theme ────────────────────────────────────────────────────────────
 
-export const defaultTheme: ThemeConfig = {
+// Same satisfies-not-colon reasoning as defaultColors above — DefaultSpacingKey
+// below depends on typeof defaultTheme.spacing keeping its literal keys.
+export const defaultTheme = {
   colors: defaultColors,
 
   // 1 unit = 4px
@@ -362,4 +370,20 @@ export const defaultTheme: ThemeConfig = {
   // alongside them without needing to redeclare the built-ins.
   keyframes: {},
   animation: {},
-};
+} satisfies ThemeConfig;
+
+// ─── Literal token types, derived from the two consts above ──────────────────
+// Used to give useColors()/useSpacing() real autocomplete + typo-catching by
+// default (see their own files). Only covers the BUILT-IN theme — a
+// kbach.config.js customization isn't visible to TypeScript at all, since
+// it's a plain .js file loaded at runtime, not a statically-analyzed module;
+// see useColors.ts's doc comment for the escape hatch that covers that case.
+
+export type DefaultColorName = keyof typeof defaultColors;
+// Wrapped in a template literal type: object literal keys written as bare
+// numbers (spacing's `4: 16`, `0.5: 2`, …) type as the NUMBER literal in
+// `keyof`, not the string '4' — even though JS itself always uses the
+// string key at runtime. `` `${K}` `` stringifies every union member
+// (numeric or already-string) so DefaultSpacingKey is a plain string union,
+// matching what spacing[...] is actually indexed with.
+export type DefaultSpacingKey = `${keyof typeof defaultTheme.spacing}`;

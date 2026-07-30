@@ -220,6 +220,30 @@ colors.blue['6/50']         // 'rgba(59,130,246,0.5)'
 colors.alpha('#ff6b35', 60) // 'rgba(255,107,53,0.6)'
 ```
 
+### Typed theme tokens
+
+`useColors()` and `useSpacing()` are typed against the built-in theme by default (`DefaultColorName`/`DefaultSpacingKey`), so TypeScript autocompletes real color/spacing names and flags a typo (`colors.blu`, `spacing.ful`) as an error — no setup needed if you're on the default theme.
+
+```ts
+import { useSpacing } from '@kbach/react';
+
+const spacing = useSpacing();
+spacing[4]      // 16
+spacing.full    // '100%'
+spacing['1/2']  // '50%'
+```
+
+A customized `kbach.config.js` isn't visible to TypeScript — it's a plain `.js` file loaded at runtime, not a statically-analyzed module — so a project with extra colors or spacing keys needs to widen the type parameter by hand:
+
+```ts
+import { useColors, type DefaultColorName } from '@kbach/react';
+
+const colors = useColors<DefaultColorName | 'brand'>();
+colors.brand[6] // now type-checks
+```
+
+This only affects the exported *types* — `useColors()`/`useSpacing()` called with no type argument behave exactly as before at runtime. If existing code was relying on a color/spacing name TypeScript couldn't previously catch (the old types had a blanket `[key: string]: any`), this may surface a new type error — the fix is the escape-hatch pattern above, not a code change.
+
 ## Modifiers
 
 Chain in any order: `<div className="dark:sm:hover:p-4" />`

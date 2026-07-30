@@ -22,6 +22,29 @@ function warn(message) {
 // for an identical class name that maps to a different theme in each project.
 const _resolveCache = new Map();
 
+// ─── Shared mtime-poll mechanics ───────────────────────────────────────────────
+// getCore() and getUserConfig() below both cache a value keyed off a file's
+// mtime, re-checking that mtime at most once every N ms rather than on every
+// call (fs.statSync on every JSXAttribute visited would be wasteful). The
+// fallback/warning behavior differs enough between the two (getCore has one
+// global slot and propagates when nothing is cached yet; getUserConfig is
+// keyed per config path and always has a default-config fallback) that
+// sharing more than this small freshness/stat mechanism would obscure more
+// than it simplifies — so only these two pure helpers are shared.
+function isFresh(lastStatMs, pollIntervalMs) {
+  return (Date.now() - lastStatMs) < pollIntervalMs;
+}
+
+// Missing/unreadable file reads as mtime 0 — never equal to a real mtime, so
+// callers correctly treat that as "changed" and attempt a fresh load.
+function safeStatMtime(filePath) {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
 // ─── Load core lazily, reloading when the dist changes ───────────────────────
 //
 // This plugin runs inside a plain Node.js process (a Metro/Babel worker), where
@@ -37,16 +60,16 @@ let _core = null;
 let _coreMtime = 0;
 let _corePath = null;
 let _lastStatMs = 0;
+let _coreWarned = false;
 const STAT_INTERVAL_MS = 500;
 
 function getCore() {
-  const now = Date.now();
-  if (_core && (now - _lastStatMs) < STAT_INTERVAL_MS) return _core;
+  if (_core && isFresh(_lastStatMs, STAT_INTERVAL_MS)) return _core;
 
   try {
     if (!_corePath) _corePath = require.resolve('@kbach/react');
     const mtime = fs.statSync(_corePath).mtimeMs;
-    _lastStatMs = now;
+    _lastStatMs = Date.now();
     if (_core && mtime === _coreMtime) return _core;
     for (const id of Object.keys(require.cache)) {
       if (id.includes(`${path.sep}@kbach${path.sep}react`) || id.includes(`${path.sep}packages${path.sep}react${path.sep}`)) {
@@ -58,10 +81,22 @@ function getCore() {
     _coreMtime = mtime;
     _configCache.clear();
     _resolveCache.clear(); // config changed — invalidate resolve cache too
-  } catch {
+    _coreWarned = false;
+  } catch (err) {
     if (!_core) {
+      // No previously loaded copy to fall back to — let this propagate as a
+      // real build error rather than swallowing it, since there's nothing
+      // usable to silently continue with.
       _core = require('@kbach/react');
       _core.setResolveTarget?.('native');
+    } else if (!_coreWarned) {
+      // A previously loaded copy exists — fall back to it, but only silently
+      // once. Otherwise a persistent reload failure (e.g. @kbach/react briefly
+      // mid-write on disk, or a broken reinstall) never surfaces anywhere in
+      // the Metro/Babel output, and every class resolved afterward silently
+      // uses a stale copy of the core engine with no indication why.
+      _coreWarned = true;
+      warn(`Failed to reload @kbach/react (${err.message}) — using the previously loaded copy.`);
     }
   }
   return _core;
@@ -82,14 +117,13 @@ const CFG_STAT_INTERVAL_MS = 500;
 
 function getUserConfig(configFile, root) {
   const cfgPath = path.resolve(root || process.cwd(), configFile);
-  const now = Date.now();
   let entry = _configCache.get(cfgPath);
 
-  if (entry && (now - entry.lastStatMs) < CFG_STAT_INTERVAL_MS) return entry.config;
+  if (entry && isFresh(entry.lastStatMs, CFG_STAT_INTERVAL_MS)) return entry.config;
 
+  const now = Date.now();
   try {
-    let mtime = 0;
-    try { mtime = fs.statSync(cfgPath).mtimeMs; } catch {}
+    const mtime = safeStatMtime(cfgPath);
 
     if (entry && mtime === entry.mtime) {
       entry.lastStatMs = now;
@@ -105,13 +139,28 @@ function getUserConfig(configFile, root) {
     entry = { config: buildConfig(userCfg), mtime, lastStatMs: now };
     _configCache.set(cfgPath, entry);
     _resolveCache.clear();
-  } catch {
+  } catch (err) {
+    // A syntax error or throw in kbach.config.js (or a transient failure while
+    // it's mid-write on disk during a save) used to fall back to a stale or
+    // default config with zero output anywhere — a broken config file was
+    // very hard to notice since styles just looked subtly wrong instead of
+    // erroring. Warn once per failure streak (not on every call — this can be
+    // hit once per file transformed while the config stays broken) so it
+    // shows up in the Metro/Babel terminal output; the warning clears the
+    // next time the config loads successfully, since that path creates a
+    // fresh cache entry with no `warned` flag set.
     if (!entry) {
       const { getConfig } = getCore();
       entry = { config: getConfig(), mtime: 0, lastStatMs: now };
       _configCache.set(cfgPath, entry);
+      warn(`Couldn't load "${cfgPath}" (${err.message}) — using the default theme until it's fixed.`);
+      entry.warned = true;
     } else {
       entry.lastStatMs = now;
+      if (!entry.warned) {
+        entry.warned = true;
+        warn(`Couldn't reload "${cfgPath}" (${err.message}) — keeping the previously loaded config.`);
+      }
     }
   }
   return entry.config;
@@ -283,6 +332,13 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
       Program: {
         enter(programPath, state) {
           state.kbachDeclarations = new Map();
+          // openingElementNode -> { classString, stylesIdentifier, classAttrValue }
+          // Tracks the first matched class attribute seen on each JSX element, so a
+          // second matched attribute on the SAME element (e.g. both `kb` and
+          // `className`) merges into it instead of producing a duplicate
+          // __kbachClasses/__kbachStyles attribute pair — see the JSXAttribute
+          // visitor below.
+          state.kbachElementInfo = new Map();
         },
 
         exit(programPath, state) {
@@ -356,6 +412,24 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
 
         if (!classString || !classString.trim()) return;
 
+        // An element carrying more than one configured class attribute at once
+        // (e.g. both `kb` and `className` — the default `attributes` list) would
+        // otherwise get two independent __kbachClasses/__kbachStyles attribute
+        // pairs with the SAME names: each JSXAttribute visit renames its own
+        // attribute in place and inserts its own sibling, with no awareness that
+        // another matched attribute already did the same on this element. When
+        // the JSX transform lowers that into a createElement/jsx() props object
+        // literal, duplicate keys silently keep only the LATER pair — the
+        // earlier attribute's resolved styles are dropped with no warning even
+        // though both were valid, statically-resolved class strings. Merging
+        // here — combine the class strings, drop the second attribute, and
+        // re-resolve once as a single list — makes the result match what the
+        // runtime would produce if both class strings had been written in one
+        // attribute to begin with.
+        const openingElement = nodePath.parentPath.node;
+        const existing = state.kbachElementInfo.get(openingElement);
+        const combinedClassString = existing ? `${existing.classString} ${classString}` : classString;
+
         try {
           // Use global cache to avoid re-resolving the same class string
           // across different files in the same build. Namespaced by the
@@ -363,14 +437,14 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
           // this worker process never collide (see _resolveCache comment above).
           const projectRoot = resolveProjectRoot(state);
           const cfgAbsPath = path.resolve(projectRoot, configFile);
-          const cacheKey = `${cfgAbsPath} ${classString}`;
+          const cacheKey = `${cfgAbsPath} ${combinedClassString}`;
           let resolved;
           if (_resolveCache.has(cacheKey)) {
             resolved = _resolveCache.get(cacheKey);
           } else {
             const { resolve } = getCore();
             const config = getUserConfig(configFile, projectRoot);
-            resolved = resolve(classString, config.theme, config.darkMode);
+            resolved = resolve(combinedClassString, config.theme, config.darkMode);
             _resolveCache.set(cacheKey, resolved);
           }
 
@@ -379,6 +453,30 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
           const hasStyles = Object.values(resolved).some(
             v => v && typeof v === 'object' && Object.keys(v).length > 0,
           );
+
+          if (existing) {
+            if (!hasStyles) { nodePath.remove(); return; }
+
+            let uid;
+            if (state.kbachDeclarations.has(combinedClassString)) {
+              uid = state.kbachDeclarations.get(combinedClassString).uid;
+            } else {
+              const astNode = resolvedStyleToAST(t, resolved);
+              uid = nodePath.scope.getProgramParent().generateUidIdentifier('kbach');
+              state.kbachDeclarations.set(combinedClassString, { uid, astNode });
+            }
+
+            if (debug) {
+              log(`Transformed "${combinedClassString}" (merged from multiple class attributes)`);
+            }
+
+            existing.classString = combinedClassString;
+            existing.stylesIdentifier.name = uid.name;
+            existing.classAttrValue.value = combinedClassString;
+            nodePath.remove();
+            return;
+          }
+
           if (!hasStyles) return;
 
           if (debug) {
@@ -394,17 +492,24 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
             state.kbachDeclarations.set(classString, { uid, astNode });
           }
 
+          const stylesIdentifier = t.identifier(uid.name);
           nodePath.insertAfter(
             t.jSXAttribute(
               t.jSXIdentifier('__kbachStyles'),
-              t.jSXExpressionContainer(t.identifier(uid.name)),
+              t.jSXExpressionContainer(stylesIdentifier),
             ),
           );
 
           nodePath.node.name = t.jSXIdentifier('__kbachClasses');
+
+          state.kbachElementInfo.set(openingElement, {
+            classString,
+            stylesIdentifier,
+            classAttrValue: t.isStringLiteral(value) ? value : value.expression,
+          });
         } catch (err) {
           if (debug) {
-            warn(`Couldn't transform "${classString}": ${err.message}`);
+            warn(`Couldn't transform "${combinedClassString}": ${err.message}`);
           }
         }
       },

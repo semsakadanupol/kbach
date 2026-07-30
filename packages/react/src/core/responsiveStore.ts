@@ -71,12 +71,21 @@ export function subscribeGlobalWidth(listener: WidthListener): () => void {
 /**
  * Returns the Set of breakpoint names that are currently active
  * (i.e. width >= their min-width threshold).
+ *
+ * `screens` defaults to the global store's screens map (the common case —
+ * DarkWrapper/InteractiveWrapper have no per-tree config available). Pass an
+ * explicit map to check against a LOCAL config instead — e.g. useBreakpoint()/
+ * useResponsive() pass the nearest <ThemeProvider>'s own `config.theme.screens`
+ * so they stay correct per-provider rather than silently reading whichever
+ * config the global store happens to hold (see ThemeProvider's per-tree
+ * config-override limitation).
  */
-export function getActiveBreakpoints(width?: number): Set<string> {
+export function getActiveBreakpoints(width?: number, screens?: Record<string, number>): Set<string> {
   const store = getStore();
   const w = width ?? store.width;
+  const s = screens ?? store.screens;
   const active = new Set<string>();
-  for (const [name, minW] of Object.entries(store.screens)) {
+  for (const [name, minW] of Object.entries(s)) {
     if (typeof minW === 'number' && w >= minW) active.add(name);
   }
   return active;

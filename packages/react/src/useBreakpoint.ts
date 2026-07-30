@@ -1,6 +1,19 @@
 import { useMemo } from 'react';
 import { useTheme } from './context';
 import { useGlobalWidth } from './useGlobalWidth';
+import { getActiveBreakpoints } from './core';
+
+// Shared by both hooks below. Converts the theme's screens map (values may be
+// numbers or CSS-length strings like '640px') to a plain numeric map, the
+// shape getActiveBreakpoints() (core/responsiveStore.ts) expects.
+function toNumericScreens(screens: Record<string, string | number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [name, v] of Object.entries(screens)) {
+    const n = typeof v === 'number' ? v : parseInt(String(v), 10);
+    if (!Number.isNaN(n)) out[name] = n;
+  }
+  return out;
+}
 
 /**
  * Returns the name of the currently active breakpoint — the largest breakpoint
@@ -14,19 +27,20 @@ export function useBreakpoint(): string {
   const { config } = useTheme();
   const width = useGlobalWidth();
   const screens = config.theme.screens as Record<string, string | number>;
-  // Sort once per config change, not every render.
-  const sorted = useMemo(
-    () =>
-      (Object.entries(screens) as [string, string | number][])
-        .map(([name, v]): [string, number] => [name, typeof v === 'number' ? v : parseInt(String(v), 10)])
-        .filter(([, minW]) => !Number.isNaN(minW))
-        .sort(([, a], [, b]) => b - a),
-    [screens],
-  );
-  for (const [name, minW] of sorted) {
-    if (width >= minW) return name;
-  }
-  return 'xs';
+  const numericScreens = useMemo(() => toNumericScreens(screens), [screens]);
+  return useMemo(() => {
+    // getActiveBreakpoints() takes this hook's own (nearest-<ThemeProvider>)
+    // screens map explicitly, rather than defaulting to the global store's —
+    // see its comment in core/responsiveStore.ts for why that matters.
+    const active = getActiveBreakpoints(width, numericScreens);
+    let best: string | null = null;
+    let bestMinW = -Infinity;
+    for (const name of active) {
+      const minW = numericScreens[name]!;
+      if (minW > bestMinW) { bestMinW = minW; best = name; }
+    }
+    return best ?? 'xs';
+  }, [numericScreens, width]);
 }
 
 /**
@@ -42,12 +56,13 @@ export function useResponsive(): Record<string, boolean> {
   const { config } = useTheme();
   const width = useGlobalWidth();
   const screens = config.theme.screens as Record<string, string | number>;
+  const numericScreens = useMemo(() => toNumericScreens(screens), [screens]);
   return useMemo(() => {
+    const active = getActiveBreakpoints(width, numericScreens);
     const result: Record<string, boolean> = {};
-    for (const [name, v] of Object.entries(screens)) {
-      const minW = typeof v === 'number' ? v : parseInt(String(v), 10);
-      if (!Number.isNaN(minW)) result[name] = width >= minW;
+    for (const name of Object.keys(numericScreens)) {
+      result[name] = active.has(name);
     }
     return result;
-  }, [screens, width]);
+  }, [numericScreens, width]);
 }

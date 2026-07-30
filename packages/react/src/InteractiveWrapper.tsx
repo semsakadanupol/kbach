@@ -114,6 +114,15 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
 
     const { children, disabled, checked, ...restForComponent } = rest as any;
 
+    // Included in computedStyle's memo deps below (matching DarkWrapper's
+    // isNonStringComponent) — without it, an instance whose Component prop
+    // switches between a string host tag and a non-string component across
+    // renders (while resolvedStyle/interaction state/width/disabled/checked
+    // stay identical) would reuse the stale style object computed for the
+    // PREVIOUS component type, incorrectly retaining or stripping web-only
+    // keys like display:grid/position:sticky for the new one.
+    const isNonStringComponent = typeof Component !== 'string';
+
     const computedStyle = useMemo(
       () => {
         // On web (browser and SSR alike), CSS classes carry all styles — flatten()
@@ -125,10 +134,10 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
         // Only strip web-only props for RN components. Native HTML elements ('div' etc.)
         // handle display:grid, gridTemplateColumns, and position:sticky as inline styles.
         stripInternalMarkers(s);
-        if (typeof Component !== 'string') stripWebOnlyProps(s);
+        if (isNonStringComponent) stripWebOnlyProps(s);
         return s;
       },
-      [resolvedStyle, isDark, pressed, hovered, focused, width, disabled, checked],
+      [resolvedStyle, isDark, pressed, hovered, focused, width, disabled, checked, isNonStringComponent],
     );
 
     // On web (browser and SSR alike), CSS classes handle all Kbach styles — only

@@ -553,7 +553,13 @@ function pushTokens(str: string, into: Set<string>): void {
 
 // ── Directory scan ─────────────────────────────────────────────────────────────
 
-function scanDir(dir: string, onFile: (filePath: string, code: string) => void): void {
+// Depth cap mirrors findKbachCSS's scan() above — without it, a symlink cycle
+// inside a scanned directory (statSync follows symlinks) recurses forever and
+// crashes the dev server/build with a stack overflow.
+const MAX_SCAN_DEPTH = 10;
+
+function scanDir(dir: string, onFile: (filePath: string, code: string) => void, depth = 0): void {
+  if (depth > MAX_SCAN_DEPTH) return;
   let entries: string[];
   try {
     entries = readdirSync(dir);
@@ -568,7 +574,7 @@ function scanDir(dir: string, onFile: (filePath: string, code: string) => void):
     const full = join(dir, entry);
     try {
       const st = statSync(full);
-      if (st.isDirectory()) scanDir(full, onFile);
+      if (st.isDirectory()) scanDir(full, onFile, depth + 1);
       else if (/\.(tsx?|jsx?)$/.test(entry)) onFile(full, readFileSync(full, 'utf-8'));
     } catch (err) {
       warn(`Can't process ${full}: ${(err as Error).message}`);
@@ -602,7 +608,8 @@ function scanCssFileInto(filePath: string, into: Set<string>): void {
   } catch { /* unreadable file — skip */ }
 }
 
-function scanCssSelectorsInto(dir: string, into: Set<string>): void {
+function scanCssSelectorsInto(dir: string, into: Set<string>, depth = 0): void {
+  if (depth > MAX_SCAN_DEPTH) return;
   let entries: string[];
   try {
     entries = readdirSync(dir);
@@ -614,7 +621,7 @@ function scanCssSelectorsInto(dir: string, into: Set<string>): void {
     const full = join(dir, entry);
     try {
       const st = statSync(full);
-      if (st.isDirectory()) scanCssSelectorsInto(full, into);
+      if (st.isDirectory()) scanCssSelectorsInto(full, into, depth + 1);
       else if (CSS_FILE_RE.test(entry)) scanCssFileInto(full, into);
     } catch { /* unreadable file — skip */ }
   }
@@ -732,6 +739,26 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
     return formatKbachCSS(buildTokenCSSView(), cfg.theme, responsiveRe);
   }
 
+  // Prune tokenCSS of every token no longer referenced by any file so
+  // removed/renamed classes are immediately dropped from the cache and the
+  // output CSS — not just filtered by buildTokenCSSView — then rewrite
+  // kbach.css and notify Vite only when its content actually changed, to
+  // avoid spurious HMR updates on saves that don't touch any class names.
+  // Shared by handleHotUpdate (edits) and configureServer's add/unlink
+  // listeners (creates/deletes) so both paths stay in sync the same way.
+  function syncMainCSSFile(server: { watcher: { emit(event: string, ...args: unknown[]): unknown } }): void {
+    const active = new Set<string>();
+    for (const tokens of fileTokens.values()) for (const t of tokens) active.add(t);
+    for (const tok of tokenCSS.keys()) {
+      if (!active.has(tok)) tokenCSS.delete(tok);
+    }
+
+    if (mainCSSFile) {
+      const changed = writeKbachToFile(mainCSSFile, generateCSS());
+      if (changed) server.watcher.emit('change', mainCSSFile);
+    }
+  }
+
   return {
     name: 'kbach',
     enforce: 'pre',
@@ -809,6 +836,38 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
       if (mainCSSFile) writeKbachToFile(mainCSSFile, generateCSS());
     },
 
+    // Vite's `handleHotUpdate` hook only fires for `type === "update"` (plain
+    // file edits) — it's never called for file create/delete, which land on
+    // the watcher's own 'add'/'unlink' events instead (confirmed against
+    // vite's own onHMRUpdate/handleHMRUpdate: the hook loop is gated on
+    // `type === "update"`). Without also listening on those two events here,
+    // creating a new file with new Kbach classes never adds them to
+    // kbach.css, and deleting a file never removes its classes, until a full
+    // dev-server restart. configureServer gives access to the raw watcher so
+    // both cases can share the same sync logic as a plain edit.
+    configureServer(server) {
+      const onAddOrUnlink = (file: string, isUnlink: boolean) => {
+        if (file.includes('node_modules')) return;
+        if (CSS_FILE_RE.test(file)) {
+          if (!isUnlink) scanCssFileInto(file, projectCssClasses);
+          return;
+        }
+        if (!/\.(tsx?|jsx?)$/.test(file)) return;
+        if (isUnlink) {
+          fileTokens.delete(normPath(file));
+        } else {
+          try {
+            processFile(file, readFileSync(file, 'utf-8'));
+          } catch {
+            fileTokens.delete(normPath(file));
+          }
+        }
+        syncMainCSSFile(server);
+      };
+      server.watcher.on('add', (file) => onAddOrUnlink(file, false));
+      server.watcher.on('unlink', (file) => onAddOrUnlink(file, true));
+    },
+
     handleHotUpdate({ file, server }) {
       if (file.includes('node_modules')) return;
 
@@ -827,21 +886,7 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
         fileTokens.delete(normPath(file));
       }
 
-      // Prune tokenCSS of every token no longer referenced by any file so
-      // removed/renamed classes are immediately dropped from the cache and
-      // the output CSS — not just filtered by buildTokenCSSView.
-      const active = new Set<string>();
-      for (const tokens of fileTokens.values()) for (const t of tokens) active.add(t);
-      for (const tok of tokenCSS.keys()) {
-        if (!active.has(tok)) tokenCSS.delete(tok);
-      }
-
-      if (mainCSSFile) {
-        // Only notify Vite when the CSS content actually changed — avoids
-        // spurious HMR updates on saves that don't touch any class names.
-        const changed = writeKbachToFile(mainCSSFile, generateCSS());
-        if (changed) server.watcher.emit('change', mainCSSFile);
-      }
+      syncMainCSSFile(server);
     },
   };
 }

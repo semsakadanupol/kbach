@@ -47,6 +47,8 @@ const STORAGE_KEY = 'kbach-theme';
 // once so the failure mode isn't silent.
 let _mountedProviderCount = 0;
 let _warnedMultipleProviders = false;
+let _mountedConfigOverrideCount = 0;
+let _warnedConfigOverride = false;
 
 // ─── Persist helpers ──────────────────────────────────────────────────────────
 function loadPersistedMode(): ThemeMode | null {
@@ -149,26 +151,66 @@ export function ThemeProvider({
     configOverride ? buildConfig(configOverride) : getConfig(),
   );
 
+  // Sync a `config` override to the global config store SYNCHRONOUSLY during
+  // render — mirroring syncGlobalDarkMode(isDark) below and the width/screens
+  // ref-guards above — instead of only in a useEffect. jsx-runtime.tsx's
+  // processElement() calls getConfig() synchronously on every plain (no
+  // hover:/dark:/sm: modifier) className element's render, including this
+  // subtree's FIRST render. An effect-only sync updates the global store only
+  // after that first commit, so any such element rendered on mount resolved
+  // against whatever config was active before this provider even mounted —
+  // wrong colors/spacing on first paint that never self-corrected, since
+  // nothing re-renders a bare className element on its own. The ref guard
+  // below only calls updateConfig() when configOverride's reference actually
+  // changes, so an inline object literal re-created every render doesn't
+  // reset plugins/clear caches on every render — same cost as before, just
+  // retimed to before children render instead of after.
+  const _prevConfigOverrideRef = useRef<FrameworkConfig | undefined>(undefined);
+  if (configOverride && _prevConfigOverrideRef.current !== configOverride) {
+    _prevConfigOverrideRef.current = configOverride;
+    updateConfig(configOverride); // syncs global store, fires listeners for other providers
+    const fresh = getConfig();
+    if (fresh !== resolvedConfig) setResolvedConfig(fresh);
+  }
+
   // Dev-only: warn (once) if more than one ThemeProvider is ever mounted at the
   // same time — see the _mountedProviderCount comment above for why this can't
   // just be silently made to work correctly.
   useEffect(() => {
     _mountedProviderCount++;
-    if (
-      process.env.NODE_ENV !== 'production' &&
-      _mountedProviderCount > 1 &&
-      !_warnedMultipleProviders
-    ) {
-      _warnedMultipleProviders = true;
-      kbachWarn(
-        'Multiple <ThemeProvider> instances are mounted at once. Dark mode and ' +
-        'responsive width are shared through one global store, so whichever ' +
-        'provider rendered most recently wins for every consumer — nested or ' +
-        'per-section theming is not isolated between providers.',
-      );
+    if (configOverride) _mountedConfigOverrideCount++;
+    if (process.env.NODE_ENV !== 'production') {
+      if (_mountedProviderCount > 1 && !_warnedMultipleProviders) {
+        _warnedMultipleProviders = true;
+        kbachWarn(
+          'Multiple <ThemeProvider> instances are mounted at once. Dark mode and ' +
+          'responsive width are shared through one global store, so whichever ' +
+          'provider rendered most recently wins for every consumer — nested or ' +
+          'per-section theming is not isolated between providers.',
+        );
+      }
+      // A more specific, more surprising case than the generic warning above:
+      // an app explicitly passing DIFFERENT `config` overrides to more than one
+      // mounted provider — expecting per-tree theming — silently gets the same
+      // "most recently committed wins globally" behavior for every className/kb
+      // element that isn't wrapped by DarkWrapper/InteractiveWrapper (i.e. has
+      // no hover:/dark:/sm: modifier), since resolveUtility() ultimately reads
+      // one shared config store, not React Context, for that path.
+      if (_mountedConfigOverrideCount > 1 && !_warnedConfigOverride) {
+        _warnedConfigOverride = true;
+        kbachWarn(
+          'Multiple <ThemeProvider config={...}> overrides are mounted at once. The ' +
+          'resolved config is shared through the same global store as dark mode/width ' +
+          '(see the multiple-providers warning), so per-tree config overrides are not ' +
+          'actually isolated between providers — plain className/kb elements with no ' +
+          'hover:/dark:/sm: modifier resolve against whichever override last committed, ' +
+          'not necessarily their nearest ancestor <ThemeProvider>.',
+        );
+      }
     }
     return () => {
       _mountedProviderCount--;
+      if (configOverride) _mountedConfigOverrideCount--;
     };
   }, []);
 
@@ -318,14 +360,9 @@ export function ThemeProvider({
     setGlobalDarkMode(isDark);
   }, [isDark, resolvedMode, resolvedConfig.darkMode]);
 
-  // ── Keep resolvedConfig in sync when configOverride prop changes ───────────
-  // Also push to the global store so the JSX runtime (dynamic classes) and any
-  // code calling getConfig() outside of React context sees the correct theme.
-  useEffect(() => {
-    if (!configOverride) return;
-    updateConfig(configOverride); // syncs global store, fires listeners for other providers
-    setResolvedConfig(getConfig()); // update local state (not subscribed to onConfigChange)
-  }, [configOverride]);
+  // configOverride is kept in sync with the global store synchronously during
+  // render (see the ref-guarded block near the top of this component) —
+  // no effect needed for that anymore.
 
   // ── Listen for global config changes (only when not using a per-tree override) ──
   useEffect(() => {

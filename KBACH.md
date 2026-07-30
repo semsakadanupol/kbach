@@ -15,12 +15,17 @@ Two packages:
 { "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@kbach/react" } }
 ```
 
-### vite.config.ts (plain Vite only — skip if a meta-framework already provides its own Vite/React plugin, e.g. React Router's reactRouter())
+### vite.config.ts — Static CSS (recommended, plain Vite only)
 Not installed by `@kbach/react` itself: `npm install -D vite @vitejs/plugin-react`.
 ```ts
 import react from '@vitejs/plugin-react';
-export default { plugins: [react({ jsxImportSource: '@kbach/react' })] };
+import { kbach } from '@kbach/react/vite';
+export default { plugins: [react({ jsxImportSource: '@kbach/react' }), kbach()] };
 ```
+Then create `src/kbach.css` with `/* kbach:start */` / `/* kbach:end */` markers and `import './kbach.css'` once in your entry file — that import is what actually switches the app to Static CSS (zero runtime cost, build-time typo warnings); `kbach()` alone only generates the file, it doesn't disable runtime injection by itself. Skip if a meta-framework already provides its own Vite/React plugin, e.g. React Router's `reactRouter()` — see below.
+
+### vite.config.ts — Runtime setup (any bundler, no plugin)
+Skip `kbach()`/`kbach.css` above; just wrap the app in `<ThemeProvider>` (see "Wrap app" below). Right choice for Next.js (Static CSS doesn't apply there — webpack/Turbopack, not Vite) or for skipping the plugin for now.
 
 ### Per-file (no config needed)
 ```jsx

@@ -53,8 +53,13 @@ export async function resolveAnswers(
     setup = flags.setup ?? null;
     if (!setup) {
       if (flags.yes) {
-        // Safer default under --yes: works with any bundler config, no extra
-        // plugin wiring needed on top of what Tier 1 already automates.
+        // NOT the same choice as the interactive prompt's recommendation
+        // below, deliberately: Static CSS needs two manual Tier 2 follow-ups
+        // (wire vite.config.ts, import kbach.css) before it does anything, so
+        // defaulting to it unattended would leave the app looking broken
+        // (no styles at all) until those are done by hand. Runtime only
+        // needs the ThemeProvider wrap and works immediately, so it's the
+        // safer thing to land on with nobody there to finish the setup.
         setup = 'runtime';
       } else {
         const res = await prompts(
@@ -63,8 +68,8 @@ export async function resolveAnswers(
             name: 'setup',
             message: 'Runtime setup (client-side CSS injection) or Static CSS setup (Vite plugin, zero runtime cost)?',
             choices: [
-              { title: 'Runtime — simplest, works everywhere', value: 'runtime' },
-              { title: 'Static CSS — Vite only, zero runtime cost', value: 'static' },
+              { title: 'Static CSS (recommended) — Vite only, zero runtime cost', value: 'static' },
+              { title: 'Runtime — simplest to try, works with any bundler', value: 'runtime' },
             ],
           },
           { onCancel: exitOnCancel },

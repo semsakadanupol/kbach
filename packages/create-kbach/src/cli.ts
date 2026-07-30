@@ -34,6 +34,16 @@ function printViteConfigSnippet(): void {
   log('    export default defineConfig({ plugins: [kbach(), /* your other plugins */] });');
 }
 
+// kbach() alone only generates the CSS file — this import is the step that
+// actually switches the app over to Static CSS (auto-disables runtime
+// injection). Easy to do the plugin wiring and forget this, which silently
+// leaves runtime injection active alongside the generated file.
+function printKbachCssImportSnippet(relativeCssPath: string): void {
+  const importPath = relativeCssPath.replace(/\\/g, '/');
+  log(`  Your entry file (e.g. main.tsx) — import the generated stylesheet:`);
+  log(`    import './${importPath.startsWith('src/') ? importPath.slice(4) : importPath}';`);
+}
+
 function printWebAppRootSnippet(includeReset: boolean): void {
   log('  Your app root — wrap with ThemeProvider' + (includeReset ? ' + KbachReset' : '') + ':');
   log(`    import { ThemeProvider${includeReset ? ', KbachReset' : ''} } from '@kbach/react';`);
@@ -110,9 +120,11 @@ async function main(): Promise<void> {
     }
   }
 
+  let cssRelativePath = '';
   if (platform === 'web' && setup === 'static') {
     const css = writeKbachCss(cwd);
-    (css.result === 'created' ? created : skipped).push(path.relative(cwd, css.path));
+    cssRelativePath = path.relative(cwd, css.path);
+    (css.result === 'created' ? created : skipped).push(cssRelativePath);
   }
 
   let tsconfigNote = '';
@@ -149,6 +161,8 @@ async function main(): Promise<void> {
 
   if (platform === 'web' && setup === 'static') {
     printViteConfigSnippet();
+    log();
+    printKbachCssImportSnippet(cssRelativePath);
     log();
     printWebAppRootSnippet(false);
   } else if (platform === 'web' && setup === 'runtime') {

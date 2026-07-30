@@ -13,7 +13,7 @@ Package: `@kbach/react`
 { "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@kbach/react" } }
 ```
 
-### vite.config.ts (plain Vite only — skip @vitejs/plugin-react if a meta-framework already provides its own Vite/React plugin, e.g. React Router's reactRouter(); see below)
+### vite.config.ts — Static CSS setup (recommended, plain Vite only — skip @vitejs/plugin-react if a meta-framework already provides its own Vite/React plugin, e.g. React Router's reactRouter(); see below)
 Requires `vite` and `@vitejs/plugin-react` as dev dependencies — not installed by `@kbach/react` itself: `npm install -D vite @vitejs/plugin-react`.
 ```ts
 import { defineConfig } from 'vite';
@@ -27,6 +27,19 @@ export default defineConfig({
   ],
 });
 ```
+Then create the stylesheet the plugin writes into and import it once — this import is the step that actually disables runtime CSS injection; `kbach()` in the plugins array alone only generates the file:
+```css
+/* src/kbach.css */
+/* kbach:start */
+/* kbach:end */
+```
+```ts
+// main.tsx
+import './kbach.css';
+```
+
+### Runtime setup (any bundler, no Vite plugin)
+Skip `kbach()` and the `kbach.css` import above. Works with any bundler (Vite, webpack, Turbopack, Metro-for-web) with no build plugin — the only option for Next.js (see below), or for skipping the plugin for now on Vite.
 
 ### Babel (non-Vite)
 ```js

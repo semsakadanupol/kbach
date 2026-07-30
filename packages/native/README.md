@@ -204,7 +204,7 @@ In a browser (Expo Web, Metro web), `@kbach/native` switches to the same CSS-cla
 - RN components substitute to HTML: `View`/`ScrollView`→`div`, `Text`→`span`, `TextInput`→`input`/`textarea`, `Image`→`img`, `Pressable`/`TouchableOpacity`→`div[role=button]`
 - RN-only props (`onChangeText`, `source`, `secureTextEntry`, …) map to HTML equivalents
 - Register more: `registerWebElement(Animated.View, 'div')`
-- Use the Vite plugin same as `@kbach/react` — `import { kbach } from '@kbach/react/vite'` — and import `kbach.css` in your entry file
+- Recommended: use the Vite plugin same as `@kbach/react`'s Static CSS setup — `import { kbach } from '@kbach/react/vite'` — and import `kbach.css` in your entry file, for zero runtime cost on the web target too
 
 ## Web-only utilities (ignored on native, no warning)
 

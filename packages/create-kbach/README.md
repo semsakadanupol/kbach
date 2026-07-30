@@ -1,0 +1,35 @@
+# create-kbach
+
+Adds [Kbach](https://www.npmjs.com/package/@kbach/react) to an **existing** React (Vite/Next.js) or React Native (Expo) project. It doesn't scaffold a new app — run it from inside a project you already have.
+
+```
+npm create kbach@latest
+```
+
+(or `npx create-kbach`)
+
+## What it does
+
+Detects your package manager (from the lockfile) and platform (Vite/Next.js/Expo, from `package.json` and known config files), then:
+
+- Installs `@kbach/react` or `@kbach/native`
+- Creates `kbach.config.js` (skipped if one already exists)
+- Merges `compilerOptions.jsx`/`jsxImportSource` into `tsconfig.json` (or `tsconfig.app.json`, whichever your project actually uses) — skipped if already set, or if it conflicts with something already there
+- Static CSS setup (Vite web only): creates `src/kbach.css` with the marker comments
+- Native: creates `babel.config.js` with the Kbach preset — only if you don't already have one
+
+It deliberately does **not** edit `vite.config.ts`, your app's root component, or an existing `babel.config.js` — those are arbitrary source files, and blindly patching them risks producing broken code. Instead it prints the exact snippet to paste, copy-paste identical to what [`@kbach/react`'s README](../react/README.md) / [`@kbach/native`'s README](../native/README.md) document.
+
+## Flags
+
+```
+--platform=web|next|native   Skip platform detection/prompt
+--setup=runtime|static       Skip the Runtime-vs-Static-CSS prompt (web only)
+--pm=npm|pnpm|yarn|bun       Override detected package manager
+--yes, -y                    Accept defaults, skip all prompts
+--no-install                 Don't run the package install
+```
+
+## Full setup reference
+
+[`@kbach/react` README](../react/README.md) · [`@kbach/native` README](../native/README.md)

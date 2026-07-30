@@ -1,6 +1,13 @@
 /**
- * Global responsive width store — backed by globalThis so all CJS bundle
- * splits (index.js, jsx-runtime.js, jsx-dev-runtime.js) share one instance.
+ * Global responsive width store.
+ *
+ * Used to be backed by globalThis so all CJS bundle splits (index.js,
+ * jsx-runtime.js, jsx-dev-runtime.js) shared one instance — tsup used to
+ * bundle core/ separately into each of them (esbuild doesn't support
+ * code-splitting CJS output). core/ is now built as its own dist/core/
+ * entry and required externally by all three (see
+ * packages/react/tsup.config.ts), so there's only ever one real instance of
+ * this module to begin with — a plain module-level object is enough.
  */
 
 type WidthListener = () => void;
@@ -22,28 +29,20 @@ interface ResponsiveStore {
   listeners: Set<WidthListener>;
 }
 
-const RESPONSIVE_KEY = '__kbach_responsive__';
-
-function getStore(): ResponsiveStore {
-  const g = globalThis as Record<string, unknown>;
-  if (!g[RESPONSIVE_KEY]) {
-    g[RESPONSIVE_KEY] = { width: 0, notifiedWidth: 0, screens: {}, listeners: new Set<WidthListener>() };
-  }
-  return g[RESPONSIVE_KEY] as ResponsiveStore;
-}
+const store: ResponsiveStore = { width: 0, notifiedWidth: 0, screens: {}, listeners: new Set<WidthListener>() };
 
 /** Synchronous write for use in the render phase. */
 export function syncGlobalWidth(width: number): void {
-  getStore().width = width;
+  store.width = width;
 }
 
 /** Update the breakpoint-name → min-width map from the resolved theme config. */
 export function syncGlobalScreens(screens: Record<string, number>): void {
-  getStore().screens = screens;
+  store.screens = screens;
 }
 
 export function getGlobalScreens(): Record<string, number> {
-  return getStore().screens;
+  return store.screens;
 }
 
 /**
@@ -51,7 +50,6 @@ export function getGlobalScreens(): Record<string, number> {
  * notifiedWidth, not width — see the ResponsiveStore.notifiedWidth comment.
  */
 export function setGlobalWidth(width: number): void {
-  const store = getStore();
   store.width = width;
   if (store.notifiedWidth === width) return;
   store.notifiedWidth = width;
@@ -59,11 +57,10 @@ export function setGlobalWidth(width: number): void {
 }
 
 export function getGlobalWidth(): number {
-  return getStore().width;
+  return store.width;
 }
 
 export function subscribeGlobalWidth(listener: WidthListener): () => void {
-  const store = getStore();
   store.listeners.add(listener);
   return () => store.listeners.delete(listener);
 }
@@ -81,7 +78,6 @@ export function subscribeGlobalWidth(listener: WidthListener): () => void {
  * config-override limitation).
  */
 export function getActiveBreakpoints(width?: number, screens?: Record<string, number>): Set<string> {
-  const store = getStore();
   const w = width ?? store.width;
   const s = screens ?? store.screens;
   const active = new Set<string>();

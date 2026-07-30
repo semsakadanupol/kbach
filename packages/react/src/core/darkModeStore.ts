@@ -5,15 +5,14 @@
  * synchronously during render without needing context. ThemeProvider writes to it;
  * DarkWrapper / InteractiveWrapper subscribe via useSyncExternalStore.
  *
- * CJS bundle isolation problem:
- *   tsup creates separate self-contained CJS bundles for dist/index.js and
- *   dist/jsx-runtime.js. Metro (React Native) requires each by its file path,
- *   so they get independent module instances — top-level variables are NOT shared.
- *   ESM works because tsup extracts a shared chunk; CJS does not.
- *
- *   Fix: park the mutable state on globalThis so both CJS bundles read and
- *   write the same object. The globalThis key is intentionally namespaced to
- *   avoid collisions.
+ * Used to be backed by globalThis instead of a plain module-level variable:
+ * tsup used to bundle core/ separately into each of dist/index.js and
+ * dist/jsx-runtime.js (esbuild doesn't support code-splitting CJS output),
+ * so Metro loading each by path got independent copies of this module with
+ * independent top-level state. core/ is now built as its own dist/core/
+ * entry and required externally by both (see packages/react/tsup.config.ts),
+ * so there's only ever one real instance of this module to begin with — a
+ * plain module-level object is enough.
  */
 
 interface KbachDarkStore {
@@ -34,15 +33,7 @@ interface KbachDarkStore {
   subscribers: Set<() => void>;
 }
 
-const KEY = '__kbach_dark_store__';
-
-function getStore(): KbachDarkStore {
-  const g = globalThis as Record<string, unknown>;
-  if (!g[KEY]) {
-    g[KEY] = { isDark: false, notifiedIsDark: false, subscribers: new Set<() => void>() };
-  }
-  return g[KEY] as KbachDarkStore;
-}
+const store: KbachDarkStore = { isDark: false, notifiedIsDark: false, subscribers: new Set<() => void>() };
 
 /**
  * Silently update isDark without notifying subscribers.
@@ -52,7 +43,7 @@ function getStore(): KbachDarkStore {
  * already see the correct value.
  */
 export function syncGlobalDarkMode(isDark: boolean): void {
-  getStore().isDark = isDark;
+  store.isDark = isDark;
 }
 
 /**
@@ -64,7 +55,6 @@ export function syncGlobalDarkMode(isDark: boolean): void {
  * above for why that comparison can't use `isDark` itself.
  */
 export function setGlobalDarkMode(isDark: boolean): void {
-  const store = getStore();
   store.isDark = isDark;
   if (store.notifiedIsDark === isDark) return;
   store.notifiedIsDark = isDark;
@@ -73,7 +63,7 @@ export function setGlobalDarkMode(isDark: boolean): void {
 
 /** Read current dark-mode state synchronously (safe in render, no hook needed). */
 export function getGlobalDarkMode(): boolean {
-  return getStore().isDark;
+  return store.isDark;
 }
 
 /**
@@ -81,7 +71,6 @@ export function getGlobalDarkMode(): boolean {
  * @returns Cleanup function — call it to unsubscribe (no leak).
  */
 export function subscribeGlobalDarkMode(callback: () => void): () => void {
-  const store = getStore();
   store.subscribers.add(callback);
   return () => store.subscribers.delete(callback);
 }

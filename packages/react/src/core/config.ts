@@ -27,12 +27,16 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial
   return result;
 }
 
-// ─── Config singleton (globalThis-backed to survive CJS bundle splits) ────────
+// ─── Config singleton ───────────────────────────────────────────────────────
 //
-// tsup creates separate self-contained CJS bundles for dist/index.js and
-// dist/jsx-runtime.js. Metro (React Native) loads each by path, giving them
-// independent module-level variables. Using globalThis ensures all bundles
-// share one config instance.
+// Used to be backed by globalThis to survive CJS bundle splits: tsup used to
+// bundle core/ separately into each of dist/index.js and dist/jsx-runtime.js
+// (esbuild doesn't support code-splitting CJS output), so Metro loading each
+// by path got independent copies of this module with independent top-level
+// state. core/ is now built as its own dist/core/ entry and required
+// externally by all client entries (see packages/react/tsup.config.ts), so
+// there's only ever one real instance of this module to begin with — a
+// plain module-level object is enough.
 
 interface KbachConfigStore {
   resolved: ResolvedConfig | null;
@@ -41,29 +45,20 @@ interface KbachConfigStore {
   _src?: FrameworkConfig;
 }
 
-const CONFIG_KEY = '__kbach_config_store__';
-
-function getConfigStore(): KbachConfigStore {
-  const g = globalThis as Record<string, unknown>;
-  if (!g[CONFIG_KEY]) {
-    g[CONFIG_KEY] = { resolved: null, listeners: new Set<ConfigListener>(), customVariants: {} };
-  }
-  return g[CONFIG_KEY] as KbachConfigStore;
-}
+const configStore: KbachConfigStore = { resolved: null, listeners: new Set<ConfigListener>(), customVariants: {} };
 
 /**
  * Load, merge, and cache the resolved config.
  * Call resetConfig() to force a reload (e.g. in tests or after live update).
  */
 export function getConfig(): ResolvedConfig {
-  const store = getConfigStore();
-  if (store.resolved) return store.resolved;
-  store.resolved = buildConfig({});
-  return store.resolved;
+  if (configStore.resolved) return configStore.resolved;
+  configStore.resolved = buildConfig({});
+  return configStore.resolved;
 }
 
 export function resetConfig(): void {
-  getConfigStore().resolved = null;
+  configStore.resolved = null;
 }
 
 // ─── Color reference resolution ───────────────────────────────────────────────
@@ -168,8 +163,7 @@ export function buildConfig(userConfig: FrameworkConfig): ResolvedConfig {
     clearPluginUtilities();
     clearPluginModifiers();
   }
-  const _store = getConfigStore();
-  for (const k of Object.keys(_store.customVariants)) delete _store.customVariants[k];
+  for (const k of Object.keys(configStore.customVariants)) delete configStore.customVariants[k];
   const pluginAPI = makePluginAPI(resolved.theme);
   for (const plugin of resolved.plugins) {
     plugin(pluginAPI);
@@ -252,18 +246,16 @@ function makePluginAPI(theme: ThemeConfig): PluginAPI {
 type ConfigListener = (config: ResolvedConfig) => void;
 
 export function onConfigChange(listener: ConfigListener): () => void {
-  const store = getConfigStore();
-  store.listeners.add(listener);
-  return () => store.listeners.delete(listener);
+  configStore.listeners.add(listener);
+  return () => configStore.listeners.delete(listener);
 }
 
 export function updateConfig(userConfig: FrameworkConfig): void {
-  const store = getConfigStore();
-  store.resolved = buildConfig(userConfig);
-  store._src = userConfig;
+  configStore.resolved = buildConfig(userConfig);
+  configStore._src = userConfig;
   clearCache();
-  for (const listener of store.listeners) {
-    listener(store.resolved);
+  for (const listener of configStore.listeners) {
+    listener(configStore.resolved);
   }
 }
 
@@ -274,29 +266,15 @@ export function updateConfig(userConfig: FrameworkConfig): void {
  *  - Fast Refresh DOES re-run when kbach.config.js changes (new module → new object)
  */
 export function initConfig(userConfig: FrameworkConfig): void {
-  if (getConfigStore()._src === userConfig) return;
+  if (configStore._src === userConfig) return;
   updateConfig(userConfig);
 }
 
 /**
  * Custom variants registered via plugins (modifier name → CSS selector template).
- * Reads from globalThis store so it's consistent across CJS bundle boundaries.
+ * A direct reference to configStore.customVariants rather than a copy — the
+ * object itself is only ever mutated in place (keys added in addVariant()
+ * above, cleared in buildConfig()), never reassigned, so this binding always
+ * reflects the current set.
  */
-export const customVariants: Record<string, string> = new Proxy(
-  {} as Record<string, string>,
-  {
-    get(_t, p: string | symbol) {
-      return typeof p === 'string' ? getConfigStore().customVariants[p] : undefined;
-    },
-    set(_t, p: string | symbol, v: string) {
-      if (typeof p === 'string') getConfigStore().customVariants[p] = v;
-      return true;
-    },
-    ownKeys() { return Object.keys(getConfigStore().customVariants); },
-    getOwnPropertyDescriptor(_t, p: string | symbol) {
-      if (typeof p !== 'string') return undefined;
-      const v = getConfigStore().customVariants[p];
-      return v !== undefined ? { value: v, writable: true, enumerable: true, configurable: true } : undefined;
-    },
-  },
-);
+export const customVariants: Record<string, string> = configStore.customVariants;

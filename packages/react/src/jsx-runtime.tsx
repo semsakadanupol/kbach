@@ -106,6 +106,40 @@ function mergeStyle(
   return { ...computed, ...(userStyle as object) };
 }
 
+// ─── Substituted-RN-primitive flex compensation ───────────────────────────────
+//
+// React Native's View/ScrollView/SafeAreaView/etc. are ALWAYS flex containers
+// natively. flex-1/flex-auto/flex-grow/flex-shrink deliberately don't imply
+// display:flex at the CSS-class level (core/resolvers/layout.ts) — a single
+// shared `.flex-1 { }` rule can't vary per element, and forcing it there broke
+// ordinary <div className="flex-1"> usage elsewhere that relies on staying
+// block. But an element substituted FROM a real RN primitive (webTag truthy —
+// the caller wrote <View>/<ScrollView>/<SafeAreaView>/...) is exactly the case
+// where that native "always flex" default IS actually expected, since that's
+// what the component they wrote means — most commonly hit as Expo Web's
+// <View className="flex-1 items-center justify-center"> silently losing its
+// centering once View becomes a plain (block-by-default) <div>.
+//
+// Compensated with a per-element inline style override rather than touching
+// the shared class rule — inline style always wins over class-based CSS, so
+// this can't leak into other elements using the same class.
+function withImpliedFlexIfNeeded(
+  webTag: string | null,
+  resolvedBase: Record<string, unknown> | undefined,
+  userStyle: unknown,
+): unknown {
+  if (
+    !webTag || !resolvedBase || resolvedBase.display !== undefined ||
+    !('flexGrow' in resolvedBase || 'flexShrink' in resolvedBase || 'flex' in resolvedBase)
+  ) {
+    return userStyle;
+  }
+  // User's own explicit style still wins on conflict (e.g. an intentional display: 'block').
+  return Array.isArray(userStyle)
+    ? [{ display: 'flex' }, ...userStyle]
+    : { display: 'flex', ...(userStyle as object | undefined) };
+}
+
 // ─── Element factory ──────────────────────────────────────────────────────────
 
 function makeElement(
@@ -220,7 +254,8 @@ function processElement(
       ? (__kbachStyles as ResolvedStyle)
       : (classStr ? resolve(classStr, config.theme, config.darkMode) : {});
 
-  const { style: userStyle, ...passProps } = omitConsumed(workingProps) as any;
+  const { style: rawUserStyle, ...passProps } = omitConsumed(workingProps) as any;
+  const userStyle = withImpliedFlexIfNeeded(webTag, resolved.base as Record<string, unknown> | undefined, rawUserStyle);
 
   // Bug #8: bucketMods result is memoized by resolved object reference.
   const { interactive, modeOrResponsive } = bucketMods(resolved);

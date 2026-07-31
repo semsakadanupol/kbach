@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { readProjectInfo, isExpoProject, type PackageManager, type Platform } from './detect';
-import { resolveAnswers, type CliFlags } from './prompts';
+import { resolveAnswers, confirmPlan, type CliFlags } from './prompts';
 import { writeKbachConfig, writeKbachCss, writeBabelConfig, mergeTsconfigJsx, installPackage } from './actions';
 
 // ─── Flag parsing ───────────────────────────────────────────────────────────
@@ -121,6 +121,67 @@ async function main(): Promise<void> {
   const pm = flags.pm ?? info.packageManager;
   const pkgName = platform === 'native' ? '@kbach/native' : '@kbach/react';
 
+  // Computed once, up front, so the pre-flight summary below and the actual
+  // write phase further down agree on exactly the same facts — no re-check
+  // that could see a different answer (e.g. a file appearing) between the
+  // two, and no need to duplicate mergeTsconfigJsx's own conflict/already-set
+  // detection just to preview it.
+  const babelConfigPath = path.join(cwd, 'babel.config.js');
+  const babelExisted = platform === 'native' && fs.existsSync(babelConfigPath);
+  const isExpo = platform === 'native' && isExpoProject(cwd, info.pkg);
+  const presetSpecifier = isExpo ? 'babel-preset-expo' : 'module:@react-native/babel-preset';
+  const presetPackage = isExpo ? 'babel-preset-expo' : '@react-native/babel-preset';
+  const presetInstalled = (() => {
+    const deps = {
+      ...(info.pkg.dependencies as Record<string, string> | undefined),
+      ...(info.pkg.devDependencies as Record<string, string> | undefined),
+    };
+    return presetPackage in deps;
+  })();
+
+  const summary: string[] = [];
+  summary.push(
+    flags.install
+      ? `Install ${pkgName} with ${pm}`
+      : `NOT install ${pkgName} (--no-install) — you'll need to install it yourself`,
+  );
+  summary.push(
+    fs.existsSync(path.join(cwd, 'kbach.config.js'))
+      ? 'Leave kbach.config.js untouched (already exists)'
+      : 'Create kbach.config.js',
+  );
+  if (platform === 'native') {
+    if (babelExisted) {
+      summary.push('Leave babel.config.js untouched (already exists) — print a manual merge snippet for it instead');
+    } else {
+      summary.push(`Create babel.config.js, using the ${isExpo ? 'Expo' : 'bare React Native'} preset (${presetSpecifier})`);
+      if (!presetInstalled) {
+        summary.push(
+          flags.install
+            ? `Install ${presetPackage} (that preset isn't in your dependencies yet)`
+            : `NOT install ${presetPackage} (--no-install) — the babel.config.js just created needs it before Metro will run`,
+        );
+      }
+    }
+  }
+  if (platform === 'web' && setup === 'static') {
+    const cssDir = fs.existsSync(path.join(cwd, 'src')) ? 'src/kbach.css' : 'kbach.css';
+    summary.push(
+      fs.existsSync(path.join(cwd, cssDir))
+        ? `Leave ${cssDir} untouched (already exists)`
+        : `Create ${cssDir} — the stylesheet the Vite plugin writes into`,
+    );
+  }
+  if (platform === 'web' || platform === 'next') {
+    summary.push('Add "jsx": "react-jsx" and "jsxImportSource" to tsconfig.json, if not already set (never overwrites a conflicting value)');
+  }
+  summary.push('Print the remaining manual edits (wiring ThemeProvider, etc.) — nothing beyond the above is changed automatically');
+
+  if (!flags.yes) {
+    log();
+    await confirmPlan(summary);
+  }
+
   log();
   log(`[kbach] Setting up ${pkgName} (${platform}${setup ? `, ${setup}` : ''}) with ${pm}...`);
   log();
@@ -141,31 +202,17 @@ async function main(): Promise<void> {
   const cfg = writeKbachConfig(cwd);
   (cfg.result === 'created' ? created : skipped).push(path.relative(cwd, cfg.path));
 
-  let babelExisted = false;
-  if (platform === 'native') {
-    babelExisted = fs.existsSync(path.join(cwd, 'babel.config.js'));
-    if (!babelExisted) {
-      const isExpo = isExpoProject(cwd, info.pkg);
-      // babel.config.js needs the 'module:' resolution prefix; the npm package
-      // name itself never has it — see detect.ts's isExpoProject().
-      const presetSpecifier = isExpo ? 'babel-preset-expo' : 'module:@react-native/babel-preset';
-      const presetPackage = isExpo ? 'babel-preset-expo' : '@react-native/babel-preset';
+  if (platform === 'native' && !babelExisted) {
+    const babel = writeBabelConfig(cwd, presetSpecifier);
+    (babel.result === 'created' ? created : skipped).push(path.relative(cwd, babel.path));
 
-      const babel = writeBabelConfig(cwd, presetSpecifier);
-      (babel.result === 'created' ? created : skipped).push(path.relative(cwd, babel.path));
-
-      const existingDeps = {
-        ...(info.pkg.dependencies as Record<string, string> | undefined),
-        ...(info.pkg.devDependencies as Record<string, string> | undefined),
-      };
-      if (!(presetPackage in existingDeps)) {
-        if (flags.install) {
-          log(`[kbach] Installing ${presetPackage} (referenced by the babel.config.js just created)...`);
-          const ok = installPackage(pm, presetPackage, cwd);
-          if (!ok) log(`[kbach] Install failed — install ${presetPackage} manually before running Metro, or the preset won't resolve.`);
-        } else {
-          log(`[kbach] ${presetPackage} isn't installed — install it manually (skipped via --no-install) before running Metro.`);
-        }
+    if (!presetInstalled) {
+      if (flags.install) {
+        log(`[kbach] Installing ${presetPackage} (referenced by the babel.config.js just created)...`);
+        const ok = installPackage(pm, presetPackage, cwd);
+        if (!ok) log(`[kbach] Install failed — install ${presetPackage} manually before running Metro, or the preset won't resolve.`);
+      } else {
+        log(`[kbach] ${presetPackage} isn't installed — install it manually (skipped via --no-install) before running Metro.`);
       }
     }
   }

@@ -21,6 +21,24 @@ function exitOnCancel(): never {
 }
 
 /**
+ * Shown right before the confirm prompt so "Proceed?" is an informed yes/no,
+ * not a blind one — cli.ts builds `summaryLines` from the actual platform/
+ * setup/pm choices and real file-existence checks in the target directory.
+ * Skipped entirely under --yes (nothing to confirm unattended).
+ */
+export async function confirmPlan(summaryLines: string[]): Promise<void> {
+  console.log('[kbach] This will, in the current directory:');
+  for (const line of summaryLines) console.log(`  • ${line}`);
+  console.log();
+
+  const res = await prompts(
+    { type: 'confirm', name: 'confirmed', message: 'Proceed?', initial: true },
+    { onCancel: exitOnCancel },
+  );
+  if (!res.confirmed) exitOnCancel();
+}
+
+/**
  * Only prompts for what flags/auto-detection didn't already resolve. Every
  * prompts() call passes onCancel so Ctrl+C exits cleanly instead of
  * continuing with an undefined answer.
@@ -77,19 +95,6 @@ export async function resolveAnswers(
         setup = res.setup as 'runtime' | 'static';
       }
     }
-  }
-
-  if (!flags.yes) {
-    const res = await prompts(
-      {
-        type: 'confirm',
-        name: 'confirmed',
-        message: 'Proceed?',
-        initial: true,
-      },
-      { onCancel: exitOnCancel },
-    );
-    if (!res.confirmed) exitOnCancel();
   }
 
   return { platform, setup };

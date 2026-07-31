@@ -47,7 +47,7 @@ function Logo() {
 
 function Sidebar({ onNavigate }: { onNavigate: () => void }) {
   return (
-    <nav className="flex-1 space-y-6">
+    <nav className="space-y-6">
       {NAV_GROUPS.map((group) => (
         <div key={group.label}>
           <p className={GROUP_LABEL_CLASS + ' mb-2 px-3'}>{group.label}</p>

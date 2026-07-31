@@ -2,6 +2,13 @@
   "name": "@kbach/react",
   "version": "0.6.27",
   "description": "React / React Native components and hooks for the Kbach framework",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/semsakadanupol/kbach.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/semsakadanupol/kbach#readme",
+  "bugs": "https://github.com/semsakadanupol/kbach/issues",
   "source": "./src/index.ts",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

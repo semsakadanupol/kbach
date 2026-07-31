@@ -27,9 +27,9 @@ export function writeKbachCss(root: string): { result: FileResult; path: string 
 }
 
 /** Only ever called when no babel.config.js already exists — see cli.ts. */
-export function writeBabelConfig(root: string): { result: FileResult; path: string } {
+export function writeBabelConfig(root: string, preset: string): { result: FileResult; path: string } {
   const filePath = path.join(root, 'babel.config.js');
-  return { result: writeFileIfMissing(filePath, babelConfigTemplate()), path: filePath };
+  return { result: writeFileIfMissing(filePath, babelConfigTemplate(preset)), path: filePath };
 }
 
 // ─── tsconfig.json jsx/jsxImportSource merge ──────────────────────────────────

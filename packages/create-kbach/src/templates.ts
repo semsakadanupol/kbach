@@ -5,7 +5,7 @@
 
 export function kbachConfigTemplate(): string {
   return `// kbach.config.js
-// Full reference: https://github.com/kbach/kbach (or your installed kbach-react.md / kbach-native.md)
+// Full reference: https://github.com/semsakadanupol/kbach (or your installed kbach-react.md / kbach-native.md)
 module.exports = {
   darkMode: 'attribute', // 'attribute' | 'class' | 'media'
 
@@ -38,13 +38,17 @@ export function kbachCssTemplate(): string {
 export const KBACH_CSS_START_MARKER = '/* kbach:start */';
 export const KBACH_CSS_END_MARKER = '/* kbach:end */';
 
-/** Native babel.config.js — only ever written when no such file already exists. */
-export function babelConfigTemplate(): string {
+/**
+ * Native babel.config.js — only ever written when no such file already exists.
+ * `preset` is 'babel-preset-expo' for an Expo project or '@react-native/babel-preset'
+ * for bare React Native — see detect.ts's isExpoProject().
+ */
+export function babelConfigTemplate(preset: string): string {
   return `module.exports = function (api) {
   api.cache(true);
   return {
     presets: [
-      'babel-preset-expo',
+      '${preset}',
       '@kbach/native/babel',
     ],
   };

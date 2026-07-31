@@ -148,10 +148,12 @@ table {
 
 .items-center {
   align-items: center;
+  display: flex;
 }
 
 .justify-center {
   justify-content: center;
+  display: flex;
 }
 
 .sticky {
@@ -168,6 +170,7 @@ table {
 
 .justify-between {
   justify-content: space-between;
+  display: flex;
 }
 
 .fixed {
@@ -209,6 +212,7 @@ table {
 
 .flex-col {
   flex-direction: column;
+  display: flex;
 }
 
 .relative {
@@ -260,10 +264,6 @@ table {
   width: var(--spacing-7);
 }
 
-.flex-1 {
-  flex: 1;
-}
-
 .min-h-screen {
   min-height: 100dvh;
 }
@@ -274,6 +274,10 @@ table {
 
 .h-14 {
   height: var(--spacing-14);
+}
+
+.flex-1 {
+  flex: 1;
 }
 
 .min-w-0 {

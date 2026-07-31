@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 'use strict';
 
-// @kbach/react and @kbach/native are supposed to stay version-locked (every
-// publish:* script bumps both together, even when only one is actually
-// published to npm — see the root package.json comment in KBACH.md/README).
-// That guarantee only holds if every publish attempt starts from a clean,
-// matching state. A publish that fails or is interrupted after the version
-// bump but before (or during) `npm publish` leaves the two package.json files
-// desynced with no automatic signal — the next publish:* run would silently
-// bump further from that inconsistent base. Refuse to proceed instead.
+// @kbach/react and @kbach/native are supposed to stay version-locked — both
+// their package.json "version" fields AND what's actually live on the npm
+// registry. publish:react and publish:native both publish both packages
+// together (see root package.json), so registry drift should no longer
+// happen going forward — this guard is what catches it if it ever does: a
+// publish that fails or is interrupted after the version bump but before (or
+// during) one of the two `npm publish` calls leaves the two package.json
+// files desynced with no automatic signal — the next publish:* run would
+// silently bump further from that inconsistent base. Refuse to proceed
+// instead.
 
 const reactPkg = require('../packages/react/package.json');
 const nativePkg = require('../packages/native/package.json');

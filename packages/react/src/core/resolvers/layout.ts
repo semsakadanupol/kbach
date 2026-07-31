@@ -33,46 +33,61 @@ function buildStandalone(): Record<string, StyleValue | null> {
   contents:       web ? { display: 'contents' } : null,
   'flow-root':    web ? { display: 'flow-root' } : null,
 
-  // Flex direction (both web and native)
-  'flex-row':         { flexDirection: 'row' },
-  'flex-col':         { flexDirection: 'column' },
-  'flex-row-reverse': { flexDirection: 'row-reverse' },
-  'flex-col-reverse': { flexDirection: 'column-reverse' },
+  // Flex direction, wrap, grow/shrink, and alignment (both web and native) —
+  // every one of these is meaningless without the element also being a flex
+  // container. React Native Views are ALWAYS flex containers by default, so
+  // on native this was already true for free; on web a plain <div> defaults
+  // to display:block, so e.g. `items-center` alone silently did nothing.
+  // Folding `display: 'flex'` into these on web closes that native/web gap —
+  // `flex-1 items-center justify-center` now behaves the same on both,
+  // without also needing a separate `flex` class.
+  'flex-row':         { flexDirection: 'row', ...(web ? { display: 'flex' } : {}) },
+  'flex-col':         { flexDirection: 'column', ...(web ? { display: 'flex' } : {}) },
+  'flex-row-reverse': { flexDirection: 'row-reverse', ...(web ? { display: 'flex' } : {}) },
+  'flex-col-reverse': { flexDirection: 'column-reverse', ...(web ? { display: 'flex' } : {}) },
 
   // Flex wrap (both)
-  'flex-wrap':         { flexWrap: 'wrap' },
-  'flex-wrap-reverse': { flexWrap: 'wrap-reverse' },
-  'flex-nowrap':       { flexWrap: 'nowrap' },
+  'flex-wrap':         { flexWrap: 'wrap', ...(web ? { display: 'flex' } : {}) },
+  'flex-wrap-reverse': { flexWrap: 'wrap-reverse', ...(web ? { display: 'flex' } : {}) },
+  'flex-nowrap':       { flexWrap: 'nowrap', ...(web ? { display: 'flex' } : {}) },
 
-  // Flex grow / shrink (both)
+  // Flex grow / shrink (both) — deliberately NOT folding in display:flex
+  // like the container-level properties above. flex-grow/flex-shrink are
+  // item-level: they already take effect purely via the PARENT already
+  // being a flex container, with zero dependency on this element's own
+  // display. Forcing display:flex here would instead be an unrelated side
+  // effect on THIS element's own children (turning what may be an ordinary
+  // block stack into a flex row) — exactly the kind of surprise the
+  // container-level properties above can never cause, since those are
+  // no-ops without display:flex to begin with.
   'flex-grow':     { flexGrow: 1 },
   'flex-grow-0':   { flexGrow: 0 },
   'flex-shrink':   { flexShrink: 1 },
   'flex-shrink-0': { flexShrink: 0 },
 
   // Align items (both)
-  'items-start':    { alignItems: 'flex-start' },
-  'items-end':      { alignItems: 'flex-end' },
-  'items-center':   { alignItems: 'center' },
-  'items-baseline': { alignItems: 'baseline' },
-  'items-stretch':  { alignItems: 'stretch' },
+  'items-start':    { alignItems: 'flex-start', ...(web ? { display: 'flex' } : {}) },
+  'items-end':      { alignItems: 'flex-end', ...(web ? { display: 'flex' } : {}) },
+  'items-center':   { alignItems: 'center', ...(web ? { display: 'flex' } : {}) },
+  'items-baseline': { alignItems: 'baseline', ...(web ? { display: 'flex' } : {}) },
+  'items-stretch':  { alignItems: 'stretch', ...(web ? { display: 'flex' } : {}) },
 
   // Justify content (both)
-  'justify-start':   { justifyContent: 'flex-start' },
-  'justify-end':     { justifyContent: 'flex-end' },
-  'justify-center':  { justifyContent: 'center' },
-  'justify-between': { justifyContent: 'space-between' },
-  'justify-around':  { justifyContent: 'space-around' },
-  'justify-evenly':  { justifyContent: 'space-evenly' },
+  'justify-start':   { justifyContent: 'flex-start', ...(web ? { display: 'flex' } : {}) },
+  'justify-end':     { justifyContent: 'flex-end', ...(web ? { display: 'flex' } : {}) },
+  'justify-center':  { justifyContent: 'center', ...(web ? { display: 'flex' } : {}) },
+  'justify-between': { justifyContent: 'space-between', ...(web ? { display: 'flex' } : {}) },
+  'justify-around':  { justifyContent: 'space-around', ...(web ? { display: 'flex' } : {}) },
+  'justify-evenly':  { justifyContent: 'space-evenly', ...(web ? { display: 'flex' } : {}) },
 
   // Align content (both)
-  'content-start':   { alignContent: 'flex-start' },
-  'content-end':     { alignContent: 'flex-end' },
-  'content-center':  { alignContent: 'center' },
-  'content-between': { alignContent: 'space-between' },
-  'content-around':  { alignContent: 'space-around' },
-  'content-evenly':  { alignContent: 'space-evenly' },
-  'content-stretch': { alignContent: 'stretch' },
+  'content-start':   { alignContent: 'flex-start', ...(web ? { display: 'flex' } : {}) },
+  'content-end':     { alignContent: 'flex-end', ...(web ? { display: 'flex' } : {}) },
+  'content-center':  { alignContent: 'center', ...(web ? { display: 'flex' } : {}) },
+  'content-between': { alignContent: 'space-between', ...(web ? { display: 'flex' } : {}) },
+  'content-around':  { alignContent: 'space-around', ...(web ? { display: 'flex' } : {}) },
+  'content-evenly':  { alignContent: 'space-evenly', ...(web ? { display: 'flex' } : {}) },
+  'content-stretch': { alignContent: 'stretch', ...(web ? { display: 'flex' } : {}) },
 
   // Align self (both)
   'self-auto':     { alignSelf: 'auto' },
@@ -571,6 +586,12 @@ export const layoutResolvers: Record<string, Resolver> = {
   },
 
   // ── Flex ───────────────────────────────────────────────────────────────────
+  // flex-1/flex-auto/flex-none/grow/shrink are item-level sizing properties —
+  // deliberately NOT implying display:flex here. See the "Flex grow / shrink"
+  // comment in the standalone table above for why: these already work via the
+  // PARENT's flex context regardless of this element's own display, so
+  // forcing display:flex here would only be a surprising, unrelated side
+  // effect on this element's OWN children.
   flex: ({ value, isArbitrary }, { flex }) => {
     if (!value) return { display: 'flex' };
     if (isArbitrary) {

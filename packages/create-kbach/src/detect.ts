@@ -68,6 +68,22 @@ export function detectPlatform(root: string, pkg: Record<string, unknown>): Plat
   return null;
 }
 
+/**
+ * Expo and bare React Native projects need different babel presets
+ * ('babel-preset-expo' vs '@react-native/babel-preset') — detectPlatform()
+ * above treats both as the same 'native' platform, so the babel.config.js
+ * template needs this separate, narrower check to pick the right one.
+ * metro.config.js is deliberately excluded here (unlike detectPlatform's
+ * native check) — both project types have one, so it isn't an Expo signal.
+ */
+export function isExpoProject(root: string, pkg: Record<string, unknown>): boolean {
+  const deps = {
+    ...(pkg.dependencies as Record<string, string> | undefined),
+    ...(pkg.devDependencies as Record<string, string> | undefined),
+  };
+  return 'expo' in deps || fileExists(root, 'app.json', 'app.config.js', 'app.config.ts');
+}
+
 export type ReadProjectInfoResult =
   | { status: 'ok'; info: ProjectInfo }
   | { status: 'missing' }

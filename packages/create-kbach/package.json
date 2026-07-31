@@ -2,6 +2,13 @@
   "name": "create-kbach",
   "version": "0.1.2",
   "description": "Add Kbach to an existing React (Vite/Next.js) or React Native (Expo) project",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/semsakadanupol/kbach.git",
+    "directory": "packages/create-kbach"
+  },
+  "homepage": "https://github.com/semsakadanupol/kbach#readme",
+  "bugs": "https://github.com/semsakadanupol/kbach/issues",
   "bin": {
     "create-kbach": "dist/cli.js"
   },

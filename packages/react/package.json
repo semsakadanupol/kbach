@@ -9,19 +9,19 @@
     ".": {
       "types": "./dist/index.d.ts",
       "source": "./src/index.ts",
-      "import": "./dist/index.js",
+      "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
       "source": "./src/jsx-runtime.tsx",
-      "import": "./dist/jsx-runtime.js",
+      "import": "./dist/jsx-runtime.mjs",
       "require": "./dist/jsx-runtime.js"
     },
     "./jsx-dev-runtime": {
       "types": "./dist/jsx-dev-runtime.d.ts",
       "source": "./src/jsx-dev-runtime.tsx",
-      "import": "./dist/jsx-dev-runtime.js",
+      "import": "./dist/jsx-dev-runtime.mjs",
       "require": "./dist/jsx-dev-runtime.js"
     },
     "./types": {

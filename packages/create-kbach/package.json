@@ -1,10 +1,9 @@
 {
   "name": "create-kbach",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Add Kbach to an existing React (Vite/Next.js) or React Native (Expo) project",
-  "private": true,
   "bin": {
-    "create-kbach": "./dist/cli.js"
+    "create-kbach": "dist/cli.js"
   },
   "files": [
     "dist"

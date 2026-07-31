@@ -457,6 +457,26 @@ module.exports = {
 
 The Babel preset automatically syncs `kbach.config.js` into the runtime — no extra setup needed.
 
+### Mode-aware colors (dark mode without `dark:`)
+
+A color value can be `{ light, dark }` instead of a plain string — define it once, and every class using that color automatically picks the right side, with no `dark:` variant needed at the call site:
+
+```js
+extend: {
+  theme: {
+    colors: {
+      surface: { light: '#ffffff', dark: '#111827' },
+    },
+  },
+},
+```
+
+```jsx
+<View className="bg-surface">
+```
+
+Works everywhere a color does — `useColors()`, opacity composition (`bg-surface/50`), and per-shade within a scale. An explicit `dark:`/`light:` modifier stacked on an already mode-aware color is not supported (falls back to the light side).
+
 ### Custom font families
 ```js
 // kbach.config.js

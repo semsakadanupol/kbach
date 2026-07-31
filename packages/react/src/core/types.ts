@@ -39,8 +39,14 @@ export interface ResolvedStyle {
 
 // ─── Theme config ────────────────────────────────────────────────────────────
 
-export type ColorShades = Record<string, string>;
-export type ThemeColors = Record<string, string | ColorShades>;
+/**
+ * A color value is either a plain string (hex/rgb/alias-to-another-color-name)
+ * or a mode-aware pair — resolved to `light` or `dark` per the active theme
+ * mode wherever it's actually used (className resolution, useColors()).
+ */
+export type ColorValue = string | { light: string; dark: string };
+export type ColorShades = Record<string, ColorValue>;
+export type ThemeColors = Record<string, ColorValue | ColorShades>;
 export type ThemeSpacing = Record<string, number | string>;
 
 export interface ThemeConfig {

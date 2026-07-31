@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useTheme } from './context';
-import { parseHexRgb, defaultColors, type DefaultColorName } from './core';
-import type { ThemeColors, ColorShades } from './core';
+import { parseHexRgb, defaultColors, isModeAwareColor, type DefaultColorName } from './core';
+import type { ThemeColors, ColorShades, ColorValue } from './core';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -59,7 +59,12 @@ function applyOpacity(color: string, opacity: number): string {
   return color;
 }
 
-function makeShadeProxy(shades: ColorShades): ColorScale {
+/** Collapse a mode-aware `{ light, dark }` pair to the active side; a plain string passes through unchanged. */
+function pickSide(value: ColorValue, isDark: boolean): string {
+  return isModeAwareColor(value) ? (isDark ? value.dark : value.light) : value;
+}
+
+function makeShadeProxy(shades: ColorShades, isDark: boolean): ColorScale {
   return new Proxy(shades as unknown as ColorScale, {
     get(target, prop) {
       const key = String(prop);
@@ -69,9 +74,10 @@ function makeShadeProxy(shades: ColorShades): ColorScale {
         const shade = key.slice(0, slash);
         const op = Number(key.slice(slash + 1));
         const color = (target as any)[shade];
-        return typeof color === 'string' ? applyOpacity(color, op) : undefined;
+        return color !== undefined ? applyOpacity(pickSide(color, isDark), op) : undefined;
       }
-      return (target as any)[key];
+      const color = (target as any)[key];
+      return color !== undefined ? pickSide(color, isDark) : undefined;
     },
   });
 }
@@ -80,6 +86,7 @@ function makeShadeProxy(shades: ColorShades): ColorScale {
 
 export function wrapColors<ColorName extends string = DefaultColorName>(
   rawColors: ThemeColors,
+  isDark = false,
 ): ColorsAPI<ColorName> {
   const cache = new Map<string, ColorScale>();
   const alpha = (color: string, opacity?: number) =>
@@ -97,15 +104,18 @@ export function wrapColors<ColorName extends string = DefaultColorName>(
         const name = key.slice(0, slash);
         const op = Number(key.slice(slash + 1));
         const entry = rawColors[name];
-        return typeof entry === 'string' ? applyOpacity(entry, op) : undefined;
+        return entry !== undefined && (typeof entry === 'string' || isModeAwareColor(entry))
+          ? applyOpacity(pickSide(entry, isDark), op)
+          : undefined;
       }
 
       const entry = rawColors[key];
       if (entry === undefined) return undefined;
-      if (typeof entry === 'string') return entry;
+      if (typeof entry === 'string' || isModeAwareColor(entry)) return pickSide(entry, isDark);
 
-      if (!cache.has(key)) cache.set(key, makeShadeProxy(entry));
-      return cache.get(key)!;
+      const cacheKey = `${key}:${isDark}`;
+      if (!cache.has(cacheKey)) cache.set(cacheKey, makeShadeProxy(entry, isDark));
+      return cache.get(cacheKey)!;
     },
   });
 }
@@ -113,6 +123,6 @@ export function wrapColors<ColorName extends string = DefaultColorName>(
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useColors<ColorName extends string = DefaultColorName>(): ColorsAPI<ColorName> {
-  const { config } = useTheme();
-  return useMemo(() => wrapColors<ColorName>(config.theme.colors), [config.theme.colors]);
+  const { config, isDark } = useTheme();
+  return useMemo(() => wrapColors<ColorName>(config.theme.colors, isDark), [config.theme.colors, isDark]);
 }

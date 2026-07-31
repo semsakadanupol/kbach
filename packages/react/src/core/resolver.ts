@@ -5,6 +5,7 @@ import { resolveUtility, isKnownUtility } from './utilities';
 import { LRUCache } from './cache';
 import { escapeCSSSelector, isWeb, isNative } from './platform';
 import { getGlobalScreens } from './responsiveStore';
+import { expandModeAwareColorClasses } from './modeAwareColors';
 import {
   getModifier,
   matchModifier,
@@ -384,7 +385,7 @@ export function generateClassCSS(
   screens: Record<string, number> = {},
 ): string {
   const rules: string[] = [];
-  for (const parsed of parseClasses(classString)) {
+  for (const parsed of parseClasses(expandModeAwareColorClasses(classString, theme.colors))) {
     const styles = resolveUtility(parsed, theme);
     if (!styles) continue;
     const bucketKey = parsed.modifiers.length === 0 ? 'base' : parsed.modifiers.join(':');
@@ -408,6 +409,9 @@ export function resolve(
   darkMode: 'attribute' | 'class' | 'media' = 'attribute',
 ): ResolvedStyle {
   const cache = getThemeCache(theme);
+  // Cached (and CSS-injected below) under the ORIGINAL classString — expansion
+  // is a pure function of (classString, theme.colors), so this stays correct
+  // without the cache key needing to know anything changed.
   const cacheKey = `${classString}::${darkMode}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
@@ -415,7 +419,7 @@ export function resolve(
   const result: ResolvedStyle = {};
   const onWeb = isWeb;
 
-  for (const parsed of parseClasses(classString)) {
+  for (const parsed of parseClasses(expandModeAwareColorClasses(classString, theme.colors))) {
     const styles = resolveUtility(parsed, theme);
     if (!styles) {
       if (process.env.NODE_ENV !== 'production' && !parsed.isArbitrary && !isKnownUtility(parsed.utility)

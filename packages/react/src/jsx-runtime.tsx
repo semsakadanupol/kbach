@@ -9,7 +9,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from 'react/jsx-runtime';
 import { Fragment } from 'react';
 import type { ReactElement } from 'react';
-import { isWeb, isNative, getEffectiveIsWeb, getConfig, onConfigChange, resolve, flatten, getDefaultFontFamily, normalizeClassString, isRuntimeCSSDisabled, getInteractiveModifiers, getModeModifiers, getResponsiveModifiers, type ResolvedStyle } from './core';
+import { isWeb, isNative, getEffectiveIsWeb, getConfig, onConfigChange, resolve, flatten, getDefaultFontFamily, normalizeClassString, isRuntimeCSSDisabled, getInteractiveModifiers, getModeModifiers, getResponsiveModifiers, expandModeAwareColorClasses, type ResolvedStyle } from './core';
 import { InteractiveWrapper } from './InteractiveWrapper';
 import { DarkWrapper } from './DarkWrapper';
 import { getWebTag, transformToWebProps, registerWebElement } from './web-substitute';
@@ -214,15 +214,31 @@ function processElement(
   }
   const classStr: string | undefined = classStrRaw;
 
+  // Mode-aware colors (kbach.config.js colors shaped `{ light, dark }`) are
+  // expanded from their semantic name (e.g. `bg-surface`) into an explicit
+  // `bg-[#hex] dark:bg-[#hex2]` pair right here, before ANYTHING else touches
+  // classStr. That's deliberate: the CSS Kbach generates/injects for this
+  // element is keyed off the expanded token text (see modeAwareColors.ts and
+  // resolver.ts's resolve()/generateClassCSS()), so the literal className
+  // string landing on the DOM has to be the SAME expanded text everywhere —
+  // the static-CSS fast path below, the two wrapper components, and the plain
+  // path all set `className` from this one variable rather than each
+  // re-deriving it, so they can't drift out of sync with each other.
+  // getConfig() is hoisted up here (was previously fetched further down)
+  // purely so the fast path below — which returns before that later point —
+  // can reach theme.colors too. Cheap: a memoized singleton read.
+  const config = getConfig();
+  const expandedClassStr = classStr ? expandModeAwareColorClasses(classStr, config.theme.colors) : classStr;
+
   // ── Static CSS fast path ─────────────────────────────────────────────────────
   // When kbach.css is the style source (Vite plugin), resolve(), flatten(), and
   // all wrapper logic are dead work — the CSS file handles everything.
   // Skip them entirely: just normalize className and forward the user's style prop.
-  if (!isNative && isRuntimeCSSDisabled() && classStr && !__kbachStyles) {
+  if (!isNative && isRuntimeCSSDisabled() && expandedClassStr && !__kbachStyles) {
     const { style: userStyle, ...passProps } = omitConsumed(workingProps) as any;
     return makeElement(isStaticChildren, effectiveType as any, {
       ...passProps,
-      className: normalizeClassString(classStr),
+      className: normalizeClassString(expandedClassStr),
       ...(userStyle !== undefined ? { style: userStyle } : {}),
     }, key);
   }
@@ -261,14 +277,16 @@ function processElement(
     return makeElement(isStaticChildren, effectiveType, { ...passProps, style: finalStyle }, key);
   }
 
-  const config = getConfig();
   // __kbachStyles = Babel-pre-resolved buckets (avoids runtime resolve on native).
   // On web (browser) we must call resolve() regardless so it injects the CSS rules
   // as a side effect — the pre-resolved object is an optimisation for native only.
+  // resolve() runs its own (idempotent, cheap-to-skip) mode-aware expansion
+  // internally too — see resolver.ts — so passing the already-expanded string
+  // here is only to avoid a second wasted pass, not required for correctness.
   const resolved: ResolvedStyle =
     (!isWeb && (__kbachStyles as ResolvedStyle | undefined) != null)
       ? (__kbachStyles as ResolvedStyle)
-      : (classStr ? resolve(classStr, config.theme, config.darkMode) : {});
+      : (expandedClassStr ? resolve(expandedClassStr, config.theme, config.darkMode) : {});
 
   const { style: rawUserStyle, ...passProps } = omitConsumed(workingProps) as any;
   const userStyle = withImpliedFlexIfNeeded(webTag, resolved.base as Record<string, unknown> | undefined, rawUserStyle);
@@ -280,7 +298,7 @@ function processElement(
     return _jsx(InteractiveWrapper, {
       Component: effectiveType as any,
       resolvedStyle: resolved,
-      ...(!isNative && classStr ? { className: normalizeClassString(classStr) } : {}),
+      ...(!isNative && expandedClassStr ? { className: normalizeClassString(expandedClassStr) } : {}),
       style: userStyle,
       ...passProps,
     }, key) as ReactElement;
@@ -290,7 +308,7 @@ function processElement(
     return _jsx(DarkWrapper, {
       Component: effectiveType as any,
       resolvedStyle: resolved,
-      ...(!isNative && classStr ? { className: normalizeClassString(classStr) } : {}),
+      ...(!isNative && expandedClassStr ? { className: normalizeClassString(expandedClassStr) } : {}),
       style: userStyle,
       ...passProps,
     }, key) as ReactElement;
@@ -316,7 +334,7 @@ function processElement(
   return makeElement(isStaticChildren, effectiveType as any, {
     ...passProps,
     ...(finalStyle !== undefined ? { style: finalStyle } : {}),
-    ...(!isNative && classStr ? { className: normalizeClassString(classStr) } : {}),
+    ...(!isNative && expandedClassStr ? { className: normalizeClassString(expandedClassStr) } : {}),
   }, key);
 }
 

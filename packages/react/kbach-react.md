@@ -712,6 +712,29 @@ module.exports = {
 
 **Global default font (web):** Setting `fontFamily.sans` to anything other than `'System'` auto-injects `body { font-family: <font> }`.
 
+### Mode-aware colors (dark mode without `dark:`)
+
+A color value can be `{ light, dark }` instead of a plain string — define it once, and every class using that color automatically picks the right side, with no `dark:` variant needed at the call site:
+
+```js
+extend: {
+  theme: {
+    colors: {
+      surface: { light: '#ffffff', dark: '#111827' },
+      // each side can itself be an alias — resolved independently
+      accent:  { light: 'blue-6', dark: 'blue-4' },
+    },
+  },
+},
+```
+
+```jsx
+<div className="bg-surface text-accent" />
+// equivalent to writing bg-white dark:bg-gray-9 text-blue-6 dark:text-blue-4 by hand
+```
+
+Works everywhere a color does — `useColors()` (returns the active side directly), opacity composition (`bg-surface/50`), and per-shade within a scale (`brand: { 6: { light: '#3b82f6', dark: '#60a5fa' } }`). An explicit `dark:`/`light:` modifier stacked on an already mode-aware color is not supported (falls back to the light side) — the whole point is not needing `dark:` for these.
+
 ### Runtime update
 ```js
 import { updateConfig, clearCache } from '@kbach/react';

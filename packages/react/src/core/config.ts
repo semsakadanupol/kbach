@@ -1,8 +1,9 @@
-import type { FrameworkConfig, ResolvedConfig, ThemeConfig, ThemeColors, ColorShades, PluginAPI, StyleValue } from './types';
+import type { FrameworkConfig, ResolvedConfig, ThemeConfig, ThemeColors, ColorShades, ColorValue, PluginAPI, StyleValue } from './types';
 import { defaultTheme } from './theme';
 import { clearPluginUtilities, getPluginStandaloneMap } from './utilities';
 import { clearCache, injectGlobalStyles, setDefaultFontFamily } from './resolver';
 import { registerModifier, clearPluginModifiers, type ModifierDef } from './registry';
+import { isModeAwareColor } from './colorValue';
 import { kbachWarn } from './devWarn';
 
 // ─── Deep merge ───────────────────────────────────────────────────────────────
@@ -76,8 +77,14 @@ function resolveOneRef(ref: string, colors: ThemeColors): string | null {
   const shade = ref.slice(lastDash + 1);
   if (!/^\d+$/.test(shade)) return null;
   const entry = colors[name];
-  if (!entry || typeof entry !== 'object') return null;
-  return (entry as ColorShades)[shade] ?? null;
+  // entry itself being a mode-aware pair means `name` has no shades to index
+  // into — nothing at colors[name][shade] to chase.
+  if (!entry || typeof entry !== 'object' || isModeAwareColor(entry)) return null;
+  const target = (entry as ColorShades)[shade];
+  // A chain can't continue INTO a mode-aware pair (which side would it pick?)
+  // — the chain simply stops here, and resolveChain's caller (resolveValue)
+  // handles a mode-aware pair's own light/dark sides as their own chains.
+  return typeof target === 'string' ? target : null;
 }
 
 function resolveColorRefs(colors: ThemeColors): ThemeColors {
@@ -95,14 +102,21 @@ function resolveColorRefs(colors: ThemeColors): ThemeColors {
     return current;
   }
 
+  // A mode-aware pair's light/dark sides are each their own independent alias
+  // chain (e.g. `{ light: 'gray-2', dark: 'gray-9' }` — two ordinary string
+  // aliases, just packaged together).
+  function resolveValue(val: ColorValue): ColorValue {
+    return typeof val === 'string' ? resolveChain(val) : { light: resolveChain(val.light), dark: resolveChain(val.dark) };
+  }
+
   const out: ThemeColors = {};
   for (const [key, val] of Object.entries(colors)) {
-    if (typeof val === 'string') {
-      out[key] = resolveChain(val);
+    if (typeof val === 'string' || isModeAwareColor(val)) {
+      out[key] = resolveValue(val);
     } else {
       const shades: ColorShades = {};
-      for (const [shade, hex] of Object.entries(val)) {
-        shades[shade] = resolveChain(hex);
+      for (const [shade, v] of Object.entries(val)) {
+        shades[shade] = resolveValue(v);
       }
       out[key] = shades;
     }

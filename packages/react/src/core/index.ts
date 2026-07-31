@@ -4,6 +4,7 @@ export type {
   StyleValue,
   ParsedClass,
   ResolvedStyle,
+  ColorValue,
   ColorShades,
   ThemeColors,
   ThemeSpacing,
@@ -13,6 +14,9 @@ export type {
   PluginAPI,
   DarkMode,
 } from './types';
+
+export { isModeAwareColor } from './colorValue';
+export { expandModeAwareColorClasses } from './modeAwareColors';
 
 export { defaultTheme, defaultColors } from './theme';
 export type { DefaultColorName, DefaultSpacingKey } from './theme';

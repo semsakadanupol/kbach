@@ -1,8 +1,21 @@
 import type { StyleValue, ThemeColors } from '../types';
 import { getEffectiveIsWeb } from '../platform';
+import { isModeAwareColor } from '../colorValue';
 import type { Resolver } from './types';
 
 // ─── Color resolution ─────────────────────────────────────────────────────────
+
+// A mode-aware `{ light, dark }` pair reaching here unexpanded means the
+// caller bypassed modeAwareColors.ts's className-level expansion (resolve()/
+// generateClassCSS() always run it first — see resolver.ts). That's only
+// reachable today via an explicit `dark:`/`light:` modifier stacked on an
+// already mode-aware color, which the expansion deliberately skips (chasing
+// "which side does dark:-on-top-of-already-mode-aware mean" isn't
+// well-defined). Falling back to the light side keeps this a plain "picked
+// the less surprising default" rather than silently rendering nothing.
+function pickModeAwareFallback(v: string | { light: string; dark: string }): string {
+  return isModeAwareColor(v) ? v.light : v;
+}
 
 export function resolveColor(value: string, colors: ThemeColors, isArbitrary: boolean): string | null {
   if (isArbitrary) return value;
@@ -24,15 +37,17 @@ export function resolveColor(value: string, colors: ThemeColors, isArbitrary: bo
   } else if (colorPart in colors) {
     const entry = colors[colorPart];
     if (typeof entry === 'string') hex = entry;
-    else if (typeof entry === 'object' && '6' in entry) hex = entry['6']!;
+    else if (isModeAwareColor(entry)) hex = pickModeAwareFallback(entry);
+    else if (typeof entry === 'object' && '6' in entry) hex = pickModeAwareFallback(entry['6']!);
   } else {
     const lastDash = colorPart.lastIndexOf('-');
     if (lastDash > 0) {
       const colorName = colorPart.slice(0, lastDash);
       const shade = colorPart.slice(lastDash + 1);
       const scale = colors[colorName];
-      if (scale && typeof scale === 'object' && shade in scale) {
-        hex = (scale as Record<string, string>)[shade] ?? null;
+      if (scale && typeof scale === 'object' && !isModeAwareColor(scale) && shade in scale) {
+        const shadeVal = (scale as Record<string, string | { light: string; dark: string }>)[shade];
+        hex = shadeVal !== undefined ? pickModeAwareFallback(shadeVal) : null;
       }
     }
   }

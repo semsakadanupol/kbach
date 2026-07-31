@@ -55,15 +55,21 @@ function getSortedEntries(resolved: ResolvedStyle): readonly [string, StyleValue
 }
 
 // ─── Default font family ──────────────────────────────────────────────────────
+//
+// Plain module-level variable, not globalThis — see darkModeStore.ts's header
+// comment for why globalThis is no longer needed now that core/ builds as its
+// own shared dist/core/ entry (dist/index.js, dist/jsx-runtime.js, and
+// dist/jsx-dev-runtime.js all require() the same module instance, so there's
+// only ever one copy of this state to begin with).
 
-const FONT_KEY = '__kbach_default_font__';
+let _defaultFontFamily: string | undefined;
 
 export function setDefaultFontFamily(font: string | undefined): void {
-  (globalThis as Record<string, unknown>)[FONT_KEY] = font;
+  _defaultFontFamily = font;
 }
 
 export function getDefaultFontFamily(): string | undefined {
-  return (globalThis as Record<string, unknown>)[FONT_KEY] as string | undefined;
+  return _defaultFontFamily;
 }
 
 // ─── CSS injection (web only) ─────────────────────────────────────────────────
@@ -101,13 +107,14 @@ const _injectedRules = new LRUCache<string, true>(50_000, evictInjectedRule);
 
 // When kbach.css is loaded as a static stylesheet (Vite plugin), runtime CSS
 // injection is redundant. Call disableRuntimeCSS() once at startup to skip it.
-// globalThis-backed so the flag is shared across CJS bundle splits (Metro).
-const _CSS_DISABLED_KEY = '__kbach_runtime_css_disabled__';
+// Plain module-level flag, not globalThis — see the default-font-family
+// comment above / darkModeStore.ts's header comment for why.
+let _runtimeCSSDisabled = false;
 export function disableRuntimeCSS(): void {
-  (globalThis as Record<string, unknown>)[_CSS_DISABLED_KEY] = true;
+  _runtimeCSSDisabled = true;
 }
 export function isRuntimeCSSDisabled(): boolean {
-  return !!(globalThis as Record<string, unknown>)[_CSS_DISABLED_KEY];
+  return _runtimeCSSDisabled;
 }
 
 function getStyleEl(): HTMLStyleElement {

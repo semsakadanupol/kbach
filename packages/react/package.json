@@ -32,14 +32,10 @@
       "source": "./src/vite-plugin.ts",
       "import": "./dist/vite-plugin.mjs",
       "require": "./dist/vite-plugin.js"
-    },
-    "./vite/client": {
-      "types": "./dist/vite-plugin-client.d.ts"
     }
   },
   "scripts": {
     "build": "tsup",
-    "postbuild": "node -e \"const f=require('fs');f.copyFileSync('src/vite-plugin-client.d.ts','dist/vite-plugin-client.d.ts');f.copyFileSync('src/vite-plugin-client.d.ts','dist/vite-plugin-client.d.mts')\"",
     "dev": "tsup --watch",
     "test": "vitest run --passWithNoTests",
     "lint": "tsc --noEmit",

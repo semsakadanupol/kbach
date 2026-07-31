@@ -11,6 +11,7 @@
 
 import { escapeCSSSelector } from './platform';
 import { kbachWarn } from './devWarn';
+import { LRUCache } from './cache';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -164,8 +165,10 @@ export function clearPluginModifiers(): void {
 // values), they can't be pre-registered in BUILTIN_MODIFIERS like every other
 // modifier — this constructs a ModifierDef for them on demand instead, and
 // memoizes each one so repeated classes (the common case) don't reallocate.
+// LRU-bounded like every other cache in core/ — an app that generates dynamic
+// group/peer names (ids, indices, …) must not grow this without limit.
 const NAMED_GROUP_PEER_RE = /^(group|peer)-(hover|focus)\/(.+)$/;
-const _namedModifierCache = new Map<string, ModifierDef>();
+const _namedModifierCache = new LRUCache<string, ModifierDef>(10_000);
 
 function getNamedGroupPeerModifier(name: string): ModifierDef | undefined {
   const cached = _namedModifierCache.get(name);

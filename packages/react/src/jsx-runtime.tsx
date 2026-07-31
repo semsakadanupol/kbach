@@ -150,7 +150,19 @@ function processElement(
     : rawProps;
 
   const { className, kb: kbProp, __kbachStyles, __kbachClasses } = workingProps as any;
-  const classStr: string | undefined = className ?? kbProp ?? __kbachClasses;
+  const classStrRaw: unknown = className ?? kbProp ?? __kbachClasses;
+
+  // className/kb isn't always a plain string — third-party components can declare
+  // their own contract for it, e.g. react-router's <NavLink className={({isActive}) =>
+  // '...'}>. Kbach only knows how to resolve a literal class string; anything else
+  // (a function, in that example) isn't ours to touch, so skip interception entirely
+  // and forward the element untouched. Without this, splitClassTokens() below would
+  // iterate a function by its `.length` (arity) instead of a string's, silently
+  // producing the single garbage token "undefined" instead of erroring loudly.
+  if (classStrRaw !== undefined && typeof classStrRaw !== 'string') {
+    return makeElement(isStaticChildren, effectiveType as any, workingProps, key);
+  }
+  const classStr: string | undefined = classStrRaw;
 
   // ── Static CSS fast path ─────────────────────────────────────────────────────
   // When kbach.css is the style source (Vite plugin), resolve(), flatten(), and

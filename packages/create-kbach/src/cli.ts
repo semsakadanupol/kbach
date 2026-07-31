@@ -7,14 +7,38 @@ import { writeKbachConfig, writeKbachCss, writeBabelConfig, mergeTsconfigJsx, in
 // ─── Flag parsing ───────────────────────────────────────────────────────────
 // Deliberately hand-rolled — five flags doesn't justify a dependency.
 
+const VALID_PLATFORMS: readonly Platform[] = ['web', 'next', 'native'];
+const VALID_SETUPS: readonly ('runtime' | 'static')[] = ['runtime', 'static'];
+const VALID_PMS: readonly PackageManager[] = ['npm', 'pnpm', 'yarn', 'bun'];
+
+// Bad values here used to sail through unchecked: an invalid --platform
+// skipped every platform branch downstream (install succeeds, but no
+// config/snippets get written and nothing tells the user why), and an
+// invalid --pm crashed with a raw TypeError from an undefined lookup. Failing
+// fast here with a clear message replaces both with one obvious error.
+function invalidFlag(flag: string, value: string, valid: readonly string[]): never {
+  console.error(`[kbach] Invalid ${flag}="${value}" — expected one of: ${valid.join(', ')}`);
+  process.exit(1);
+}
+
 function parseFlags(argv: string[]): CliFlags {
   const flags: CliFlags = { yes: false, install: true };
   for (const arg of argv) {
     if (arg === '--yes' || arg === '-y') flags.yes = true;
     else if (arg === '--no-install') flags.install = false;
-    else if (arg.startsWith('--platform=')) flags.platform = arg.slice('--platform='.length) as Platform;
-    else if (arg.startsWith('--setup=')) flags.setup = arg.slice('--setup='.length) as 'runtime' | 'static';
-    else if (arg.startsWith('--pm=')) flags.pm = arg.slice('--pm='.length) as PackageManager;
+    else if (arg.startsWith('--platform=')) {
+      const value = arg.slice('--platform='.length);
+      if (!VALID_PLATFORMS.includes(value as Platform)) invalidFlag('--platform', value, VALID_PLATFORMS);
+      flags.platform = value as Platform;
+    } else if (arg.startsWith('--setup=')) {
+      const value = arg.slice('--setup='.length);
+      if (!VALID_SETUPS.includes(value as 'runtime' | 'static')) invalidFlag('--setup', value, VALID_SETUPS);
+      flags.setup = value as 'runtime' | 'static';
+    } else if (arg.startsWith('--pm=')) {
+      const value = arg.slice('--pm='.length);
+      if (!VALID_PMS.includes(value as PackageManager)) invalidFlag('--pm', value, VALID_PMS);
+      flags.pm = value as PackageManager;
+    }
   }
   return flags;
 }
@@ -77,8 +101,13 @@ async function main(): Promise<void> {
   const cwd = process.cwd();
   const flags = parseFlags(process.argv.slice(2));
 
-  const info = readProjectInfo(cwd);
-  if (!info) {
+  const projectInfo = readProjectInfo(cwd);
+  if (projectInfo.status === 'malformed') {
+    log('[kbach] Found package.json in the current directory, but it failed to parse as JSON.');
+    log('Fix the syntax error and re-run create-kbach.');
+    process.exit(1);
+  }
+  if (projectInfo.status === 'missing') {
     log('[kbach] No package.json found in the current directory.');
     log('create-kbach adds Kbach to an EXISTING project — it doesn\'t scaffold a new one.');
     log('Create your app first, then re-run this from inside it:');
@@ -86,6 +115,7 @@ async function main(): Promise<void> {
     log('  npx create-expo-app@latest  (React Native)');
     process.exit(1);
   }
+  const info = projectInfo.info;
 
   const { platform, setup } = await resolveAnswers(info.platform, flags);
   const pm = flags.pm ?? info.packageManager;

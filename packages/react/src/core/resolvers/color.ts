@@ -14,7 +14,14 @@ export function resolveColor(value: string, colors: ThemeColors, isArbitrary: bo
 
   // Resolve base hex
   let hex: string | null = null;
-  if (colorPart in colors) {
+  if (colorPart.startsWith('[') && colorPart.endsWith(']')) {
+    // Arbitrary color combined with a slash opacity, e.g. 'bg-[#1da1f2]/50'.
+    // The parser only marks a token isArbitrary when nothing follows the
+    // closing bracket (see parser.ts's arbitrary-value step), so this
+    // composition arrives here instead — same non-arbitrary path as
+    // 'black/[0.15]', just with the bracket on the other side of the slash.
+    hex = colorPart.slice(1, -1);
+  } else if (colorPart in colors) {
     const entry = colors[colorPart];
     if (typeof entry === 'string') hex = entry;
     else if (typeof entry === 'object' && '6' in entry) hex = entry['6']!;

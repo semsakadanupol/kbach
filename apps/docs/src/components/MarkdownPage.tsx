@@ -1,9 +1,11 @@
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSlug from 'rehype-slug';
 import rehypeHighlight from 'rehype-highlight';
 import { Link } from 'react-router-dom';
 import type { Components } from 'react-markdown';
+import { collectHeadings, TableOfContents, type TocHeading } from './TableOfContents';
 
 // Cross-references inside the SOURCE .md files point at sibling .md files
 // (e.g. packages/react/README.md links to "./kbach-react.md") — those paths
@@ -26,11 +28,45 @@ function rewriteHref(href: string): string | null {
   return null;
 }
 
+// Anchor targets need breathing room above them so a jumped-to heading isn't
+// flush against (or hidden under) the mobile sticky header — applies at every
+// width since the extra space is harmless on desktop, where there's no sticky
+// header to clear.
+const HEADING_SCROLL_MARGIN = { scrollMarginTop: '5rem' };
+
+function CodeBlock({ children }: { children: ReactNode }) {
+  const preRef = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    const text = preRef.current?.textContent ?? '';
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <div className="group relative mb-4">
+      <pre ref={preRef} className="bg-gray-11 dark:bg-black rounded-lg p-4 overflow-x-auto text-sm">
+        {children}
+      </pre>
+      <button
+        onClick={handleCopy}
+        aria-label="Copy code to clipboard"
+        className="absolute top-2 right-2 rounded-md px-2 py-1 text-xs font-medium text-gray-3 bg-gray-9 hover:bg-gray-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+      >
+        {copied ? 'Copied!' : 'Copy'}
+      </button>
+    </div>
+  );
+}
+
 const components: Components = {
-  h1: ({ children }) => <h1 className="text-3xl font-bold text-gray-11 dark:text-white mt-8 mb-4 first:mt-0">{children}</h1>,
-  h2: ({ children }) => <h2 className="text-2xl font-bold text-gray-11 dark:text-white mt-10 mb-3 pb-2 border-b border-gray-3 dark:border-gray-8">{children}</h2>,
-  h3: ({ children }) => <h3 className="text-lg font-semibold text-gray-11 dark:text-white mt-6 mb-2">{children}</h3>,
-  h4: ({ children }) => <h4 className="text-base font-semibold text-gray-10 dark:text-gray-2 mt-4 mb-2">{children}</h4>,
+  h1: ({ children }) => <h1 style={HEADING_SCROLL_MARGIN} className="text-3xl font-bold text-gray-11 dark:text-white mt-8 mb-4 first:mt-0">{children}</h1>,
+  h2: ({ id, children }) => <h2 id={id} style={HEADING_SCROLL_MARGIN} className="text-2xl font-bold text-gray-11 dark:text-white mt-10 mb-3 pb-2 border-b border-gray-3 dark:border-gray-8">{children}</h2>,
+  h3: ({ id, children }) => <h3 id={id} style={HEADING_SCROLL_MARGIN} className="text-lg font-semibold text-gray-11 dark:text-white mt-6 mb-2">{children}</h3>,
+  h4: ({ children }) => <h4 style={HEADING_SCROLL_MARGIN} className="text-base font-semibold text-gray-10 dark:text-gray-2 mt-4 mb-2">{children}</h4>,
   p: ({ children }) => <p className="text-gray-9 dark:text-gray-3 leading-relaxed mb-4">{children}</p>,
   ul: ({ children }) => <ul className="list-disc pl-6 mb-4 text-gray-9 dark:text-gray-3 space-y-1">{children}</ul>,
   ol: ({ children }) => <ol className="list-decimal pl-6 mb-4 text-gray-9 dark:text-gray-3 space-y-1">{children}</ol>,
@@ -48,7 +84,7 @@ const components: Components = {
     }
     return <code className={className}>{children}</code>;
   },
-  pre: ({ children }) => <pre className="bg-gray-11 dark:bg-black rounded-lg p-4 overflow-x-auto mb-4 text-sm">{children}</pre>,
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   a: ({ href, children }) => {
     if (!href) return <>{children}</>;
     if (href.startsWith('#')) {
@@ -70,15 +106,29 @@ const components: Components = {
 };
 
 export function MarkdownPage({ content }: { content: string }) {
+  const articleRef = useRef<HTMLDivElement>(null);
+  const [headings, setHeadings] = useState<TocHeading[]>([]);
+
+  // Re-scan after every render triggered by a new `content` — rehype-slug's
+  // ids only exist in the committed DOM, so this can't run any earlier than
+  // a post-render effect.
+  useEffect(() => {
+    if (!articleRef.current) return;
+    setHeadings(collectHeadings(articleRef.current));
+  }, [content]);
+
   return (
-    <div className="max-w-3xl">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeSlug, rehypeHighlight]}
-        components={components}
-      >
-        {content}
-      </ReactMarkdown>
+    <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_16rem] xl:gap-12">
+      <div ref={articleRef} className="max-w-[50rem]">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeSlug, rehypeHighlight]}
+          components={components}
+        >
+          {content}
+        </ReactMarkdown>
+      </div>
+      <TableOfContents headings={headings} />
     </div>
   );
 }

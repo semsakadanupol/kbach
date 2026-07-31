@@ -54,8 +54,15 @@ export type TsconfigMergeStatus =
 // Best-effort only — used purely to decide whether the splice below is safe,
 // never to regenerate the file, so a string like "//" inside a path value
 // being misread as a comment just means falling back to Tier 2, not a bad write.
+//
+// Replaces comment characters with same-length whitespace rather than
+// deleting them, so every index in the stripped string still lines up
+// exactly with `raw` — mergeTsconfigJsx's insertion-point regex runs against
+// this output specifically so a commented-out "compilerOptions": { block
+// can't be mistaken for the real one, and needs those offsets to carry
+// straight over to `raw` for the splice to land in the right place.
 function stripJsonComments(text: string): string {
-  return text.replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, (match) => (match.startsWith('/') ? '' : match));
+  return text.replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, (match) => match.replace(/[^\n]/g, ' '));
 }
 
 function findTsconfigPath(root: string): string | null {
@@ -76,9 +83,10 @@ export function mergeTsconfigJsx(root: string): { status: TsconfigMergeStatus; p
   if (!tsconfigPath) return { status: 'no-file' };
 
   const raw = fs.readFileSync(tsconfigPath, 'utf-8');
+  const stripped = stripJsonComments(raw);
   let parsed: { compilerOptions?: Record<string, unknown> };
   try {
-    parsed = JSON.parse(stripJsonComments(raw));
+    parsed = JSON.parse(stripped);
   } catch {
     return { status: 'unparseable', path: tsconfigPath };
   }
@@ -94,7 +102,12 @@ export function mergeTsconfigJsx(root: string): { status: TsconfigMergeStatus; p
     return { status: 'conflict', path: tsconfigPath };
   }
 
-  const blockMatch = /"compilerOptions"\s*:\s*\{/.exec(raw);
+  // Matched against `stripped`, not `raw` — a commented-out compilerOptions
+  // block ahead of the real one would otherwise match first and splice the
+  // insertion into dead text. stripJsonComments preserves offsets exactly
+  // (comments become same-length whitespace), so the index found here is
+  // valid to slice into `raw` directly below.
+  const blockMatch = /"compilerOptions"\s*:\s*\{/.exec(stripped);
   if (!blockMatch) return { status: 'no-compiler-options-block', path: tsconfigPath };
 
   const insertAt = blockMatch.index + blockMatch[0].length;

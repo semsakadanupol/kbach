@@ -12,13 +12,18 @@ export interface ProjectInfo {
   platform: Platform | null;
 }
 
-function readPackageJson(root: string): Record<string, unknown> | null {
+type PackageJsonResult =
+  | { status: 'found'; pkg: Record<string, unknown> }
+  | { status: 'missing' }
+  | { status: 'malformed' };
+
+function readPackageJson(root: string): PackageJsonResult {
   const pkgPath = path.join(root, 'package.json');
-  if (!fs.existsSync(pkgPath)) return null;
+  if (!fs.existsSync(pkgPath)) return { status: 'missing' };
   try {
-    return JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    return { status: 'found', pkg: JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) };
   } catch {
-    return null;
+    return { status: 'malformed' };
   }
 }
 
@@ -63,18 +68,29 @@ export function detectPlatform(root: string, pkg: Record<string, unknown>): Plat
   return null;
 }
 
+export type ReadProjectInfoResult =
+  | { status: 'ok'; info: ProjectInfo }
+  | { status: 'missing' }
+  | { status: 'malformed' };
+
 /**
  * Reads package.json from `cwd` and detects package manager + platform.
- * Returns null (not throws) when no package.json is found — the CLI treats
- * that as "not an existing project" and prints guidance instead of erroring.
+ * Distinguishes "no package.json" (not an existing project — the CLI prints
+ * guidance to scaffold one first) from "package.json exists but doesn't
+ * parse" (a real problem in the user's project the CLI can't safely act
+ * around) — the two used to collapse into the same `null`, which meant a
+ * broken package.json got the misleading "no package.json found" message.
  */
-export function readProjectInfo(cwd: string): ProjectInfo | null {
-  const pkg = readPackageJson(cwd);
-  if (!pkg) return null;
+export function readProjectInfo(cwd: string): ReadProjectInfoResult {
+  const result = readPackageJson(cwd);
+  if (result.status !== 'found') return { status: result.status };
   return {
-    root: cwd,
-    pkg,
-    packageManager: detectPackageManager(cwd),
-    platform: detectPlatform(cwd, pkg),
+    status: 'ok',
+    info: {
+      root: cwd,
+      pkg: result.pkg,
+      packageManager: detectPackageManager(cwd),
+      platform: detectPlatform(cwd, result.pkg),
+    },
   };
 }

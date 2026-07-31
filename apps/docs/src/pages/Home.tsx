@@ -30,9 +30,9 @@ const FEATURES = [
 
 export function Home() {
   return (
-    <div className="max-w-3xl">
-      <p className="text-sm font-semibold text-blue-6 mb-2">Kbach</p>
-      <h1 className="text-4xl font-bold text-gray-11 dark:text-white mb-4">
+    <div className="max-w-[50rem]">
+      <p className="text-sm font-semibold text-blue-6 mb-3">Kbach</p>
+      <h1 className="text-5xl font-bold text-gray-11 dark:text-white mb-5 leading-tight">
         Tailwind-like utility classes for React and React Native
       </h1>
       <p className="text-lg text-gray-8 dark:text-gray-4 mb-8 leading-relaxed">
@@ -40,21 +40,31 @@ export function Home() {
       </p>
 
       <div className="flex gap-3 mb-10">
-        <Link to="/web" className="bg-blue-6 hover:bg-blue-7 text-white font-semibold rounded-lg px-5 py-2.5">
+        <Link to="/web" className="bg-blue-6 hover:bg-blue-7 text-white font-semibold rounded-lg px-5 py-2.5 transition-colors">
           Web setup
         </Link>
-        <Link to="/native" className="bg-gray-2 dark:bg-gray-9 hover:bg-gray-3 dark:hover:bg-gray-8 text-gray-10 dark:text-white font-semibold rounded-lg px-5 py-2.5">
+        <Link to="/native" className="bg-gray-2 dark:bg-gray-9 hover:bg-gray-3 dark:hover:bg-gray-8 text-gray-10 dark:text-white font-semibold rounded-lg px-5 py-2.5 transition-colors">
           Native setup
         </Link>
       </div>
 
-      <pre className="bg-gray-11 dark:bg-black rounded-lg p-4 overflow-x-auto mb-12 text-sm text-gray-2">
-        <code>{CODE_EXAMPLE}</code>
-      </pre>
+      <div className="rounded-xl overflow-hidden mb-12 border border-gray-9 dark:border-gray-8 shadow-lg">
+        <div className="flex items-center gap-1.5 bg-gray-10 dark:bg-gray-9 px-4 py-2.5">
+          <span className="h-2.5 w-2.5 rounded-full bg-red-6" />
+          <span className="h-2.5 w-2.5 rounded-full bg-amber-6" />
+          <span className="h-2.5 w-2.5 rounded-full bg-green-6" />
+        </div>
+        <pre className="bg-gray-11 dark:bg-black p-4 overflow-x-auto text-sm text-gray-2">
+          <code>{CODE_EXAMPLE}</code>
+        </pre>
+      </div>
 
       <div className="grid sm:grid-cols-2 gap-6">
         {FEATURES.map((feature) => (
-          <div key={feature.title} className="rounded-xl border border-gray-2 dark:border-gray-9 p-5">
+          <div
+            key={feature.title}
+            className="rounded-xl border border-gray-2 dark:border-gray-9 p-5 transition-all hover:border-gray-3 dark:hover:border-gray-8 hover:shadow-md hover:-translate-y-0.5"
+          >
             <h3 className="text-base font-semibold text-gray-11 dark:text-white mb-1.5">{feature.title}</h3>
             <p className="text-sm text-gray-8 dark:text-gray-4 leading-relaxed">{feature.body}</p>
           </div>

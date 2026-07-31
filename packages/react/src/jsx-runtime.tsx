@@ -109,35 +109,51 @@ function mergeStyle(
 // ─── Substituted-RN-primitive flex compensation ───────────────────────────────
 //
 // React Native's View/ScrollView/SafeAreaView/etc. are ALWAYS flex containers
-// natively. flex-1/flex-auto/flex-grow/flex-shrink deliberately don't imply
-// display:flex at the CSS-class level (core/resolvers/layout.ts) — a single
-// shared `.flex-1 { }` rule can't vary per element, and forcing it there broke
-// ordinary <div className="flex-1"> usage elsewhere that relies on staying
-// block. But an element substituted FROM a real RN primitive (webTag truthy —
-// the caller wrote <View>/<ScrollView>/<SafeAreaView>/...) is exactly the case
-// where that native "always flex" default IS actually expected, since that's
-// what the component they wrote means — most commonly hit as Expo Web's
-// <View className="flex-1 items-center justify-center"> silently losing its
-// centering once View becomes a plain (block-by-default) <div>.
+// natively, column-direction by default. Neither of those defaults is implied
+// at the CSS-class level (core/resolvers/layout.ts) for item-level utilities
+// like flex-1 — a single shared `.flex-1 { }` rule can't vary per element, and
+// forcing it there broke ordinary <div className="flex-1"> usage elsewhere
+// that relies on staying block. Even container-level utilities that DO imply
+// display:flex there (items-center, justify-center, ...) still only set
+// display, never flexDirection — CSS's own default is 'row', not RN's 'column',
+// so e.g. <View className="flex-1 items-center justify-center"> (the exact
+// shape of Expo's default template) ends up flex but ROW: two children sit
+// side by side on web instead of stacking, while native/Expo Go (real View,
+// real column default) shows them stacked correctly.
 //
-// Compensated with a per-element inline style override rather than touching
-// the shared class rule — inline style always wins over class-based CSS, so
-// this can't leak into other elements using the same class.
+// An element substituted FROM a real RN primitive (webTag truthy — the caller
+// wrote <View>/<ScrollView>/<SafeAreaView>/...) is exactly the case where both
+// of those native defaults ARE actually expected, since that's what the
+// component they wrote means. Compensated with a per-element inline style
+// override rather than touching the shared class rule — inline style always
+// wins over class-based CSS, so this can't leak into other elements using the
+// same class, and an explicit flex-row/flex-col/display:block elsewhere in
+// the same className always wins over this (checked via resolvedBase, which
+// already reflects it).
 function withImpliedFlexIfNeeded(
   webTag: string | null,
   resolvedBase: Record<string, unknown> | undefined,
   userStyle: unknown,
 ): unknown {
-  if (
-    !webTag || !resolvedBase || resolvedBase.display !== undefined ||
-    !('flexGrow' in resolvedBase || 'flexShrink' in resolvedBase || 'flex' in resolvedBase)
-  ) {
-    return userStyle;
-  }
-  // User's own explicit style still wins on conflict (e.g. an intentional display: 'block').
+  if (!webTag || !resolvedBase) return userStyle;
+
+  const explicitDisplay = resolvedBase.display;
+  const hasFlexItemProps = 'flexGrow' in resolvedBase || 'flexShrink' in resolvedBase || 'flex' in resolvedBase;
+  // Already flex (e.g. items-center already set it), or would become flex via
+  // our own compensation below (flex-1 etc., and nothing already opted OUT
+  // with an explicit non-flex display like `block`).
+  const willBeFlex = explicitDisplay === 'flex' || (explicitDisplay === undefined && hasFlexItemProps);
+  if (!willBeFlex) return userStyle;
+
+  const compensation: Record<string, string> = {};
+  if (explicitDisplay === undefined) compensation.display = 'flex';
+  if (resolvedBase.flexDirection === undefined) compensation.flexDirection = 'column';
+  if (Object.keys(compensation).length === 0) return userStyle;
+
+  // User's own explicit style still wins on conflict.
   return Array.isArray(userStyle)
-    ? [{ display: 'flex' }, ...userStyle]
-    : { display: 'flex', ...(userStyle as object | undefined) };
+    ? [compensation, ...userStyle]
+    : { ...compensation, ...(userStyle as object | undefined) };
 }
 
 // ─── Element factory ──────────────────────────────────────────────────────────

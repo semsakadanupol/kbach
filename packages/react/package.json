@@ -1,6 +1,6 @@
 {
   "name": "@kbach/react",
-  "version": "0.6.37",
+  "version": "0.6.39",
   "description": "React / React Native components and hooks for the Kbach framework",
   "repository": {
     "type": "git",

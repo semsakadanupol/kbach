@@ -146,4 +146,17 @@ export const effectResolvers: Record<string, Resolver> = {
     const ms = isArbitrary ? value : `${value}ms`;
     return { transitionDelay: ms };
   },
+
+  ease: ({ value, isArbitrary }) => {
+    if (!getEffectiveIsWeb()) return null;
+    if (isArbitrary) return { transitionTimingFunction: value };
+    const presets: Record<string, string> = {
+      linear: 'linear',
+      in: 'cubic-bezier(0.4, 0, 1, 1)',
+      out: 'cubic-bezier(0, 0, 0.2, 1)',
+      'in-out': 'cubic-bezier(0.4, 0, 0.2, 1)',
+    };
+    const v = presets[value];
+    return v !== undefined ? { transitionTimingFunction: v } : null;
+  },
 };

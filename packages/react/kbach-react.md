@@ -619,6 +619,7 @@ animate-spin / animate-ping / animate-pulse / animate-bounce / animate-none
 transition / transition-all/none/colors/opacity/shadow/transform
 duration-75/100/150/200/300/500/700/1000
 delay-75/100/150/200/300/500/700/1000
+ease-linear/in/out/in-out         ease-[cubic-bezier(...)]
 ```
 
 ### Cursor

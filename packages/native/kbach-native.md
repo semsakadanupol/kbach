@@ -430,7 +430,7 @@ These resolve to `null` on React Native and produce no warning:
 `caret-*`, `accent-*`, `touch-*`, `float-*`, `clear-*`, `align-*` (vertical),
 `line-clamp-*`, `scroll-smooth`, `scroll-auto`, `overflow-clip`,
 `overflow-ellipsis`, `bg-clip-text`, `bg-gradient-to-*`,
-`animate-*`, `transition`, `filter`, `backdrop-filter`,
+`animate-*`, `transition`, `duration-*`, `delay-*`, `ease-*`, `filter`, `backdrop-filter`,
 `print:`, `before:`, `after:`, `selection:`, `first-letter:`, `first-line:`, `marker:`,
 `landscape:`, `portrait:`, `motion-reduce:`, `motion-safe:`,
 `contrast-more:`, `contrast-less:`, `rtl:`, `ltr:`,

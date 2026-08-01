@@ -50,6 +50,35 @@ export function registerWebElement(rnComponent: unknown, htmlTag: string): void 
   _cache.delete(rnComponent as object);
 }
 
+// react.forward_ref / react.memo exotic-object markers — how React tags the
+// object returned by React.forwardRef()/React.memo(). Real RN primitives
+// (View, Text, Pressable, TextInput, …) are implemented this way in both
+// react-native and react-native-web.
+const _forwardRefOrMemoType = new Set<unknown>([
+  Symbol.for('react.forward_ref'),
+  Symbol.for('react.memo'),
+]);
+
+/**
+ * True for real RN primitives (forwardRef-wrapped, or a class component with
+ * React.Component in its prototype chain, e.g. FlatList/SectionList). False
+ * for plain function components — including React Native's own and
+ * react-native-reanimated's `createAnimatedComponent()` wrappers (Animated.View,
+ * Animated.Text, …), which deliberately re-borrow the wrapped component's own
+ * `name`/`displayName` (so `Animated.View.displayName === 'View'`) but are a
+ * PLAIN arrow function under the hood — nothing else distinguishes them
+ * structurally from an ordinary custom "View"-named function component. Without
+ * this check, name-based matching alone would silently substitute Animated.View
+ * for a bare `<div>`, discarding createAnimatedComponent's entire wiring (the
+ * worklet-driven style never gets applied — the element just renders once with
+ * whatever the initial snapshot happened to be, then never animates again).
+ */
+function looksLikeRealRNPrimitive(type: object): boolean {
+  const t = (type as any).$$typeof;
+  if (t !== undefined) return _forwardRefOrMemoType.has(t);
+  return !!(type as any).prototype?.isReactComponent;
+}
+
 /**
  * Return the HTML tag to substitute for this component type on web.
  * For TextInput, checks props.multiline to decide between input and textarea.
@@ -60,6 +89,7 @@ export function getWebTag(type: unknown, props?: Record<string, unknown>): strin
   if (type === null || (typeof type !== 'function' && typeof type !== 'object')) return null;
   const obj = type as object;
   if (_userMap.has(obj)) return _userMap.get(obj)!;
+  if (!looksLikeRealRNPrimitive(obj)) return null;
 
   const name: string | undefined = (obj as any).displayName ?? (obj as any).name;
   if (!name) {

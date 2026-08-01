@@ -740,17 +740,21 @@ extend: {
       surface: { light: '#ffffff', dark: '#111827' },
       // each side can itself be an alias — resolved independently
       accent:  { light: 'blue-6', dark: 'blue-4' },
+      // or derived from another color at an opacity — 'name/opacity', resolved
+      // once here instead of only being computable at runtime via colors.alpha()
+      accentSoft: { light: 'accent/30', dark: 'accent/40' },
     },
   },
 },
 ```
 
 ```jsx
-<div className="bg-surface text-accent" />
-// equivalent to writing bg-white dark:bg-gray-9 text-blue-6 dark:text-blue-4 by hand
+<div className="bg-surface text-accent hover:bg-accentSoft" />
+// equivalent to writing bg-white dark:bg-gray-9 text-blue-6 dark:text-blue-4
+// hover:bg-[rgba(...)] dark:hover:bg-[rgba(...)] by hand
 ```
 
-Works everywhere a color does — `useColors()` (returns the active side directly), opacity composition (`bg-surface/50`), and per-shade within a scale (`brand: { 6: { light: '#3b82f6', dark: '#60a5fa' } }`). An explicit `dark:`/`light:` modifier stacked on an already mode-aware color is not supported (falls back to the light side) — the whole point is not needing `dark:` for these.
+Works everywhere a color does — `useColors()` (returns the active side directly), opacity composition (`bg-surface/50`), per-shade within a scale (`brand: { 6: { light: '#3b82f6', dark: '#60a5fa' } }`), and stacked under an explicit modifier (`dark:hover:bg-accent` correctly uses the dark side, still scoped to dark mode + hover — the modifier doesn't need to be there in the first place, but it's respected if it is).
 
 ### Runtime update
 ```js

@@ -4,6 +4,7 @@ import { clearPluginUtilities, getPluginStandaloneMap } from './utilities';
 import { clearCache, injectGlobalStyles, setDefaultFontFamily } from './resolver';
 import { registerModifier, clearPluginModifiers, type ModifierDef } from './registry';
 import { isModeAwareColor } from './colorValue';
+import { hexToRgba } from './resolvers/color';
 import { kbachWarn } from './devWarn';
 
 // ─── Deep merge ───────────────────────────────────────────────────────────────
@@ -66,47 +67,98 @@ export function resetConfig(): void {
 // Allows palette references as values in the colors config:
 //   brand: { 1: '#eff6ff', 6: '#6366f1', 11: 'orange-6' }
 // 'orange-6' → resolved hex of orange shade 6 from the same colors map.
+//
+// Also allows an opacity suffix on a bare color NAME (not a family-shade pair):
+//   primarySoft: { light: 'primary/30', dark: 'primary/40' }
+// 'primary/30' → primary's OWN light side (since this is itself the `light`
+// branch being resolved — `side` tracks that), at 30% opacity, as an rgba()
+// string. Lets a derived color (a "soft"/muted variant of another color) live
+// in kbach.config.js — and therefore in className, useColors(), everywhere a
+// real color does — instead of only ever being computable at runtime via
+// colors.alpha(), which a plain className string can't call into.
 
-function resolveOneRef(ref: string, colors: ThemeColors): string | null {
-  // Split on the LAST hyphen (not a regex) so hyphenated custom color group
-  // names like 'warm-gray-6' split into name='warm-gray', shade='6' — matching
-  // the same lookup logic resolveColor() uses in utilities.ts.
-  const lastDash = ref.lastIndexOf('-');
-  if (lastDash <= 0) return null;
-  const name = ref.slice(0, lastDash);
-  const shade = ref.slice(lastDash + 1);
-  if (!/^\d+$/.test(shade)) return null;
-  const entry = colors[name];
-  // entry itself being a mode-aware pair means `name` has no shades to index
-  // into — nothing at colors[name][shade] to chase.
-  if (!entry || typeof entry !== 'object' || isModeAwareColor(entry)) return null;
-  const target = (entry as ColorShades)[shade];
-  // A chain can't continue INTO a mode-aware pair (which side would it pick?)
-  // — the chain simply stops here, and resolveChain's caller (resolveValue)
-  // handles a mode-aware pair's own light/dark sides as their own chains.
-  return typeof target === 'string' ? target : null;
-}
+// A plain (non-mode-aware) string color has no side to speak of — `side` is
+// only ever non-null while resolving one specific branch of a mode-aware pair.
+type Side = 'light' | 'dark' | null;
 
 function resolveColorRefs(colors: ThemeColors): ThemeColors {
   // Bug #2 fix: resolve alias chains up to MAX_DEPTH levels deep.
   // e.g. brand.6 → primary-6 → orange-6 → #f97316 all resolve correctly.
   const MAX_DEPTH = 5;
 
-  function resolveChain(raw: string): string {
+  function resolveChain(raw: string, side: Side): string {
     let current = raw;
     for (let i = 0; i < MAX_DEPTH; i++) {
-      const next = resolveOneRef(current, colors);
+      const next = resolveOneRef(current, side);
       if (!next || next === current) break;
       current = next;
     }
     return current;
   }
 
+  // Nested (not module-level) so it can recurse into resolveChain for the
+  // opacity case's target color — that target can itself be an alias chain
+  // ('primarySoft: { light: "accent/30" }' where accent is itself 'orange-6'),
+  // not necessarily already a raw hex.
+  function resolveOneRef(ref: string, side: Side): string | null {
+    const slashIdx = ref.indexOf('/');
+    if (slashIdx > 0) {
+      const baseName = ref.slice(0, slashIdx);
+      const opacity = Number(ref.slice(slashIdx + 1));
+      if (!Number.isFinite(opacity)) return null;
+
+      let baseRef: string | undefined;
+      const entry = colors[baseName];
+      if (typeof entry === 'string') {
+        baseRef = entry;
+      } else if (isModeAwareColor(entry)) {
+        // A mode-aware target with no side to borrow from (this opacity alias
+        // itself isn't inside a light/dark branch) is ambiguous — bail rather
+        // than silently guessing a side.
+        if (!side) return null;
+        baseRef = entry[side];
+      } else if (entry && typeof entry === 'object' && '6' in entry) {
+        // Bare family reference with no shade (e.g. 'brand/30') — shade 6 is
+        // the same "representative middle shade" convention resolveColor()
+        // itself uses for a shade-less family reference (bg-brand, no number).
+        const v = (entry as ColorShades)['6'];
+        baseRef = typeof v === 'string' ? v : undefined;
+      }
+      if (baseRef === undefined) return null;
+
+      const baseHex = resolveChain(baseRef, side);
+      const a = opacity > 1 ? opacity / 100 : opacity;
+      return hexToRgba(baseHex, a);
+    }
+
+    // Split on the LAST hyphen (not a regex) so hyphenated custom color group
+    // names like 'warm-gray-6' split into name='warm-gray', shade='6' —
+    // matching the same lookup logic resolveColor() uses in utilities.ts.
+    const lastDash = ref.lastIndexOf('-');
+    if (lastDash <= 0) return null;
+    const name = ref.slice(0, lastDash);
+    const shade = ref.slice(lastDash + 1);
+    if (!/^\d+$/.test(shade)) return null;
+    const entry = colors[name];
+    // entry itself being a mode-aware pair means `name` has no shades to index
+    // into — nothing at colors[name][shade] to chase.
+    if (!entry || typeof entry !== 'object' || isModeAwareColor(entry)) return null;
+    const target = (entry as ColorShades)[shade];
+    // A chain can't continue INTO a mode-aware pair (which side would it pick?)
+    // — the chain simply stops here, and resolveChain's caller (resolveValue)
+    // handles a mode-aware pair's own light/dark sides as their own chains.
+    return typeof target === 'string' ? target : null;
+  }
+
   // A mode-aware pair's light/dark sides are each their own independent alias
   // chain (e.g. `{ light: 'gray-2', dark: 'gray-9' }` — two ordinary string
-  // aliases, just packaged together).
+  // aliases, just packaged together) — each resolved with its OWN side, so an
+  // opacity alias partway through (`'primary/30'`) knows which of primary's
+  // two sides it's standing in for.
   function resolveValue(val: ColorValue): ColorValue {
-    return typeof val === 'string' ? resolveChain(val) : { light: resolveChain(val.light), dark: resolveChain(val.dark) };
+    return typeof val === 'string'
+      ? resolveChain(val, null)
+      : { light: resolveChain(val.light, 'light'), dark: resolveChain(val.dark, 'dark') };
   }
 
   const out: ThemeColors = {};

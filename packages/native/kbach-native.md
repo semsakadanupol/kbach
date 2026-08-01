@@ -483,16 +483,19 @@ extend: {
   theme: {
     colors: {
       surface: { light: '#ffffff', dark: '#111827' },
+      // derived from another color at an opacity — 'name/opacity', resolved
+      // once here instead of only being computable at runtime via colors.alpha()
+      surfaceSoft: { light: 'surface/30', dark: 'surface/40' },
     },
   },
 },
 ```
 
 ```jsx
-<View className="bg-surface">
+<View className="bg-surface hover:bg-surfaceSoft">
 ```
 
-Works everywhere a color does — `useColors()`, opacity composition (`bg-surface/50`), and per-shade within a scale. An explicit `dark:`/`light:` modifier stacked on an already mode-aware color is not supported (falls back to the light side).
+Works everywhere a color does — `useColors()`, opacity composition (`bg-surface/50`), per-shade within a scale, and stacked under an explicit modifier (`dark:hover:bg-surface` correctly uses the dark side, still scoped to dark mode + hover — the modifier doesn't need to be there in the first place, but it's respected if it is).
 
 ### Custom font families
 ```js

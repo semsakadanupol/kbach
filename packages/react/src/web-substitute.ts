@@ -79,6 +79,53 @@ export function getWebTag(type: unknown, props?: Record<string, unknown>): strin
   return tag;
 }
 
+// ─── Implied RN layout defaults ────────────────────────────────────────────────
+//
+// React Native's Yoga layout engine gives every node two defaults plain CSS
+// doesn't: position:'relative' (so an absolutely-positioned child anchors to
+// its nearest RN parent with zero extra classes) and, for View/ScrollView/
+// SafeAreaView/etc., display:flex + flexDirection:'column'. Neither default is
+// implied at the CSS-class level (core/resolvers/layout.ts) — a single shared
+// `.flex-1 { }` rule can't vary per element, and forcing position/flex-direction
+// there would break ordinary <div> usage elsewhere that relies on staying
+// static/row. A component substituted FROM a real RN primitive (webTag truthy)
+// is exactly the case where both native defaults ARE actually expected, since
+// that's what the caller's original component meant.
+//
+// Without the position compensation: <View> wrapping an `absolute`-positioned
+// child, with no explicit `relative` class (works on native for free — RN
+// Views are always a positioning context), renders as a plain <div> on web —
+// CSS defaults that div to position:'static', so the absolutely-positioned
+// child escapes to the nearest ACTUALLY-positioned ancestor instead of this
+// one, landing in the wrong place entirely rather than just looking slightly off.
+//
+// Returns a compensation object to merge into the element's inline style (or
+// undefined if nothing needs adding) — never mutates resolvedBase. Callers
+// merge it so the user's own explicit style/classes always win on conflict.
+export function getImpliedRNStyle(
+  webTag: string | null,
+  resolvedBase: Record<string, unknown> | undefined,
+): Record<string, string> | undefined {
+  if (!webTag || !resolvedBase) return undefined;
+
+  const compensation: Record<string, string> = {};
+
+  if (resolvedBase.position === undefined) compensation.position = 'relative';
+
+  const explicitDisplay = resolvedBase.display;
+  const hasFlexItemProps = 'flexGrow' in resolvedBase || 'flexShrink' in resolvedBase || 'flex' in resolvedBase;
+  // Already flex (e.g. items-center already set it), or would become flex via
+  // this same compensation (flex-1 etc.), and nothing already opted OUT with
+  // an explicit non-flex display like `block`.
+  const willBeFlex = explicitDisplay === 'flex' || (explicitDisplay === undefined && hasFlexItemProps);
+  if (willBeFlex) {
+    if (explicitDisplay === undefined) compensation.display = 'flex';
+    if (resolvedBase.flexDirection === undefined) compensation.flexDirection = 'column';
+  }
+
+  return Object.keys(compensation).length > 0 ? compensation : undefined;
+}
+
 // ─── Prop transformation ──────────────────────────────────────────────────────
 
 // RN-specific props with no HTML equivalent — drop to avoid React DOM warnings.

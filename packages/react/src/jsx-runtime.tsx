@@ -12,7 +12,7 @@ import type { ReactElement } from 'react';
 import { isWeb, isNative, getEffectiveIsWeb, getConfig, onConfigChange, resolve, flatten, getDefaultFontFamily, normalizeClassString, isRuntimeCSSDisabled, getInteractiveModifiers, getModeModifiers, getResponsiveModifiers, expandModeAwareColorClasses, type ResolvedStyle } from './core';
 import { InteractiveWrapper } from './InteractiveWrapper';
 import { DarkWrapper } from './DarkWrapper';
-import { getWebTag, transformToWebProps, registerWebElement } from './web-substitute';
+import { getWebTag, transformToWebProps, registerWebElement, getImpliedRNStyle } from './web-substitute';
 import { stripInternalMarkers, stripWebOnlyProps as stripWebOnlyInlineProps } from './shared-utils';
 
 export { registerWebElement };
@@ -117,49 +117,22 @@ function mergeStyle(
   return Array.isArray(userStyle) ? [computed, ...userStyle] : [computed, userStyle];
 }
 
-// ─── Substituted-RN-primitive flex compensation ───────────────────────────────
+// ─── Substituted-RN-primitive layout compensation ─────────────────────────────
 //
-// React Native's View/ScrollView/SafeAreaView/etc. are ALWAYS flex containers
-// natively, column-direction by default. Neither of those defaults is implied
-// at the CSS-class level (core/resolvers/layout.ts) for item-level utilities
-// like flex-1 — a single shared `.flex-1 { }` rule can't vary per element, and
-// forcing it there broke ordinary <div className="flex-1"> usage elsewhere
-// that relies on staying block. Even container-level utilities that DO imply
-// display:flex there (items-center, justify-center, ...) still only set
-// display, never flexDirection — CSS's own default is 'row', not RN's 'column',
-// so e.g. <View className="flex-1 items-center justify-center"> (the exact
-// shape of Expo's default template) ends up flex but ROW: two children sit
-// side by side on web instead of stacking, while native/Expo Go (real View,
-// real column default) shows them stacked correctly.
-//
-// An element substituted FROM a real RN primitive (webTag truthy — the caller
-// wrote <View>/<ScrollView>/<SafeAreaView>/...) is exactly the case where both
-// of those native defaults ARE actually expected, since that's what the
-// component they wrote means. Compensated with a per-element inline style
-// override rather than touching the shared class rule — inline style always
-// wins over class-based CSS, so this can't leak into other elements using the
-// same class, and an explicit flex-row/flex-col/display:block elsewhere in
-// the same className always wins over this (checked via resolvedBase, which
-// already reflects it).
-function withImpliedFlexIfNeeded(
+// See web-substitute.ts's getImpliedRNStyle for what's being restored and why.
+// Applied as a per-element inline style override rather than touching the
+// shared class rule — inline style always wins over class-based CSS, so this
+// can't leak into other elements using the same class, and an explicit
+// relative/absolute/flex-row/flex-col/display:block elsewhere in the same
+// className always wins over this (checked via resolvedBase, which already
+// reflects it).
+function withImpliedRNStyleIfNeeded(
   webTag: string | null,
   resolvedBase: Record<string, unknown> | undefined,
   userStyle: unknown,
 ): unknown {
-  if (!webTag || !resolvedBase) return userStyle;
-
-  const explicitDisplay = resolvedBase.display;
-  const hasFlexItemProps = 'flexGrow' in resolvedBase || 'flexShrink' in resolvedBase || 'flex' in resolvedBase;
-  // Already flex (e.g. items-center already set it), or would become flex via
-  // our own compensation below (flex-1 etc., and nothing already opted OUT
-  // with an explicit non-flex display like `block`).
-  const willBeFlex = explicitDisplay === 'flex' || (explicitDisplay === undefined && hasFlexItemProps);
-  if (!willBeFlex) return userStyle;
-
-  const compensation: Record<string, string> = {};
-  if (explicitDisplay === undefined) compensation.display = 'flex';
-  if (resolvedBase.flexDirection === undefined) compensation.flexDirection = 'column';
-  if (Object.keys(compensation).length === 0) return userStyle;
+  const compensation = getImpliedRNStyle(webTag, resolvedBase);
+  if (!compensation) return userStyle;
 
   // User's own explicit style still wins on conflict.
   return Array.isArray(userStyle)
@@ -300,7 +273,7 @@ function processElement(
       : (expandedClassStr ? resolve(expandedClassStr, config.theme, config.darkMode) : {});
 
   const { style: rawUserStyle, ...passProps } = omitConsumed(workingProps) as any;
-  const userStyle = withImpliedFlexIfNeeded(webTag, resolved.base as Record<string, unknown> | undefined, rawUserStyle);
+  const userStyle = withImpliedRNStyleIfNeeded(webTag, resolved.base as Record<string, unknown> | undefined, rawUserStyle);
 
   // Bug #8: bucketMods result is memoized by resolved object reference.
   const { interactive, modeOrResponsive } = bucketMods(resolved);

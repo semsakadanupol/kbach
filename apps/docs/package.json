@@ -1,6 +1,6 @@
 {
   "name": "docs",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "Kbach documentation site — dogfoods @kbach/react's own Static CSS setup",
   "scripts": {

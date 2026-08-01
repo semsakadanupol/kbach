@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
 // This file is Node-only (Vite build time). Import process explicitly and cast
 // to NodeJS.Process instead of relying on the ambient global — global.d.ts
@@ -20,6 +20,7 @@ function normPath(p: string): string {
 import { setCSSGenMode } from './core/platform';
 import { BASE_RESET } from './core/reset';
 import { buildConfig } from './core/config';
+import { generateKbachTypesDts } from './core/generateTypesDts';
 import { generateClassCSS } from './core/resolver';
 import { splitClassTokens, parseClass } from './core/parser';
 import { resolveUtility, parseHexRgb } from './core/utilities';
@@ -49,6 +50,11 @@ function warn(message: string): void {
 /** Multi-line warning: header in yellow, tag prefix, extra detail lines passed through as-is (already formatted/dimmed by the caller). */
 function warnBlock(header: string, ...lines: string[]): void {
   console.warn([`${TAG()} ${yellow(header)}`, ...lines].join('\n'));
+}
+
+/** Short, single-line informational note: "[kbach] <message>" — no yellow, this isn't a warning. */
+function log(message: string): void {
+  console.log(`${TAG()} ${message}`);
 }
 
 // Most terminals (VS Code's integrated terminal, iTerm2, Windows Terminal, …)
@@ -396,6 +402,41 @@ function writeKbachToFile(filePath: string, css: string): boolean {
   if (next === existing) return false;
   writeFileSync(filePath, next, 'utf-8');
   return true;
+}
+
+// Gives useColors()/useSpacing() autocomplete for a project's custom
+// colors/spacing keys with zero manual setup — see generateTypesDts.ts for
+// what actually gets generated. Re-derived from `theme` on every Vite config
+// (re)load — kbach.config.js is one of vite.config.ts's own dependencies (the
+// user imports it to pass to kbach()), so Vite already restarts the whole
+// dev server on any edit to it, which re-runs this. Content-compared against
+// what's already on disk so an unrelated restart with an unchanged theme
+// doesn't touch the file's mtime (and doesn't spuriously invalidate a
+// language server's cache of it) — same pattern as writeKbachToFile above.
+function writeKbachTypesDts(root: string, theme: ThemeConfig): void {
+  const filePath = join(root, 'kbach-types.d.ts');
+  const content = generateKbachTypesDts(theme);
+  let existing: string | null = null;
+  try { existing = readFileSync(filePath, 'utf-8'); } catch {}
+  if (content === (existing ?? '')) return;
+
+  try {
+    if (content === '') {
+      // Theme no longer adds anything beyond the stock colors/spacing —
+      // remove the stale file rather than leaving dead augmentation behind.
+      unlinkSync(filePath);
+    } else {
+      const isNew = existing === null;
+      writeFileSync(filePath, content, 'utf-8');
+      if (isNew) {
+        log(`Generated kbach-types.d.ts — gives useColors()/useSpacing() autocomplete for your custom colors/spacing keys. Safe to add to .gitignore.`);
+      }
+    }
+  } catch {
+    // Best-effort — a read-only filesystem or permissions issue here
+    // shouldn't break the build; the manual KbachCustomColors augmentation
+    // documented on it still works as a fallback.
+  }
 }
 
 function toNumericScreens(screens: Record<string, string | number>): Record<string, number> {
@@ -781,6 +822,7 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
 
     configResolved(resolved) {
       root = resolved.root;
+      writeKbachTypesDts(root, cfg.theme);
 
       // React Router's own Vite plugin (name: 'react-router') already includes
       // its own JSX transform + Fast Refresh integration. Adding @vitejs/plugin-react

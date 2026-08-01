@@ -189,7 +189,9 @@ colors.white              // '#ffffff'
 colors['white/20']        // 'rgba(255,255,255,0.2)'
 colors.alpha('#ff6b35', 60) // 'rgba(255,107,53,0.6)'
 ```
-Typed against the built-in theme by default — `colors.blu` (typo) is a compile error. Custom `kbach.config.js` colors aren't visible to TypeScript (runtime-loaded plain `.js`), so either widen per call — `useColors<DefaultColorName | 'brand'>()` — or, better, augment once project-wide in any `.d.ts` your tsconfig includes:
+Typed against the built-in theme by default — `colors.blu` (typo) is a compile error. Custom `kbach.config.js` colors work too, with **zero setup**: the Vite plugin (and `@kbach/native`'s Babel plugin) automatically generate a `kbach-types.d.ts` next to your config, kept in sync every time the dev server / Metro picks up an edit to it — safe to add to `.gitignore`. `useColors()`/`useSpacing()` see your custom names immediately, no type parameter needed, same typo-catching as the built-in ones.
+
+If you'd rather commit the types instead of generating them (a library package with no dev server/bundler step of its own, for instance), hand-author the same thing in any `.d.ts` your tsconfig includes:
 
 ```ts
 import '@kbach/react'; // or '@kbach/native' — either works, native re-exports react's types
@@ -199,9 +201,12 @@ declare module '@kbach/react' {
     accent: string;    // a flat color, like the built-in white/black — also what a
                         // mode-aware { light, dark } config color resolves to at read time
   }
+  interface KbachCustomSpacing {
+    18: true; // only the key is read — value is just a placeholder
+  }
 }
 ```
-Every `useColors()` call in the project then sees `brand`/`accent` automatically, no type parameter needed — same typo-catching as the built-in names. `useSpacing()` has the equivalent `KbachCustomSpacing` interface (`interface KbachCustomSpacing { 18: true }` — only the key is read) for the spacing scale (`spacing[4]` → `16`, `spacing.full` → `'100%'`).
+A hand-authored file and the generated one both merge into the exact same interfaces, so either — or both at once — works.
 
 ---
 

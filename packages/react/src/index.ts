@@ -56,6 +56,7 @@ export {
   normalizeClassString,
   disableRuntimeCSS,
   setResolveTarget,
+  generateKbachTypesDts,
 } from './core';
 
 export type {

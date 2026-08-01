@@ -115,6 +115,45 @@ function getCore() {
 const _configCache = new Map(); // cfgPath -> { config, mtime, lastStatMs }
 const CFG_STAT_INTERVAL_MS = 500;
 
+// Gives useColors()/useSpacing() autocomplete for a project's custom
+// colors/spacing keys with zero manual setup — see @kbach/react's
+// generateTypesDts.ts for what actually gets generated and why. Written next
+// to kbach.config.js itself (not the project root — unlike the Vite plugin,
+// this function already has the config file's own resolved path, which is
+// the more predictable location for a native project without a single
+// canonical "root" the way a Vite `root` option is). Content-compared
+// against what's already on disk so a config reload with an unchanged theme
+// doesn't touch the file's mtime.
+function writeKbachTypesDts(cfgPath, resolvedConfig) {
+  const filePath = path.join(path.dirname(cfgPath), 'kbach-types.d.ts');
+  let content;
+  try {
+    content = getCore().generateKbachTypesDts(resolvedConfig.theme);
+  } catch {
+    return; // Best-effort — an old @kbach/react without this export shouldn't break the build.
+  }
+
+  let existing = null;
+  try { existing = fs.readFileSync(filePath, 'utf-8'); } catch {}
+  if (content === (existing ?? '')) return;
+
+  try {
+    if (content === '') {
+      fs.unlinkSync(filePath);
+    } else {
+      const isNew = existing === null;
+      fs.writeFileSync(filePath, content, 'utf-8');
+      if (isNew) {
+        log(`Generated kbach-types.d.ts — gives useColors()/useSpacing() autocomplete for your custom colors/spacing keys. Safe to add to .gitignore.`);
+      }
+    }
+  } catch {
+    // Best-effort — a read-only filesystem or permissions issue here
+    // shouldn't break the build; the manual KbachCustomColors augmentation
+    // documented on it still works as a fallback.
+  }
+}
+
 function getUserConfig(configFile, root) {
   const cfgPath = path.resolve(root || process.cwd(), configFile);
   let entry = _configCache.get(cfgPath);
@@ -139,6 +178,7 @@ function getUserConfig(configFile, root) {
     entry = { config: buildConfig(userCfg), mtime, lastStatMs: now };
     _configCache.set(cfgPath, entry);
     _resolveCache.clear();
+    writeKbachTypesDts(cfgPath, entry.config);
   } catch (err) {
     // A syntax error or throw in kbach.config.js (or a transient failure while
     // it's mid-write on disk during a save) used to fall back to a stale or

@@ -17,6 +17,7 @@ export type {
 
 export { isModeAwareColor } from './colorValue';
 export { expandModeAwareColorClasses } from './modeAwareColors';
+export { generateKbachTypesDts } from './generateTypesDts';
 
 export { defaultTheme, defaultColors } from './theme';
 export type { DefaultColorName, DefaultSpacingKey } from './theme';

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { readProjectInfo, isExpoProject, type PackageManager, type Platform } from './detect';
 import { resolveAnswers, confirmPlan, type CliFlags } from './prompts';
-import { writeKbachConfig, writeKbachCss, writeBabelConfig, mergeTsconfigJsx, installPackage } from './actions';
+import { writeKbachConfig, writeKbachCss, writeBabelConfig, mergeTsconfigJsx, installPackage, ensureGitignoreEntry } from './actions';
 
 // ─── Flag parsing ───────────────────────────────────────────────────────────
 // Deliberately hand-rolled — five flags doesn't justify a dependency.
@@ -175,6 +175,7 @@ async function main(): Promise<void> {
   if (platform === 'web' || platform === 'next') {
     summary.push('Add "jsx": "react-jsx" and "jsxImportSource" to tsconfig.json, if not already set (never overwrites a conflicting value)');
   }
+  summary.push('Add kbach-types.d.ts to .gitignore, if this is a git repo and it isn\'t listed already — the Vite/Babel plugin auto-generates that file from kbach.config.js\'s custom colors, so it doesn\'t belong in version control');
   summary.push('Print the remaining manual edits (wiring ThemeProvider, etc.) — nothing beyond the above is changed automatically');
 
   if (!flags.yes) {
@@ -239,6 +240,14 @@ async function main(): Promise<void> {
       tsconfigNote = `Couldn't safely auto-edit ${path.relative(cwd, merge.path!)} — add "jsx": "react-jsx" and "jsxImportSource": "@kbach/react" under compilerOptions by hand.`;
     }
   }
+
+  const gitignoreResult = ensureGitignoreEntry(cwd, 'kbach-types.d.ts');
+  if (gitignoreResult === 'added' || gitignoreResult === 'created') {
+    created.push('.gitignore (added kbach-types.d.ts)');
+  } else if (gitignoreResult === 'already-present') {
+    skipped.push('.gitignore (kbach-types.d.ts already listed)');
+  }
+  // 'no-git-repo': nothing to report — not a git project, nothing was skipped or created.
 
   log();
   log('[kbach] Done.');

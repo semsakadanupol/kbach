@@ -117,6 +117,44 @@ export function mergeTsconfigJsx(root: string): { status: TsconfigMergeStatus; p
   return { status: 'merged', path: tsconfigPath };
 }
 
+// ─── .gitignore entry ───────────────────────────────────────────────────────
+
+export type GitignoreResult = 'added' | 'already-present' | 'created' | 'no-git-repo';
+
+/**
+ * Adds one entry to the project's .gitignore, creating the file if missing —
+ * for kbach-types.d.ts, the file the Vite plugin / native's Babel plugin
+ * auto-generate at dev time from kbach.config.js's custom colors/spacing (see
+ * generateKbachTypesDts() in @kbach/react). Skipped entirely outside a git
+ * repo (no .git directory found walking up from root) — writing a .gitignore
+ * into a project that isn't using git at all wouldn't do anything useful.
+ * Idempotent: never duplicates the entry on a second run.
+ */
+export function ensureGitignoreEntry(root: string, entry: string): GitignoreResult {
+  let dir = root;
+  for (;;) {
+    if (fs.existsSync(path.join(dir, '.git'))) break;
+    const parent = path.dirname(dir);
+    if (parent === dir) return 'no-git-repo';
+    dir = parent;
+  }
+
+  const filePath = path.join(root, '.gitignore');
+  let existing = '';
+  try { existing = fs.readFileSync(filePath, 'utf-8'); } catch {}
+
+  const alreadyPresent = existing
+    .split('\n')
+    .some((line) => line.trim() === entry);
+  if (alreadyPresent) return 'already-present';
+
+  const next = existing && !existing.endsWith('\n')
+    ? `${existing}\n${entry}\n`
+    : `${existing}${entry}\n`;
+  fs.writeFileSync(filePath, next, 'utf-8');
+  return existing ? 'added' : 'created';
+}
+
 // ─── Package install ──────────────────────────────────────────────────────────
 
 const INSTALL_COMMAND: Record<PackageManager, [string, string[]]> = {

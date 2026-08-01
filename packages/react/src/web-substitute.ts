@@ -113,10 +113,23 @@ export function getImpliedRNStyle(
   if (resolvedBase.position === undefined) compensation.position = 'relative';
 
   const explicitDisplay = resolvedBase.display;
-  const hasFlexItemProps = 'flexGrow' in resolvedBase || 'flexShrink' in resolvedBase || 'flex' in resolvedBase;
+  // gap-x/gap-y/gap ('columnGap'/'rowGap'/'gap') are exactly as meaningless
+  // without display:flex as flexGrow/flexShrink/flex are — a plain <View
+  // className="gap-2"> (no flex-row/items-*/etc. alongside it, relying purely
+  // on View's native "always flex" default for spacing between children) is
+  // the single most common way this is actually written, and was a complete
+  // no-op on web without this. Not folded into the CSS-class-level fix above
+  // (core/resolvers/layout.ts's items-center etc.) for the same reason flex-1
+  // wasn't: forcing display:flex onto gap's own shared `.gap-2 { }` rule would
+  // fight a `grid gap-2` combo in plain @kbach/react web usage (gap and grid
+  // land in different CSS rule-generation groups — see vite-plugin.ts's
+  // GROUPS — so whichever rule is emitted later in the stylesheet would win
+  // regardless of which the caller actually wrote first).
+  const hasFlexItemProps = 'flexGrow' in resolvedBase || 'flexShrink' in resolvedBase || 'flex' in resolvedBase
+    || 'gap' in resolvedBase || 'columnGap' in resolvedBase || 'rowGap' in resolvedBase;
   // Already flex (e.g. items-center already set it), or would become flex via
-  // this same compensation (flex-1 etc.), and nothing already opted OUT with
-  // an explicit non-flex display like `block`.
+  // this same compensation (flex-1, gap-2, etc.), and nothing already opted
+  // OUT with an explicit non-flex display like `block`.
   const willBeFlex = explicitDisplay === 'flex' || (explicitDisplay === undefined && hasFlexItemProps);
   if (willBeFlex) {
     if (explicitDisplay === undefined) compensation.display = 'flex';

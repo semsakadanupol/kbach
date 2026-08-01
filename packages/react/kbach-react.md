@@ -189,7 +189,19 @@ colors.white              // '#ffffff'
 colors['white/20']        // 'rgba(255,255,255,0.2)'
 colors.alpha('#ff6b35', 60) // 'rgba(255,107,53,0.6)'
 ```
-Typed against the built-in theme by default — `colors.blu` (typo) is a compile error. Custom `kbach.config.js` colors aren't visible to TypeScript (runtime-loaded plain `.js`), so widen manually: `useColors<DefaultColorName | 'brand'>()`. `useSpacing()` is the same pattern for the spacing scale (`spacing[4]` → `16`, `spacing.full` → `'100%'`).
+Typed against the built-in theme by default — `colors.blu` (typo) is a compile error. Custom `kbach.config.js` colors aren't visible to TypeScript (runtime-loaded plain `.js`), so either widen per call — `useColors<DefaultColorName | 'brand'>()` — or, better, augment once project-wide in any `.d.ts` your tsconfig includes:
+
+```ts
+import '@kbach/react'; // or '@kbach/native' — either works, native re-exports react's types
+declare module '@kbach/react' {
+  interface KbachCustomColors {
+    brand: ColorScale; // a 1–12 shade scale, like the built-in blue/red
+    accent: string;    // a flat color, like the built-in white/black — also what a
+                        // mode-aware { light, dark } config color resolves to at read time
+  }
+}
+```
+Every `useColors()` call in the project then sees `brand`/`accent` automatically, no type parameter needed — same typo-catching as the built-in names. `useSpacing()` has the equivalent `KbachCustomSpacing` interface (`interface KbachCustomSpacing { 18: true }` — only the key is read) for the spacing scale (`spacing[4]` → `16`, `spacing.full` → `'100%'`).
 
 ---
 

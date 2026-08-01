@@ -3,10 +3,10 @@ export { ThemeContext, useTheme, useIsDark } from './context';
 export type { ThemeContextValue } from './context';
 
 export { useColors, wrapColors } from './useColors';
-export type { ColorsAPI, ColorScale } from './useColors';
+export type { ColorsAPI, ColorScale, KbachCustomColors } from './useColors';
 
 export { useSpacing, wrapSpacing } from './useSpacing';
-export type { SpacingAPI } from './useSpacing';
+export type { SpacingAPI, KbachCustomSpacing } from './useSpacing';
 
 // Provider
 export { ThemeProvider } from './ThemeProvider';

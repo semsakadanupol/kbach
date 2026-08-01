@@ -12,28 +12,59 @@ export interface ColorScale {
   readonly [key: string]: string;
 }
 
+/**
+ * Empty on purpose — augment it via declaration merging so `useColors()` (and
+ * `useSpacing()`'s equivalent, `KbachCustomSpacing`) know about a project's
+ * `kbach.config.js` colors without repeating a type parameter at every call
+ * site. `kbach.config.js` is a plain runtime-loaded .js file, so TypeScript
+ * can't see into it on its own — this is the same declaration-merging pattern
+ * styled-components' `DefaultTheme` and i18next's resource typing use for the
+ * identical problem. Put this in any .d.ts your tsconfig includes:
+ *
+ * ```ts
+ * import '@kbach/react'; // or '@kbach/native' — either works, native re-exports react's types
+ * declare module '@kbach/react' {
+ *   interface KbachCustomColors {
+ *     primary: string;    // a flat color, like the built-in `white`/`black`
+ *     brand: ColorScale;  // a 1–12 shade scale, like the built-in `blue`/`red`
+ *   }
+ * }
+ * ```
+ *
+ * A mode-aware `{ light, dark }` config color (see ColorValue) still resolves
+ * to a flat `string` at read time — declare those as `string` here too, not
+ * as the config shape.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface KbachCustomColors {}
+
 // A named color is either a flat string (transparent, current, black, white, or
 // a custom flat color) or a 1–12 shade scale (blue, red, or a custom scale).
 // For a name that's part of the DEFAULT theme, this resolves to the PRECISE
 // shape (string for flat colors, ColorScale for shade scales), derived from
-// defaultColors' own literal type. For anything else — a custom color added
-// via the ColorName type param below — it falls back to the union, since
-// TypeScript can't see into a runtime-loaded kbach.config.js to know which
-// shape a custom name actually has.
+// defaultColors' own literal type. For a name augmented onto KbachCustomColors
+// above, it resolves to exactly the shape declared there. For anything else —
+// a one-off custom color added via the ColorName type param instead of the
+// augmentation — it falls back to the union, since there's no more specific
+// shape information available.
 type ColorValueFor<K extends string> = K extends keyof typeof defaultColors
   ? (typeof defaultColors)[K] extends string ? string : ColorScale
-  : ColorScale | string;
+  : K extends keyof KbachCustomColors
+    ? KbachCustomColors[K]
+    : ColorScale | string;
+
+/** Every color name TypeScript knows about without an explicit type parameter: the built-in theme plus whatever's been added via the KbachCustomColors augmentation above. */
+type KnownColorName = DefaultColorName | Extract<keyof KbachCustomColors, string>;
 
 /**
- * `ColorName` defaults to the built-in theme's color names (`DefaultColorName`,
- * derived from `defaultColors` in core/theme.ts), so `useColors()` gets full
- * autocomplete and typo-catching out of the box for any project on the default
- * theme. A customized `kbach.config.js` isn't visible to TypeScript (it's a
- * plain .js file loaded at runtime, not a statically-analyzed module), so a
- * project with extra colors needs to widen the type parameter explicitly:
+ * `ColorName` defaults to `KnownColorName` (the built-in theme's color names
+ * plus anything augmented onto `KbachCustomColors` above), so `useColors()`
+ * gets full autocomplete and typo-catching out of the box — including custom
+ * `kbach.config.js` colors, once augmented once project-wide. Without that
+ * augmentation, a project with extra colors can still widen per call instead:
  * `useColors<DefaultColorName | 'brand'>()`.
  */
-export type ColorsAPI<ColorName extends string = DefaultColorName> =
+export type ColorsAPI<ColorName extends string = KnownColorName> =
   { readonly [K in ColorName]: ColorValueFor<K> } & {
     /**
      * Pass any CSS color through, optionally applying an opacity (0–100).
@@ -84,7 +115,7 @@ function makeShadeProxy(shades: ColorShades, isDark: boolean): ColorScale {
 
 // ─── wrapColors ───────────────────────────────────────────────────────────────
 
-export function wrapColors<ColorName extends string = DefaultColorName>(
+export function wrapColors<ColorName extends string = KnownColorName>(
   rawColors: ThemeColors,
   isDark = false,
 ): ColorsAPI<ColorName> {
@@ -122,7 +153,7 @@ export function wrapColors<ColorName extends string = DefaultColorName>(
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useColors<ColorName extends string = DefaultColorName>(): ColorsAPI<ColorName> {
+export function useColors<ColorName extends string = KnownColorName>(): ColorsAPI<ColorName> {
   const { config, isDark } = useTheme();
   return useMemo(() => wrapColors<ColorName>(config.theme.colors, isDark), [config.theme.colors, isDark]);
 }

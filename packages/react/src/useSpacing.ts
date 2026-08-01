@@ -5,15 +5,35 @@ import type { ThemeSpacing, DefaultSpacingKey } from './core';
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 /**
- * `SpacingKey` defaults to the built-in theme's spacing keys (`DefaultSpacingKey`,
- * derived from `defaultTheme.spacing` in core/theme.ts), so `useSpacing()` gets
- * full autocomplete and typo-catching out of the box for any project on the
- * default scale. A customized `kbach.config.js` isn't visible to TypeScript
- * (it's a plain .js file loaded at runtime, not a statically-analyzed module),
- * so a project with extra spacing keys needs to widen the type parameter
- * explicitly: `useSpacing<DefaultSpacingKey | '18'>()`.
+ * Empty on purpose — augment it via declaration merging so `useSpacing()`
+ * (like `useColors()`'s `KbachCustomColors`) knows about a project's
+ * `kbach.config.js` spacing keys without repeating a type parameter at every
+ * call site:
+ *
+ * ```ts
+ * import '@kbach/react'; // or '@kbach/native'
+ * declare module '@kbach/react' {
+ *   interface KbachCustomSpacing {
+ *     18: true; // value doesn't matter — only the key is read (see SpacingAPI)
+ *   }
+ * }
+ * ```
  */
-export type SpacingAPI<SpacingKey extends string = DefaultSpacingKey> = {
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface KbachCustomSpacing {}
+
+/** Every spacing key TypeScript knows about without an explicit type parameter. */
+type KnownSpacingKey = DefaultSpacingKey | Extract<keyof KbachCustomSpacing, string>;
+
+/**
+ * `SpacingKey` defaults to `KnownSpacingKey` (the built-in theme's spacing keys
+ * plus anything augmented onto `KbachCustomSpacing` above), so `useSpacing()`
+ * gets full autocomplete and typo-catching out of the box — including custom
+ * `kbach.config.js` keys, once augmented once project-wide. Without that
+ * augmentation, a project with extra keys can still widen per call instead:
+ * `useSpacing<DefaultSpacingKey | '18'>()`.
+ */
+export type SpacingAPI<SpacingKey extends string = KnownSpacingKey> = {
   readonly [K in SpacingKey]: number | string;
 };
 
@@ -25,7 +45,7 @@ export type SpacingAPI<SpacingKey extends string = DefaultSpacingKey> = {
 // runtime shape SpacingAPI describes. The cast exists to apply the KEY
 // narrowing described above; it changes nothing at runtime.
 
-export function wrapSpacing<SpacingKey extends string = DefaultSpacingKey>(
+export function wrapSpacing<SpacingKey extends string = KnownSpacingKey>(
   rawSpacing: ThemeSpacing,
 ): SpacingAPI<SpacingKey> {
   return rawSpacing as SpacingAPI<SpacingKey>;
@@ -47,7 +67,7 @@ export function wrapSpacing<SpacingKey extends string = DefaultSpacingKey>(
  * spacing['1/2']  // '50%'
  * ```
  */
-export function useSpacing<SpacingKey extends string = DefaultSpacingKey>(): SpacingAPI<SpacingKey> {
+export function useSpacing<SpacingKey extends string = KnownSpacingKey>(): SpacingAPI<SpacingKey> {
   const { config } = useTheme();
   return useMemo(() => wrapSpacing<SpacingKey>(config.theme.spacing), [config.theme.spacing]);
 }

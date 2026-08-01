@@ -166,6 +166,19 @@ colors.white             // '#ffffff'
 colors['white/20']       // 'rgba(255,255,255,0.2)'
 colors.alpha('#ff6b35', 60) // 'rgba(255,107,53,0.6)'
 ```
+Typed against the built-in theme by default — a typo like `colors.blu` is a compile error. Custom `kbach.config.js` colors aren't visible to TypeScript (runtime-loaded plain `.js`), so either widen per call — `useColors<DefaultColorName | 'brand'>()` — or, better, augment once project-wide in any `.d.ts` your tsconfig includes:
+
+```ts
+import '@kbach/native';
+declare module '@kbach/native' {
+  interface KbachCustomColors {
+    brand: ColorScale; // a 1–12 shade scale, like the built-in blue/red
+    accent: string;    // a flat color, like the built-in white/black — also what a
+                        // mode-aware { light, dark } config color resolves to at read time
+  }
+}
+```
+Every `useColors()` call in the project then sees `brand`/`accent` automatically, no type parameter needed — same typo-catching as the built-in names. `useSpacing()` has the equivalent `KbachCustomSpacing` interface (`interface KbachCustomSpacing { 18: true }` — only the key is read) for the spacing scale.
 
 ---
 

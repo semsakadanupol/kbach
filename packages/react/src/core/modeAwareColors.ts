@@ -1,6 +1,7 @@
 import type { ColorShades, ThemeColors } from './types';
 import { isModeAwareColor } from './colorValue';
 import { parseClass, splitClassTokens } from './parser';
+import { getModifier } from './registry';
 
 interface ModeAwarePair {
   light: string;
@@ -41,6 +42,20 @@ function getModeAwareMap(colors: ThemeColors): ReadonlyMap<string, ModeAwarePair
  * normal parsing — e.g. `bg-surface` becomes `bg-[#ffffff] dark:bg-[#111827]`.
  * `bg-surface/50` becomes `bg-[#ffffff]/50 dark:bg-[#111827]/50` (the arbitrary-
  * color-plus-opacity composition already resolveColor() already supports).
+ * `hover:bg-surface` becomes `hover:bg-[#ffffff] dark:hover:bg-[#111827]` —
+ * every other modifier already present on the token carries through onto
+ * both halves of the pair unchanged.
+ *
+ * A token that ALREADY carries an explicit dark:/light:/not-dark:/not-light:
+ * modifier (someone writes `dark:hover:bg-primary` on a `primary` that's
+ * already mode-aware, usually out of habit from before it was) isn't split
+ * into a pair — that would be redundant on top of an already-explicit
+ * choice. Instead the matching side is substituted in place and every
+ * modifier, including the dark:/light: itself, is left exactly as written,
+ * so `dark:hover:bg-primary` still only applies in dark mode, using the
+ * dark side (not the resolveColor()-level fallback's light side, which is
+ * only ever reached by a mode-aware pair that skipped this expansion
+ * entirely — not a path normal className resolution takes).
  *
  * Runs once, upfront, purely as a string rewrite — everything downstream
  * (CSS generation, native bucketing/flatten(), the existing dark: reactivity
@@ -61,17 +76,6 @@ export function expandModeAwareColorClasses(classString: string, colors: ThemeCo
     const parsed = parseClass(token);
     if (!parsed || parsed.isArbitrary) { out.push(token); continue; }
 
-    // An explicit dark:/light: modifier already stacked on a mode-aware color
-    // (e.g. someone writes `dark:bg-surface` not realising surface is already
-    // mode-aware) is deliberately left unexpanded — "which side does dark:-on-
-    // top-of-already-mode-aware mean" isn't well-defined. resolveColor()'s own
-    // fallback (colorValue.ts) picks the light side rather than resolving to
-    // nothing in that case.
-    if (parsed.modifiers.includes('dark') || parsed.modifiers.includes('light')) {
-      out.push(token);
-      continue;
-    }
-
     const slashIdx = parsed.value.indexOf('/');
     const colorPart = slashIdx > 0 ? parsed.value.slice(0, slashIdx) : parsed.value;
     const opacitySuffix = slashIdx > 0 ? parsed.value.slice(slashIdx) : '';
@@ -81,6 +85,22 @@ export function expandModeAwareColorClasses(classString: string, colors: ThemeCo
     changed = true;
     const bang = parsed.important ? '!' : '';
     const modPrefix = parsed.modifiers.map((m) => `${m}:`).join('');
+
+    // An explicit dark:/light:/not-dark:/not-light: modifier already stacked
+    // on a mode-aware color — e.g. someone writes `dark:hover:bg-primary` on
+    // a `primary` that's already { light, dark }, most often out of habit
+    // from before the color was made mode-aware. Respect it rather than
+    // synthesizing a redundant second base+dark pair on top of an already-
+    // explicit choice: substitute the matching side and leave every modifier
+    // (including the dark:/light: itself) exactly as written, so the rule
+    // stays scoped to when the caller said it should apply.
+    const explicitScheme = parsed.modifiers.map((m) => getModifier(m)?.darkScheme).find((s) => s);
+    if (explicitScheme) {
+      const side = explicitScheme === 'dark' ? pair.dark : pair.light;
+      out.push(`${bang}${modPrefix}${parsed.utility}-[${side}]${opacitySuffix}`);
+      continue;
+    }
+
     out.push(`${bang}${modPrefix}${parsed.utility}-[${pair.light}]${opacitySuffix}`);
     out.push(`${bang}dark:${modPrefix}${parsed.utility}-[${pair.dark}]${opacitySuffix}`);
   }

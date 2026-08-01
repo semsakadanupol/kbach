@@ -126,17 +126,25 @@ export function styled<T extends ComponentType<any>>(
         [resolved, isDark, pressed, hovered, focused, disabled, checked, width], // eslint-disable-line react-hooks/exhaustive-deps
       );
 
-      // Flatten style prop array
-      const extraStyle = Array.isArray(styleProp)
-        ? Object.assign({}, ...styleProp)
-        : styleProp;
-
-      // On web (browser and SSR alike), CSS classes carry all Kbach styles — only
-      // forward the user's explicit style prop. On native, merge computed styles
-      // with the user's style prop.
-      const finalStyle: StyleValue = isWebPlatform
-        ? (extraStyle ?? undefined)
-        : (extraStyle ? { ...computedStyle, ...extraStyle } : computedStyle);
+      // Web (and SSR): CSS classes carry all Kbach styles — only forward the
+      // user's explicit style prop. DOM's style attribute must be a plain
+      // object, so an array styleProp still needs flattening here.
+      //
+      // Native: compose as an array rather than spreading styleProp into a
+      // fresh object — react-native-reanimated's useAnimatedStyle() returns
+      // an object the native UI thread mutates by reference (this is the
+      // most common way anyone combines styled() with Reanimated — e.g.
+      // `styled(Animated.View, '...')`), and Object.assign/spread would copy
+      // out today's snapshot and permanently disconnect it from Reanimated's
+      // runtime. React Native's style prop already accepts arrays (later
+      // entries win on conflicts, same precedence spreading had), so
+      // composing one here preserves styleProp's identity through to the
+      // native renderer regardless of what it actually is.
+      const finalStyle: StyleValue | unknown[] | undefined = isWebPlatform
+        ? (Array.isArray(styleProp) ? Object.assign({}, ...styleProp) : styleProp) ?? undefined
+        : styleProp
+          ? (Array.isArray(styleProp) ? [computedStyle, ...styleProp] : [computedStyle, styleProp])
+          : computedStyle;
 
       // On web (browser and SSR alike), substitute RN component types with HTML
       // elements so the DOM shows clean Kbach class names instead of React Native

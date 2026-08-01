@@ -141,14 +141,21 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
     );
 
     // On web (browser and SSR alike), CSS classes handle all Kbach styles — only
-    // forward user's explicit style. On native, merge computedStyle with user's style prop.
+    // forward user's explicit style. On native, compose as an array rather than
+    // spreading styleProp into a fresh object — react-native-reanimated's
+    // useAnimatedStyle() returns an object the native UI thread mutates by
+    // reference, and Object.assign/spread would copy out a snapshot and
+    // permanently disconnect it from Reanimated's runtime. React Native's style
+    // prop already accepts arrays (later entries win on conflicts, same
+    // precedence spreading had), so composing one here preserves styleProp's
+    // identity through to the native renderer regardless of what it actually is.
     const skipComputedInline = isWebPlatform;
-    const finalStyle: StyleValue = skipComputedInline
+    const finalStyle: Record<string, unknown> | unknown[] | undefined = skipComputedInline
       ? (styleProp ?? undefined)
       : styleProp
         ? Array.isArray(styleProp)
-          ? Object.assign({}, computedStyle, ...styleProp)
-          : { ...computedStyle, ...(styleProp as StyleValue) }
+          ? [computedStyle, ...styleProp]
+          : [computedStyle, styleProp]
         : computedStyle;
 
     const componentProps = {

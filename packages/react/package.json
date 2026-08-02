@@ -2,6 +2,7 @@
   "name": "@kbach/react",
   "version": "0.6.39",
   "description": "React / React Native components and hooks for the Kbach framework",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/semsakadanupol/kbach.git",
@@ -49,8 +50,12 @@
     "postinstall": "node scripts/postinstall.js"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^20.19.42",
     "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.4",
+    "jsdom": "^30.0.1",
+    "react-dom": "^19.2.3",
     "tsup": "^8.0.0",
     "vite": "^5.4.21",
     "vitest": "^1.0.0"

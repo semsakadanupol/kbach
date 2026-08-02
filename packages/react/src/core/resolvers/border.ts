@@ -21,8 +21,12 @@ function makeBorderSideResolver(widthProp: string, colorProp: string): Resolver 
   return ({ value, isArbitrary }, { colors, borderWidth }) => {
     if (!value) return { [widthProp]: 1 };
     if (isArbitrary) {
+      // toNativeValue's numeric check discriminates a dimension from a color,
+      // but its px/rem/em conversion is native-only — on web the original
+      // string (e.g. "2rem") must be kept so relative units still scale with
+      // the root font size, instead of being flattened to a fixed px number.
       const w = toNativeValue(value);
-      if (typeof w === 'number') return { [widthProp]: w };
+      if (typeof w === 'number') return { [widthProp]: getEffectiveIsWeb() ? value : w };
       return { [colorProp]: value };
     }
     const color = resolveColor(value, colors, false);
@@ -48,8 +52,10 @@ export const borderResolvers: Record<string, Resolver> = {
 
     if (isArbitrary) {
       // toNativeValue returns a number for px/rem/bare-numeric values; strings for colors.
+      // Its conversion is native-only, though — on web keep the original string
+      // (e.g. "2rem") so relative units still scale instead of becoming a fixed px number.
       const w = toNativeValue(value);
-      if (typeof w === 'number') return { borderWidth: w };
+      if (typeof w === 'number') return { borderWidth: getEffectiveIsWeb() ? value : w };
       return { borderColor: value };
     }
 

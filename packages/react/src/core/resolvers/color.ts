@@ -1,6 +1,6 @@
 import type { StyleValue, ThemeColors } from '../types';
 import { getEffectiveIsWeb } from '../platform';
-import { isModeAwareColor } from '../colorValue';
+import { isModeAwareColor, splitColorShadeRef } from '../colorValue';
 import type { Resolver } from './types';
 
 // ─── Color resolution ─────────────────────────────────────────────────────────
@@ -40,13 +40,11 @@ export function resolveColor(value: string, colors: ThemeColors, isArbitrary: bo
     else if (isModeAwareColor(entry)) hex = pickModeAwareFallback(entry);
     else if (typeof entry === 'object' && '6' in entry) hex = pickModeAwareFallback(entry['6']!);
   } else {
-    const lastDash = colorPart.lastIndexOf('-');
-    if (lastDash > 0) {
-      const colorName = colorPart.slice(0, lastDash);
-      const shade = colorPart.slice(lastDash + 1);
-      const scale = colors[colorName];
-      if (scale && typeof scale === 'object' && !isModeAwareColor(scale) && shade in scale) {
-        const shadeVal = (scale as Record<string, string | { light: string; dark: string }>)[shade];
+    const split = splitColorShadeRef(colorPart);
+    if (split) {
+      const scale = colors[split.name];
+      if (scale && typeof scale === 'object' && !isModeAwareColor(scale) && split.shade in scale) {
+        const shadeVal = (scale as Record<string, string | { light: string; dark: string }>)[split.shade];
         hex = shadeVal !== undefined ? pickModeAwareFallback(shadeVal) : null;
       }
     }

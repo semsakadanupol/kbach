@@ -3,7 +3,7 @@ import { defaultTheme } from './theme';
 import { clearPluginUtilities, getPluginStandaloneMap } from './utilities';
 import { clearCache, injectGlobalStyles, setDefaultFontFamily } from './resolver';
 import { registerModifier, clearPluginModifiers, type ModifierDef } from './registry';
-import { isModeAwareColor } from './colorValue';
+import { isModeAwareColor, splitColorShadeRef } from './colorValue';
 import { hexToRgba } from './resolvers/color';
 import { kbachWarn } from './devWarn';
 
@@ -43,11 +43,10 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial
 interface KbachConfigStore {
   resolved: ResolvedConfig | null;
   listeners: Set<ConfigListener>;
-  customVariants: Record<string, string>;
   _src?: FrameworkConfig;
 }
 
-const configStore: KbachConfigStore = { resolved: null, listeners: new Set<ConfigListener>(), customVariants: {} };
+const configStore: KbachConfigStore = { resolved: null, listeners: new Set<ConfigListener>() };
 
 /**
  * Load, merge, and cache the resolved config.
@@ -131,13 +130,9 @@ function resolveColorRefs(colors: ThemeColors): ThemeColors {
       return hexToRgba(baseHex, a);
     }
 
-    // Split on the LAST hyphen (not a regex) so hyphenated custom color group
-    // names like 'warm-gray-6' split into name='warm-gray', shade='6' —
-    // matching the same lookup logic resolveColor() uses in utilities.ts.
-    const lastDash = ref.lastIndexOf('-');
-    if (lastDash <= 0) return null;
-    const name = ref.slice(0, lastDash);
-    const shade = ref.slice(lastDash + 1);
+    const split = splitColorShadeRef(ref);
+    if (!split) return null;
+    const { name, shade } = split;
     if (!/^\d+$/.test(shade)) return null;
     const entry = colors[name];
     // entry itself being a mode-aware pair means `name` has no shades to index
@@ -229,7 +224,6 @@ export function buildConfig(userConfig: FrameworkConfig): ResolvedConfig {
     clearPluginUtilities();
     clearPluginModifiers();
   }
-  for (const k of Object.keys(configStore.customVariants)) delete configStore.customVariants[k];
   const pluginAPI = makePluginAPI(resolved.theme);
   for (const plugin of resolved.plugins) {
     plugin(pluginAPI);
@@ -284,10 +278,6 @@ function makePluginAPI(theme: ThemeConfig): PluginAPI {
       const def: ModifierDef = typeof selectorOrDef === 'string'
         ? _selectorToModifierDef(selectorOrDef)
         : selectorOrDef;
-      const selector = typeof selectorOrDef === 'string' ? selectorOrDef
-        : selectorOrDef.pseudo ?? selectorOrDef.mediaQuery ?? selectorOrDef.ancestorSelector ?? null;
-      // Only store in customVariants when we have an actual CSS selector (not a JS-only variant)
-      if (selector !== null && selector !== name) customVariants[name] = selector;
       registerModifier(name, def);
     },
 
@@ -335,12 +325,3 @@ export function initConfig(userConfig: FrameworkConfig): void {
   if (configStore._src === userConfig) return;
   updateConfig(userConfig);
 }
-
-/**
- * Custom variants registered via plugins (modifier name → CSS selector template).
- * A direct reference to configStore.customVariants rather than a copy — the
- * object itself is only ever mutated in place (keys added in addVariant()
- * above, cleared in buildConfig()), never reassigned, so this binding always
- * reflects the current set.
- */
-export const customVariants: Record<string, string> = configStore.customVariants;

@@ -3,12 +3,13 @@ import { BASE_RESET, RESET_STYLE_ID } from './reset';
 import { parseClasses } from './parser';
 import { resolveUtility, isKnownUtility } from './utilities';
 import { LRUCache } from './cache';
-import { escapeCSSSelector, isWeb, isNative } from './platform';
+import { escapeCSSSelector, isWeb, isNative, getEffectiveIsWeb } from './platform';
 import { getGlobalScreens } from './responsiveStore';
 import { expandModeAwareColorClasses } from './modeAwareColors';
 import {
   getModifier,
   matchModifier,
+  getModifierOrder,
   type ModifierDef,
 } from './registry';
 import { kbachWarn } from './devWarn';
@@ -21,12 +22,25 @@ import { kbachWarn } from './devWarn';
 // When updateConfig() creates a new theme object the old cache becomes
 // unreachable and is garbage-collected automatically.
 
-const _themeCache = new WeakMap<object, LRUCache<string, ResolvedStyle>>();
+// rules: the raw CSS rule strings this classString needs live in the
+// injected <style> sheet, each paired with the cascade-order value (see
+// registry.ts's ModifierDef.order) its bucket resolved to — re-injecting
+// after eviction needs that order again to land back in the right position,
+// not just at the end. Stored alongside the resolved style so a cache HIT
+// can still re-verify/re-inject them — the rule tracker below
+// (_injectedRules) evicts independently from this cache and can drop a
+// rule a still-cached classString depends on.
+interface CacheEntry {
+  result: ResolvedStyle;
+  rules: { rule: string; order: number }[];
+}
 
-function getThemeCache(theme: object): LRUCache<string, ResolvedStyle> {
+const _themeCache = new WeakMap<object, LRUCache<string, CacheEntry>>();
+
+function getThemeCache(theme: object): LRUCache<string, CacheEntry> {
   let cache = _themeCache.get(theme);
   if (!cache) {
-    cache = new LRUCache<string, ResolvedStyle>(10_000);
+    cache = new LRUCache<string, CacheEntry>(10_000);
     _themeCache.set(theme, cache);
   }
   return cache;
@@ -87,18 +101,46 @@ let _styleEl: HTMLStyleElement | null = null;
 // reserializes cssText with its own formatting (e.g. a trailing ";" this codebase
 // never emits), so a string-equality scan against sheet.cssRules[i].cssText would
 // essentially never match, leaving the CSSOM rule behind even after eviction.
-// injectRule() always appends (insertRule at cssRules.length), so this map's
-// recorded indices exactly mirror the live sheet as long as every deletion also
-// shifts down the recorded index of every rule that came after it.
+// This map's recorded indices exactly mirror the live sheet as long as every
+// insertion/deletion also shifts every other tracked index that comes after it.
 const _ruleIndexByKey = new Map<string, number>();
+
+// The cascade-order value (registry.ts's ModifierDef.order, via
+// getModifierOrder()) each currently-live rule was inserted with.
+// _sheetKeys mirrors the live sheet's rule order exactly (index i here ===
+// index i in sheet.cssRules) — kept sorted by order at all times, since every
+// insertion below places a new rule immediately before the first existing
+// rule with a strictly greater order (a stable sort: ties keep encounter
+// order). That invariant is what makes rules with the same modifier order
+// always land in the SAME relative position regardless of which one the app
+// happened to render/resolve first — e.g. hover: consistently sorts before
+// focus: (or whatever registry.ts's order table says), so the pseudo-class
+// that wins a same-specificity tie no longer depends on encounter order.
+const _sheetKeys: string[] = [];
+const _ruleOrderByKey = new Map<string, number>();
+
+// Binary search for the insertion index: the first position in _sheetKeys
+// whose order is strictly greater than `order`. Valid because _sheetKeys is
+// always kept sorted by order (see above).
+function findInsertionIndex(order: number): number {
+  let lo = 0, hi = _sheetKeys.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (_ruleOrderByKey.get(_sheetKeys[mid])! > order) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
 
 function evictInjectedRule(rule: string): void {
   const idx = _ruleIndexByKey.get(rule);
   _ruleIndexByKey.delete(rule);
+  _ruleOrderByKey.delete(rule);
   if (idx === undefined) return;
   const sheet = _styleEl?.sheet;
   if (!sheet) return;
   try { sheet.deleteRule(idx); } catch { return; }
+  _sheetKeys.splice(idx, 1);
   for (const [key, i] of _ruleIndexByKey) {
     if (i > idx) _ruleIndexByKey.set(key, i - 1);
   }
@@ -126,18 +168,27 @@ function getStyleEl(): HTMLStyleElement {
   return _styleEl;
 }
 
-function injectRule(rule: string): void {
+function injectRule(rule: string, order: number): void {
   if (isRuntimeCSSDisabled()) return;
   // .get() (not .has()) so a reused rule is refreshed to "most recently used" —
   // otherwise a class injected once but referenced for the app's whole lifetime
   // would still be evicted by unrelated churn from newer distinct classes.
+  // Already live — its position (and thus its cascade tiebreak behavior) is
+  // unaffected by `order` here even if it differs from the original call
+  // (can't happen in practice: the same rule text always comes from the same
+  // bucketKey, which always resolves to the same order).
   if (_injectedRules.get(rule)) return;
   try {
     const sheet = getStyleEl().sheet;
     if (sheet) {
-      const idx = sheet.cssRules.length;
+      const idx = findInsertionIndex(order);
       sheet.insertRule(rule, idx);
+      _sheetKeys.splice(idx, 0, rule);
+      for (const [key, i] of _ruleIndexByKey) {
+        if (i >= idx) _ruleIndexByKey.set(key, i + 1);
+      }
       _ruleIndexByKey.set(rule, idx);
+      _ruleOrderByKey.set(rule, order);
       _injectedRules.set(rule, true);
     }
   } catch {
@@ -373,9 +424,11 @@ function injectClassRule(
   styles: StyleValue,
   darkMode: 'attribute' | 'class' | 'media',
   important: boolean,
-): void {
+  order: number,
+): string[] {
   const cssRules = buildClassCSSRules(cls, bucketKey, styles, darkMode, important, getGlobalScreens());
-  for (const r of cssRules) injectRule(r);
+  for (const r of cssRules) injectRule(r, order);
+  return cssRules;
 }
 
 export function generateClassCSS(
@@ -412,11 +465,28 @@ export function resolve(
   // Cached (and CSS-injected below) under the ORIGINAL classString — expansion
   // is a pure function of (classString, theme.colors), so this stays correct
   // without the cache key needing to know anything changed.
-  const cacheKey = `${classString}::${darkMode}`;
+  //
+  // Includes getEffectiveIsWeb() so a process that resolves the SAME theme
+  // object for both platforms (shared build tooling, tests importing both the
+  // Vite and Babel plugins) never serves one platform's resolved styles to
+  // the other — resolveUtility() below is platform-aware via that same call,
+  // same class of fix as layout.ts's getStandalone() this session.
+  const cacheKey = `${classString}::${darkMode}::${getEffectiveIsWeb() ? 'web' : 'native'}`;
   const cached = cache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    // Re-verify liveness on every hit, not just the first resolve: the rule
+    // tracker (_injectedRules) is a separate, independently-evicting LRU, so
+    // a rule this classString needs can be dropped (and deleted from the
+    // live <style> sheet) while this entry is still cached. injectRule() is
+    // a cheap no-op when the rule is already live.
+    if (isWeb) {
+      for (const { rule, order } of cached.rules) injectRule(rule, order);
+    }
+    return cached.result;
+  }
 
   const result: ResolvedStyle = {};
+  const rules: { rule: string; order: number }[] = [];
   const onWeb = isWeb;
 
   for (const parsed of parseClasses(expandModeAwareColorClasses(classString, theme.colors))) {
@@ -435,11 +505,14 @@ export function resolve(
 
     // Bug #11 fix: no injectQueue allocation — inject directly in the same pass.
     if (onWeb) {
-      injectClassRule(parsed.original, bucketKey, styles, darkMode, parsed.important);
+      const order = getModifierOrder(bucketKey);
+      for (const r of injectClassRule(parsed.original, bucketKey, styles, darkMode, parsed.important, order)) {
+        rules.push({ rule: r, order });
+      }
     }
   }
 
-  cache.set(cacheKey, result);
+  cache.set(cacheKey, { result, rules });
   return result;
 }
 
@@ -511,6 +584,8 @@ export function flatten(
 export function clearCache(): void {
   _injectedRules.clear();
   _ruleIndexByKey.clear();
+  _ruleOrderByKey.clear();
+  _sheetKeys.length = 0;
   if (_styleEl) {
     _styleEl.remove();
     _styleEl = null;

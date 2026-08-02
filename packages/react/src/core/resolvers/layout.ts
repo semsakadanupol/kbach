@@ -8,10 +8,16 @@ import type { Resolver } from './types';
 // Built lazily so that CSS generation mode (set by the Vite plugin before first use)
 // is picked up correctly even though isWeb=false in Node.js at module load time.
 
+// Cached per the `web` value it was built with (not just built once) — a
+// process that resolves classes for both targets in one run (shared build
+// tooling, tests importing both the Vite and Babel plugins) calls
+// setResolveTarget() to flip getEffectiveIsWeb() between them, and a plain
+// build-once-forever cache would keep serving the first-observed platform's
+// values to the other target.
 let _standalone: Record<string, StyleValue | null> | null = null;
+let _standaloneWeb: boolean | null = null;
 
-function buildStandalone(): Record<string, StyleValue | null> {
-  const web = getEffectiveIsWeb();
+function buildStandalone(web: boolean): Record<string, StyleValue | null> {
   return {
   // Display
   // React Native only supports display:'flex'|'none'. Setting 'flex' explicitly is
@@ -26,7 +32,6 @@ function buildStandalone(): Record<string, StyleValue | null> {
   'inline-block': { display: web ? 'inline-block' : 'flex' },
   inline:         { display: web ? 'inline' : 'flex' },
   grid:           web ? { display: 'grid' } : null,
-  grd:            web ? { display: 'grid' } : null,
   'inline-flex':  { display: web ? 'inline-flex' : 'flex' },
   'inline-grid':  { display: web ? 'inline-grid' : 'flex' },
   hidden:         { display: 'none' },
@@ -416,7 +421,11 @@ function buildStandalone(): Record<string, StyleValue | null> {
 }
 
 export function getStandalone(): Record<string, StyleValue | null> {
-  if (!_standalone) _standalone = buildStandalone();
+  const web = getEffectiveIsWeb();
+  if (!_standalone || _standaloneWeb !== web) {
+    _standalone = buildStandalone(web);
+    _standaloneWeb = web;
+  }
   return _standalone;
 }
 

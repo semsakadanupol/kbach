@@ -37,9 +37,9 @@ export const filterResolvers: Record<string, Resolver> = {
     const v = isArbitrary ? `contrast(${value})` : `contrast(${parseFloat(value) / 100})`;
     return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--kb-contrast': v, filter: FILTER_COMPOSE } as StyleValue;
   },
-  grayscale: ({ value }) => {
+  grayscale: ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
-    const v = value === '0' ? 'grayscale(0)' : 'grayscale(100%)';
+    const v = isArbitrary ? `grayscale(${value})` : value === '0' ? 'grayscale(0)' : 'grayscale(100%)';
     return { '--kb-grayscale': v, filter: FILTER_COMPOSE } as StyleValue;
   },
   'hue-rotate': ({ value, negative, isArbitrary }) => {
@@ -48,9 +48,9 @@ export const filterResolvers: Record<string, Resolver> = {
     if (isNaN(parseFloat(deg)) && !isArbitrary) return null;
     return { '--kb-hue-rotate': `hue-rotate(${deg})`, filter: FILTER_COMPOSE } as StyleValue;
   },
-  invert: ({ value }) => {
+  invert: ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
-    const v = value === '0' ? 'invert(0)' : 'invert(100%)';
+    const v = isArbitrary ? `invert(${value})` : value === '0' ? 'invert(0)' : 'invert(100%)';
     return { '--kb-invert': v, filter: FILTER_COMPOSE } as StyleValue;
   },
   saturate: ({ value, isArbitrary }) => {
@@ -58,9 +58,9 @@ export const filterResolvers: Record<string, Resolver> = {
     const v = isArbitrary ? `saturate(${value})` : `saturate(${parseFloat(value) / 100})`;
     return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--kb-saturate': v, filter: FILTER_COMPOSE } as StyleValue;
   },
-  sepia: ({ value }) => {
+  sepia: ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
-    const v = value === '0' ? 'sepia(0)' : 'sepia(100%)';
+    const v = isArbitrary ? `sepia(${value})` : value === '0' ? 'sepia(0)' : 'sepia(100%)';
     return { '--kb-sepia': v, filter: FILTER_COMPOSE } as StyleValue;
   },
   'drop-shadow': ({ value, isArbitrary }) => {
@@ -107,9 +107,10 @@ export const filterResolvers: Record<string, Resolver> = {
     const v = isArbitrary ? `contrast(${value})` : `contrast(${parseFloat(value) / 100})`;
     return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--kb-backdrop-contrast': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
-  'backdrop-grayscale': ({ value }) => {
+  'backdrop-grayscale': ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
-    return { '--kb-backdrop-grayscale': value === '0' ? 'grayscale(0)' : 'grayscale(100%)', backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    const v = isArbitrary ? `grayscale(${value})` : value === '0' ? 'grayscale(0)' : 'grayscale(100%)';
+    return { '--kb-backdrop-grayscale': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
   'backdrop-hue-rotate': ({ value, negative, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
@@ -117,9 +118,10 @@ export const filterResolvers: Record<string, Resolver> = {
     if (isNaN(parseFloat(deg)) && !isArbitrary) return null;
     return { '--kb-backdrop-hue-rotate': `hue-rotate(${deg})`, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
-  'backdrop-invert': ({ value }) => {
+  'backdrop-invert': ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
-    return { '--kb-backdrop-invert': value === '0' ? 'invert(0)' : 'invert(100%)', backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    const v = isArbitrary ? `invert(${value})` : value === '0' ? 'invert(0)' : 'invert(100%)';
+    return { '--kb-backdrop-invert': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
   'backdrop-opacity': ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
@@ -131,9 +133,10 @@ export const filterResolvers: Record<string, Resolver> = {
     const v = isArbitrary ? `saturate(${value})` : `saturate(${parseFloat(value) / 100})`;
     return isNaN(parseFloat(value)) && !isArbitrary ? null : { '--kb-backdrop-saturate': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
-  'backdrop-sepia': ({ value }) => {
+  'backdrop-sepia': ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;
-    return { '--kb-backdrop-sepia': value === '0' ? 'sepia(0)' : 'sepia(100%)', backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
+    const v = isArbitrary ? `sepia(${value})` : value === '0' ? 'sepia(0)' : 'sepia(100%)';
+    return { '--kb-backdrop-sepia': v, backdropFilter: BACKDROP_FILTER_COMPOSE } as StyleValue;
   },
   'backdrop-filter': ({ value, isArbitrary }) => {
     if (!getEffectiveIsWeb()) return null;

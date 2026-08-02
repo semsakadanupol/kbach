@@ -79,3 +79,27 @@ export function stripWebOnlyProps(s: Record<string, unknown>): void {
     delete s.position;
   }
 }
+
+/**
+ * Compose Kbach's computed style with a native `style` prop WITHOUT
+ * spreading/Object.assign-ing the user value into a fresh object.
+ * react-native-reanimated's useAnimatedStyle() returns an object the native
+ * UI thread mutates directly by reference — spreading it copies out today's
+ * snapshot into a brand-new plain object and permanently disconnects it from
+ * Reanimated's runtime, so the animation silently freezes at its first
+ * frame. React Native's own style prop already accepts (and flattens)
+ * arrays with later entries winning on conflicts, same precedence as a
+ * spread — composing as an array here instead preserves userStyle's
+ * identity (whatever it is: a plain object, an array, or Reanimated's
+ * opaque style handle) straight through to the native renderer, which is
+ * exactly what a consuming Animated.View needs to find it.
+ * Native only — web/SSR always forward the user style as-is instead.
+ * Shared by jsx-runtime, DarkWrapper, InteractiveWrapper, and styled().
+ */
+export function composeNativeStyle(
+  computed: Record<string, unknown>,
+  userStyle: unknown,
+): Record<string, unknown> | unknown[] {
+  if (!userStyle) return computed;
+  return Array.isArray(userStyle) ? [computed, ...userStyle] : [computed, userStyle];
+}

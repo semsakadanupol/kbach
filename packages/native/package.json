@@ -2,6 +2,7 @@
   "name": "@kbach/native",
   "version": "0.6.39",
   "description": "Single-package Kbach install for React Native and Expo — includes core, components, Babel plugin, and Metro config",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/semsakadanupol/kbach.git",
@@ -44,6 +45,7 @@
     "@kbach/react": "^0.6.0"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.7",
     "@types/react": "^19.2.0",
     "tsup": "^8.0.0",
     "vitest": "^1.0.0"

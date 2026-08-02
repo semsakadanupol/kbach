@@ -2,6 +2,7 @@
   "name": "kbach",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/semsakadanupol/kbach.git"
@@ -19,7 +20,7 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "clean": "turbo run clean && node -e \"require('fs').rmSync('node_modules',{recursive:true,force:true})\"",
-    "publish:react": "node scripts/assert-versions-match.js && turbo run build --filter=@kbach/react --filter=@kbach/native && npm version patch --workspaces --no-git-tag-version && npm publish --workspace=@kbach/react && npm publish --workspace=@kbach/native",
+    "publish:react": "node scripts/assert-versions-match.js && turbo run build --filter=@kbach/react --filter=@kbach/native && npm version patch --workspace=@kbach/react --workspace=@kbach/native --no-git-tag-version && npm publish --workspace=@kbach/react && npm publish --workspace=@kbach/native",
     "publish:native": "npm run publish:react",
     "publish:all": "node scripts/assert-versions-match.js && turbo run build && npm version patch --workspaces --no-git-tag-version && npm publish --workspaces"
   },

@@ -15,6 +15,10 @@ export function resolveSpacing(
     if (negative) {
       if (typeof resolved === 'number') return -resolved;
       if (typeof resolved === 'string') {
+        // Already-negative arbitrary value ('-mt-[-10px]') — flip back to
+        // positive instead of prepending a second '-', which would otherwise
+        // silently leave the value negative when the caller asked to negate it.
+        if (resolved.startsWith('-')) return resolved.slice(1);
         if (/^\d/.test(resolved)) return `-${resolved}`;
         if (/^(calc|var|min|max|clamp|env)\s*\(/.test(resolved)) return `calc(-1 * (${resolved}))`;
       }

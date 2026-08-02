@@ -4,12 +4,13 @@ import {
   isNative,
   getEffectiveIsWeb,
   getActiveBreakpoints,
+  getGlobalScreens,
   type ResolvedStyle,
   type StyleValue,
 } from './core';
 import { useConditionalGlobalDarkMode } from './useGlobalDarkMode';
 import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
-import { hasResponsiveBuckets, stripInternalMarkers, stripWebOnlyProps, chain } from './shared-utils';
+import { hasResponsiveBuckets, stripInternalMarkers, stripWebOnlyProps, chain, composeNativeStyle } from './shared-utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,6 +88,7 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
     const needsWidth = hasResponsiveBuckets(resolvedStyle);
     const width = useConditionalWidth(needsWidth && !isWebPlatform);
     const breakpoints = needsWidth ? getActiveBreakpoints(width) : EMPTY_BREAKPOINTS;
+    const screens = getGlobalScreens();
 
     const [pressed, setPressed] = useState(false);
     const [hovered, setHovered] = useState(false);
@@ -137,26 +139,16 @@ export const InteractiveWrapper = forwardRef<unknown, InteractiveWrapperProps>(
         if (isNonStringComponent) stripWebOnlyProps(s);
         return s;
       },
-      [resolvedStyle, isDark, pressed, hovered, focused, width, disabled, checked, isNonStringComponent],
+      [resolvedStyle, isDark, pressed, hovered, focused, width, screens, disabled, checked, isNonStringComponent],
     );
 
     // On web (browser and SSR alike), CSS classes handle all Kbach styles — only
-    // forward user's explicit style. On native, compose as an array rather than
-    // spreading styleProp into a fresh object — react-native-reanimated's
-    // useAnimatedStyle() returns an object the native UI thread mutates by
-    // reference, and Object.assign/spread would copy out a snapshot and
-    // permanently disconnect it from Reanimated's runtime. React Native's style
-    // prop already accepts arrays (later entries win on conflicts, same
-    // precedence spreading had), so composing one here preserves styleProp's
-    // identity through to the native renderer regardless of what it actually is.
+    // forward user's explicit style. On native, composeNativeStyle() preserves
+    // styleProp's identity (Reanimated-safe) — see shared-utils.ts.
     const skipComputedInline = isWebPlatform;
     const finalStyle: Record<string, unknown> | unknown[] | undefined = skipComputedInline
       ? (styleProp ?? undefined)
-      : styleProp
-        ? Array.isArray(styleProp)
-          ? [computedStyle, ...styleProp]
-          : [computedStyle, styleProp]
-        : computedStyle;
+      : composeNativeStyle(computedStyle, styleProp);
 
     const componentProps = {
       ref,

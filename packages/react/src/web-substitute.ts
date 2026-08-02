@@ -196,7 +196,9 @@ const _rnOnlyProps = new Set([
   'onTextLayout', 'textBreakStrategy', 'lineBreakStrategyIOS',
   // TextInput
   'multiline',
-  'resizeMode', // handled separately
+  // NOTE: 'resizeMode' (Image's prop, not TextInput's) deliberately does NOT
+  // go here — it's handled below in the isImage branch (mapped to CSS
+  // object-fit). Blacklisting it here would make that branch unreachable.
   'blurOnSubmit', 'clearButtonMode', 'clearTextOnFocus', 'enablesReturnKeyAutomatically',
   'returnKeyType', 'spellCheck',
   // ScrollView
@@ -290,7 +292,7 @@ export function transformToWebProps(
         continue;
       }
       if (k === 'keyboardType') {
-        if (!('type' in props) && !('secureTextEntry' in props)) {
+        if (!('type' in props) && !props.secureTextEntry) {
           const mapped = _keyboardTypeMap[v as string];
           if (mapped) out.type = mapped;
         }
@@ -304,7 +306,7 @@ export function transformToWebProps(
     // Collected as pendingStyle and merged after the loop so it doesn't get overwritten
     // when the style prop is processed later in the iteration.
     if (isScrollable && k === 'horizontal') {
-      if (v) pendingStyle = { display: 'flex', flexDirection: 'row', overflowX: 'auto' };
+      if (v) pendingStyle = { ...(pendingStyle ?? {}), display: 'flex', flexDirection: 'row', overflowX: 'auto' };
       continue;
     }
 

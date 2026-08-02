@@ -24,7 +24,7 @@ import {
 } from './core';
 import { useConditionalGlobalDarkMode } from './useGlobalDarkMode';
 import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
-import { hasResponsiveBuckets, stripInternalMarkers, stripWebOnlyProps } from './shared-utils';
+import { hasResponsiveBuckets, stripInternalMarkers, stripWebOnlyProps, composeNativeStyle } from './shared-utils';
 
 export interface DarkWrapperProps {
   Component: React.ComponentType<any> | string;
@@ -74,22 +74,12 @@ export const DarkWrapper = React.forwardRef<unknown, DarkWrapperProps>(
     }, [resolvedStyle, isDark, width, screens, isNonStringComponent]);
 
     // On web (browser and SSR alike), CSS classes handle all Kbach styles — only
-    // forward user's explicit style. On native, compose as an array rather than
-    // spreading styleProp into a fresh object — react-native-reanimated's
-    // useAnimatedStyle() returns an object the native UI thread mutates by
-    // reference, and Object.assign/spread would copy out a snapshot and
-    // permanently disconnect it from Reanimated's runtime. React Native's style
-    // prop already accepts arrays (later entries win on conflicts, same
-    // precedence spreading had), so composing one here preserves styleProp's
-    // identity through to the native renderer regardless of what it actually is.
+    // forward user's explicit style. On native, composeNativeStyle() preserves
+    // styleProp's identity (Reanimated-safe) — see shared-utils.ts.
     const skipComputedInline = isWebPlatform;
     const finalStyle: Record<string, unknown> | unknown[] | undefined = skipComputedInline
       ? (styleProp ?? undefined)
-      : styleProp
-        ? Array.isArray(styleProp)
-          ? [computedStyle, ...styleProp]
-          : [computedStyle, styleProp]
-        : computedStyle;
+      : composeNativeStyle(computedStyle, styleProp);
 
     const props: Record<string, unknown> = { ref, ...rest, style: finalStyle };
     return Array.isArray(children)

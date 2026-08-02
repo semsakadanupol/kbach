@@ -13,7 +13,7 @@ import { isWeb, isNative, getEffectiveIsWeb, getConfig, onConfigChange, resolve,
 import { InteractiveWrapper } from './InteractiveWrapper';
 import { DarkWrapper } from './DarkWrapper';
 import { getWebTag, transformToWebProps, registerWebElement, getImpliedRNStyle } from './web-substitute';
-import { stripInternalMarkers, stripWebOnlyProps as stripWebOnlyInlineProps } from './shared-utils';
+import { stripInternalMarkers, stripWebOnlyProps as stripWebOnlyInlineProps, composeNativeStyle } from './shared-utils';
 
 export { registerWebElement };
 
@@ -93,28 +93,6 @@ function omitConsumed(props: Record<string, unknown>): Record<string, unknown> {
     if (!CONSUMED_PROPS.has(key)) out[key] = props[key];
   }
   return out;
-}
-
-// ─── Style merge helper ───────────────────────────────────────────────────────
-//
-// Native only (web/SSR never reach this — see skipComputedInline below). Must
-// NOT flatten userStyle into a fresh plain object via spread/Object.assign:
-// react-native-reanimated's useAnimatedStyle() returns an object the native
-// UI thread mutates directly by reference — spreading it copies out today's
-// snapshot into a brand-new plain object and permanently disconnects it from
-// Reanimated's runtime, so the animation silently freezes at its first frame.
-// React Native's own style prop already accepts (and flattens) arrays with
-// later entries winning on conflicts, same precedence as the old spread —
-// composing as an array here instead preserves userStyle's identity (whatever
-// it is: a plain object, an array, or Reanimated's opaque style handle)
-// straight through to the native renderer, which is exactly what a
-// consuming Animated.View needs to find it.
-function mergeStyle(
-  computed: Record<string, unknown>,
-  userStyle: unknown,
-): Record<string, unknown> | unknown[] {
-  if (!userStyle) return computed;
-  return Array.isArray(userStyle) ? [computed, ...userStyle] : [computed, userStyle];
 }
 
 // ─── Substituted-RN-primitive layout compensation ─────────────────────────────
@@ -310,7 +288,7 @@ function processElement(
     const computedStyle = flatten(resolved, false) as Record<string, unknown>;
     stripInternalMarkers(computedStyle);
     if (typeof effectiveType !== 'string') stripWebOnlyInlineProps(computedStyle);
-    finalStyle = mergeStyle(computedStyle, userStyle);
+    finalStyle = composeNativeStyle(computedStyle, userStyle);
   } else {
     finalStyle = userStyle as any ?? undefined;
   }

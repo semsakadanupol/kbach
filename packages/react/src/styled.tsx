@@ -7,11 +7,11 @@ import React, {
   type ForwardRefExoticComponent,
   type ReactElement,
 } from 'react';
-import { resolve, flatten, isNative, getEffectiveIsWeb, normalizeClassString, getActiveBreakpoints, type StyleValue, type ResolvedStyle } from './core';
+import { resolve, flatten, isNative, getEffectiveIsWeb, normalizeClassString, getActiveBreakpoints, getGlobalScreens, type StyleValue, type ResolvedStyle } from './core';
 import { useTheme } from './context';
 import { useConditionalGlobalDarkMode } from './useGlobalDarkMode';
 import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
-import { hasResponsiveBuckets, hasInteractiveBuckets, chain } from './shared-utils';
+import { hasResponsiveBuckets, hasInteractiveBuckets, chain, composeNativeStyle } from './shared-utils';
 import { getWebTag, transformToWebProps, getImpliedRNStyle } from './web-substitute';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -114,6 +114,7 @@ export function styled<T extends ComponentType<any>>(
       const needsWidth = hasResponsiveBuckets(resolved);
       const width = useConditionalWidth(needsWidth && !isWebPlatform);
       const breakpoints = needsWidth ? getActiveBreakpoints(width) : EMPTY_BREAKPOINTS;
+      const screens = getGlobalScreens();
 
       // On web (browser and SSR alike), CSS classes carry all styles — flatten()
       // output is never applied as inline style. isWebPlatform comes from
@@ -123,7 +124,7 @@ export function styled<T extends ComponentType<any>>(
       // mismatch.
       const computedStyle = useMemo(
         () => isWebPlatform ? ({} as StyleValue) : flatten(resolved, isDark, { pressed, hover: hovered, focus: focused, disabled, checked }, breakpoints),
-        [resolved, isDark, pressed, hovered, focused, disabled, checked, width], // eslint-disable-line react-hooks/exhaustive-deps
+        [resolved, isDark, pressed, hovered, focused, disabled, checked, width, screens], // eslint-disable-line react-hooks/exhaustive-deps
       );
 
       // On web (browser and SSR alike), substitute RN component types with HTML
@@ -141,16 +142,9 @@ export function styled<T extends ComponentType<any>>(
       // the way a real RN primitive does. DOM's style attribute must be a plain
       // object, so an array styleProp still needs flattening here.
       //
-      // Native: compose as an array rather than spreading styleProp into a
-      // fresh object — react-native-reanimated's useAnimatedStyle() returns
-      // an object the native UI thread mutates by reference (this is the
-      // most common way anyone combines styled() with Reanimated — e.g.
-      // `styled(Animated.View, '...')`), and Object.assign/spread would copy
-      // out today's snapshot and permanently disconnect it from Reanimated's
-      // runtime. React Native's style prop already accepts arrays (later
-      // entries win on conflicts, same precedence spreading had), so
-      // composing one here preserves styleProp's identity through to the
-      // native renderer regardless of what it actually is.
+      // Native: composeNativeStyle() preserves styleProp's identity
+      // (Reanimated-safe — e.g. `styled(Animated.View, '...')`) — see
+      // shared-utils.ts.
       const finalStyle: StyleValue | unknown[] | undefined = isWebPlatform
         ? (() => {
             const flatStyleProp = (Array.isArray(styleProp) ? Object.assign({}, ...styleProp) : styleProp) ?? undefined;
@@ -158,9 +152,7 @@ export function styled<T extends ComponentType<any>>(
             if (!compensation) return flatStyleProp;
             return flatStyleProp ? { ...compensation, ...flatStyleProp } : compensation;
           })()
-        : styleProp
-          ? (Array.isArray(styleProp) ? [computedStyle, ...styleProp] : [computedStyle, styleProp])
-          : computedStyle;
+        : composeNativeStyle(computedStyle, styleProp);
 
       const effectiveComponent: unknown = webTag ?? Component;
       const componentName: string = (Component as any).displayName ?? (Component as any).name ?? '';

@@ -46,7 +46,6 @@ export {
   updateConfig,
   initConfig,
   onConfigChange,
-  customVariants,
 } from './config';
 
 export {

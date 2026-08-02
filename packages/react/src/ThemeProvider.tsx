@@ -12,6 +12,7 @@ import {
   isWeb,
   isNative,
   getConfig,
+  resetConfig,
   buildConfig,
   updateConfig,
   onConfigChange,
@@ -49,6 +50,27 @@ let _mountedProviderCount = 0;
 let _warnedMultipleProviders = false;
 let _mountedConfigOverrideCount = 0;
 let _warnedConfigOverride = false;
+
+// Under darkMode: 'media', applyWebTheme() never runs (there's no attribute/class
+// for it to set — the CSS is a pure @media query), so a setMode()/toggle() call
+// updates isDark/resolvedMode in React state with zero effect on what's actually
+// rendered. Warn once so that divergence isn't silent.
+let _warnedMediaModeToggle = false;
+
+/**
+ * Test-only: reset the warn-once/mount-count module state above. Not part of
+ * the public API (not re-exported from index.ts) — same pattern as config.ts's
+ * resetConfig(). Without this, tests that mount/unmount multiple ThemeProviders
+ * in one file would see these warnings fire at most once for the whole file,
+ * not once per test.
+ */
+export function __resetForTests(): void {
+  _mountedProviderCount = 0;
+  _warnedMultipleProviders = false;
+  _mountedConfigOverrideCount = 0;
+  _warnedConfigOverride = false;
+  _warnedMediaModeToggle = false;
+}
 
 // ─── Persist helpers ──────────────────────────────────────────────────────────
 function loadPersistedMode(): ThemeMode | null {
@@ -211,6 +233,21 @@ export function ThemeProvider({
     return () => {
       _mountedProviderCount--;
       if (configOverride) _mountedConfigOverrideCount--;
+      // If this provider ever pushed a `config` override into the global
+      // store (_prevConfigOverrideRef is only ever set inside that render-time
+      // block above) and nothing else is mounted anymore, revert to the
+      // lazily-rebuilt default instead of leaving this override permanently
+      // active for whatever mounts next. Without this, a <ThemeProvider
+      // config={variantA}> that unmounts (e.g. a route change) followed by a
+      // later <ThemeProvider> with NO override of its own would silently
+      // inherit variantA's leftover config forever, since nothing else ever
+      // resets the global store back. Left alone (not reset) when other
+      // providers are still mounted — which provider's config should win
+      // there is already ambiguous/unsupported, per the multi-provider
+      // warning above.
+      if (_prevConfigOverrideRef.current !== undefined && _mountedProviderCount === 0) {
+        resetConfig();
+      }
     };
   }, []);
 
@@ -328,9 +365,18 @@ export function ThemeProvider({
   }, [disablePersistence]);
 
   const setMode = useCallback((next: ThemeMode) => {
+    if (process.env.NODE_ENV !== 'production' && isWeb && resolvedConfig.darkMode === 'media' && !_warnedMediaModeToggle) {
+      _warnedMediaModeToggle = true;
+      kbachWarn(
+        'setMode()/toggle() was called while darkMode is "media" — the resolved ' +
+        'mode/isDark from useTheme()/useIsDark() will update, but the actual CSS ' +
+        'stays driven by prefers-color-scheme and will not change to match. ' +
+        'Use darkMode: "attribute" or "class" if the app needs manual toggling.',
+      );
+    }
     _setMode(next);
     if (!disablePersistence) persistMode(next);
-  }, [disablePersistence]);
+  }, [disablePersistence, resolvedConfig.darkMode]);
 
   const toggle = useCallback(() => {
     setMode(mode === 'dark' || (mode === 'system' && systemScheme === 'dark') ? 'light' : 'dark');

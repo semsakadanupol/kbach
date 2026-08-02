@@ -16,6 +16,22 @@ import { LRUCache } from './cache';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ModifierDef {
+  /**
+   * Cascade priority for CSS rule ORDER — NOT specificity. Two rules that
+   * differ only by modifier (e.g. `.hover\:bg-blue-6:hover` and
+   * `.focus\:bg-red-6:focus`) have equal CSS specificity, so when both
+   * conditions are true at once (hovering AND focused), the winner is
+   * whichever rule appears LATER in the stylesheet — CSS's normal same-
+   * specificity tiebreak. Without a fixed priority, "later" would depend on
+   * encounter order (whichever class the app happens to render/scan first),
+   * making the winner effectively random and inconsistent across reloads/
+   * builds. `order` fixes that: rules are emitted/injected sorted by this
+   * value (ascending — higher wins ties), regardless of source order, so
+   * e.g. `disabled:` always beats `hover:` on the same element no matter
+   * which one was written first in the className or rendered first in the
+   * app. Omit for the default (0). See getModifierOrder() below.
+   */
+  order?: number;
   /** CSS pseudo-class or pseudo-element appended to the selector (e.g. ':hover', '::before') */
   pseudo?: string;
   /** Ancestor selector prefix INCLUDING trailing space (e.g. '.group:hover ', '.peer:focus ~ ') */
@@ -54,75 +70,86 @@ export interface ModifierDef {
 }
 
 // ─── Built-in modifiers ───────────────────────────────────────────────────────
+//
+// `order` values below encode a fixed cascade priority (see ModifierDef.order's
+// doc comment) — roughly "how urgently this state should visually dominate the
+// element": structural position < visited link < hover < focus-within < focus <
+// focus-visible < active/pressed < checked < disabled, so e.g. a disabled,
+// hovered button always renders as disabled, never stuck showing hover styles,
+// regardless of which class was written first or rendered first. Responsive/
+// dark/media/directionality modifiers sit at the end since they already scope
+// via an ancestor selector or @media wrapper (naturally less likely to tie
+// with a plain pseudo-class), but still get a fixed slot for determinism when
+// two of THEM tie (e.g. print: vs rtl:).
 
 export const BUILTIN_MODIFIERS: Readonly<Record<string, ModifierDef>> = {
   // ── Mode ─────────────────────────────────────────────────────────────────
-  dark:       { darkScheme: 'dark',  jsBehavior: 'mode', jsMatch: (d)       => d },
-  'not-light':{ darkScheme: 'dark',  jsBehavior: 'mode', jsMatch: (d)       => d },
-  light:      { darkScheme: 'light', jsBehavior: 'mode', jsMatch: (d)       => !d },
-  'not-dark': { darkScheme: 'light', jsBehavior: 'mode', jsMatch: (d)       => !d },
+  dark:       { order: 60, darkScheme: 'dark',  jsBehavior: 'mode', jsMatch: (d)       => d },
+  'not-light':{ order: 60, darkScheme: 'dark',  jsBehavior: 'mode', jsMatch: (d)       => d },
+  light:      { order: 60, darkScheme: 'light', jsBehavior: 'mode', jsMatch: (d)       => !d },
+  'not-dark': { order: 60, darkScheme: 'light', jsBehavior: 'mode', jsMatch: (d)       => !d },
 
   // ── Interactive — JS state + CSS pseudo ───────────────────────────────────
-  hover:          { pseudo: ':hover',            jsBehavior: 'interactive', jsMatch: (_, s) => !!s.hover },
-  'not-hover':    { pseudo: ':not(:hover)',       jsBehavior: 'interactive', jsMatch: (_, s) => !s.hover },
-  focus:          { pseudo: ':focus',             jsBehavior: 'interactive', jsMatch: (_, s) => !!s.focus },
-  'not-focus':    { pseudo: ':not(:focus)',       jsBehavior: 'interactive', jsMatch: (_, s) => !s.focus },
-  active:         { pseudo: ':active',            jsBehavior: 'interactive', jsMatch: (_, s) => !!s.active || !!s.pressed },
-  'not-active':   { pseudo: ':not(:active)',      jsBehavior: 'interactive', jsMatch: (_, s) => !s.active && !s.pressed },
-  pressed:        { pseudo: ':active',            jsBehavior: 'interactive', jsMatch: (_, s) => !!s.pressed || !!s.active },
-  'not-pressed':  { pseudo: ':not(:active)',      jsBehavior: 'interactive', jsMatch: (_, s) => !s.pressed && !s.active },
-  disabled:       { pseudo: ':disabled',          jsBehavior: 'interactive', jsMatch: (_, s) => !!s.disabled },
-  'not-disabled': { pseudo: ':not(:disabled)',    jsBehavior: 'interactive', jsMatch: (_, s) => !s.disabled },
-  checked:        { pseudo: ':checked',           jsBehavior: 'interactive', jsMatch: (_, s) => !!s.checked },
-  'not-checked':  { pseudo: ':not(:checked)',     jsBehavior: 'interactive', jsMatch: (_, s) => !s.checked },
-  visited:        { pseudo: ':visited',           jsBehavior: 'interactive', jsMatch: (_, s) => !!s.visited },
-  'not-visited':  { pseudo: ':not(:visited)',     jsBehavior: 'interactive', jsMatch: (_, s) => !s.visited },
-  placeholder:    { pseudo: '::placeholder',      jsBehavior: 'interactive', jsMatch: (_, s) => !!s.placeholder },
+  hover:          { order: 10, pseudo: ':hover',            jsBehavior: 'interactive', jsMatch: (_, s) => !!s.hover },
+  'not-hover':    { order: 10, pseudo: ':not(:hover)',       jsBehavior: 'interactive', jsMatch: (_, s) => !s.hover },
+  focus:          { order: 20, pseudo: ':focus',             jsBehavior: 'interactive', jsMatch: (_, s) => !!s.focus },
+  'not-focus':    { order: 20, pseudo: ':not(:focus)',       jsBehavior: 'interactive', jsMatch: (_, s) => !s.focus },
+  active:         { order: 30, pseudo: ':active',            jsBehavior: 'interactive', jsMatch: (_, s) => !!s.active || !!s.pressed },
+  'not-active':   { order: 30, pseudo: ':not(:active)',      jsBehavior: 'interactive', jsMatch: (_, s) => !s.active && !s.pressed },
+  pressed:        { order: 30, pseudo: ':active',            jsBehavior: 'interactive', jsMatch: (_, s) => !!s.pressed || !!s.active },
+  'not-pressed':  { order: 30, pseudo: ':not(:active)',      jsBehavior: 'interactive', jsMatch: (_, s) => !s.pressed && !s.active },
+  disabled:       { order: 40, pseudo: ':disabled',          jsBehavior: 'interactive', jsMatch: (_, s) => !!s.disabled },
+  'not-disabled': { order: 40, pseudo: ':not(:disabled)',    jsBehavior: 'interactive', jsMatch: (_, s) => !s.disabled },
+  checked:        { order: 35, pseudo: ':checked',           jsBehavior: 'interactive', jsMatch: (_, s) => !!s.checked },
+  'not-checked':  { order: 35, pseudo: ':not(:checked)',     jsBehavior: 'interactive', jsMatch: (_, s) => !s.checked },
+  visited:        { order: 5,  pseudo: ':visited',           jsBehavior: 'interactive', jsMatch: (_, s) => !!s.visited },
+  'not-visited':  { order: 5,  pseudo: ':not(:visited)',     jsBehavior: 'interactive', jsMatch: (_, s) => !s.visited },
+  placeholder:    { order: 0,  pseudo: '::placeholder',      jsBehavior: 'interactive', jsMatch: (_, s) => !!s.placeholder },
 
   // ── CSS-only pseudo-classes (structural) ──────────────────────────────────
-  first:           { pseudo: ':first-child',     jsBehavior: 'css-only', forcesImportant: true },
-  last:            { pseudo: ':last-child',      jsBehavior: 'css-only', forcesImportant: true },
-  odd:             { pseudo: ':nth-child(odd)',  jsBehavior: 'css-only', forcesImportant: true },
-  even:            { pseudo: ':nth-child(even)', jsBehavior: 'css-only', forcesImportant: true },
-  only:            { pseudo: ':only-child',      jsBehavior: 'css-only', forcesImportant: true },
-  'focus-within':  { pseudo: ':focus-within',    jsBehavior: 'css-only', forcesImportant: true },
-  'focus-visible': { pseudo: ':focus-visible',   jsBehavior: 'css-only', forcesImportant: true },
+  first:           { order: 0,  pseudo: ':first-child',     jsBehavior: 'css-only', forcesImportant: true },
+  last:            { order: 0,  pseudo: ':last-child',      jsBehavior: 'css-only', forcesImportant: true },
+  odd:             { order: 0,  pseudo: ':nth-child(odd)',  jsBehavior: 'css-only', forcesImportant: true },
+  even:            { order: 0,  pseudo: ':nth-child(even)', jsBehavior: 'css-only', forcesImportant: true },
+  only:            { order: 0,  pseudo: ':only-child',      jsBehavior: 'css-only', forcesImportant: true },
+  'focus-within':  { order: 15, pseudo: ':focus-within',    jsBehavior: 'css-only', forcesImportant: true },
+  'focus-visible': { order: 25, pseudo: ':focus-visible',   jsBehavior: 'css-only', forcesImportant: true },
 
   // ── CSS-only pseudo-elements ───────────────────────────────────────────────
-  before:         { pseudo: '::before',       jsBehavior: 'css-only' },
-  after:          { pseudo: '::after',        jsBehavior: 'css-only' },
-  selection:      { pseudo: '::selection',    jsBehavior: 'css-only' },
-  'first-letter': { pseudo: '::first-letter', jsBehavior: 'css-only' },
-  'first-line':   { pseudo: '::first-line',   jsBehavior: 'css-only' },
-  marker:         { pseudo: '::marker',       jsBehavior: 'css-only' },
+  before:         { order: 0, pseudo: '::before',       jsBehavior: 'css-only' },
+  after:          { order: 0, pseudo: '::after',        jsBehavior: 'css-only' },
+  selection:      { order: 0, pseudo: '::selection',    jsBehavior: 'css-only' },
+  'first-letter': { order: 0, pseudo: '::first-letter', jsBehavior: 'css-only' },
+  'first-line':   { order: 0, pseudo: '::first-line',   jsBehavior: 'css-only' },
+  marker:         { order: 0, pseudo: '::marker',       jsBehavior: 'css-only' },
 
   // ── Group / peer ancestor selectors (CSS-only) ─────────────────────────────
-  'group-hover': { ancestorSelector: '.group:hover ', jsBehavior: 'css-only', forcesImportant: true },
-  'group-focus': { ancestorSelector: '.group:focus ', jsBehavior: 'css-only', forcesImportant: true },
-  'peer-hover':  { ancestorSelector: '.peer:hover ~ ', jsBehavior: 'css-only', forcesImportant: true },
-  'peer-focus':  { ancestorSelector: '.peer:focus ~ ', jsBehavior: 'css-only', forcesImportant: true },
+  'group-hover': { order: 10, ancestorSelector: '.group:hover ', jsBehavior: 'css-only', forcesImportant: true },
+  'group-focus': { order: 20, ancestorSelector: '.group:focus ', jsBehavior: 'css-only', forcesImportant: true },
+  'peer-hover':  { order: 10, ancestorSelector: '.peer:hover ~ ', jsBehavior: 'css-only', forcesImportant: true },
+  'peer-focus':  { order: 20, ancestorSelector: '.peer:focus ~ ', jsBehavior: 'css-only', forcesImportant: true },
 
   // ── Responsive — both CSS (@media min-width) and JS (breakpoints set) ──────
-  sm:    { isResponsive: true, jsBehavior: 'responsive', jsMatch: (_, __, bp) => bp.has('sm') },
-  md:    { isResponsive: true, jsBehavior: 'responsive', jsMatch: (_, __, bp) => bp.has('md') },
-  lg:    { isResponsive: true, jsBehavior: 'responsive', jsMatch: (_, __, bp) => bp.has('lg') },
-  xl:    { isResponsive: true, jsBehavior: 'responsive', jsMatch: (_, __, bp) => bp.has('xl') },
-  '2xl': { isResponsive: true, jsBehavior: 'responsive', jsMatch: (_, __, bp) => bp.has('2xl') },
+  sm:    { order: 50, isResponsive: true, jsBehavior: 'responsive', jsMatch: (_, __, bp) => bp.has('sm') },
+  md:    { order: 50, isResponsive: true, jsBehavior: 'responsive', jsMatch: (_, __, bp) => bp.has('md') },
+  lg:    { order: 50, isResponsive: true, jsBehavior: 'responsive', jsMatch: (_, __, bp) => bp.has('lg') },
+  xl:    { order: 50, isResponsive: true, jsBehavior: 'responsive', jsMatch: (_, __, bp) => bp.has('xl') },
+  '2xl': { order: 50, isResponsive: true, jsBehavior: 'responsive', jsMatch: (_, __, bp) => bp.has('2xl') },
 
   // ── Print media (CSS-only) ─────────────────────────────────────────────────
-  print: { mediaQuery: 'print', jsBehavior: 'css-only', forcesImportant: true },
+  print: { order: 70, mediaQuery: 'print', jsBehavior: 'css-only', forcesImportant: true },
 
   // ── Orientation / accessibility media (CSS-only) ───────────────────────────
-  landscape:       { mediaQuery: '(orientation: landscape)',              jsBehavior: 'css-only', forcesImportant: true },
-  portrait:        { mediaQuery: '(orientation: portrait)',              jsBehavior: 'css-only', forcesImportant: true },
-  'motion-reduce': { mediaQuery: '(prefers-reduced-motion: reduce)',     jsBehavior: 'css-only', forcesImportant: true },
-  'motion-safe':   { mediaQuery: '(prefers-reduced-motion: no-preference)', jsBehavior: 'css-only', forcesImportant: true },
-  'contrast-more': { mediaQuery: '(prefers-contrast: more)',             jsBehavior: 'css-only', forcesImportant: true },
-  'contrast-less': { mediaQuery: '(prefers-contrast: less)',             jsBehavior: 'css-only', forcesImportant: true },
+  landscape:       { order: 70, mediaQuery: '(orientation: landscape)',              jsBehavior: 'css-only', forcesImportant: true },
+  portrait:        { order: 70, mediaQuery: '(orientation: portrait)',              jsBehavior: 'css-only', forcesImportant: true },
+  'motion-reduce': { order: 70, mediaQuery: '(prefers-reduced-motion: reduce)',     jsBehavior: 'css-only', forcesImportant: true },
+  'motion-safe':   { order: 70, mediaQuery: '(prefers-reduced-motion: no-preference)', jsBehavior: 'css-only', forcesImportant: true },
+  'contrast-more': { order: 70, mediaQuery: '(prefers-contrast: more)',             jsBehavior: 'css-only', forcesImportant: true },
+  'contrast-less': { order: 70, mediaQuery: '(prefers-contrast: less)',             jsBehavior: 'css-only', forcesImportant: true },
 
   // ── Directionality (CSS-only) ──────────────────────────────────────────────
-  rtl: { dirSelector: '[dir="rtl"] ', jsBehavior: 'css-only', forcesImportant: true },
-  ltr: { dirSelector: '[dir="ltr"] ', jsBehavior: 'css-only', forcesImportant: true },
+  rtl: { order: 80, dirSelector: '[dir="rtl"] ', jsBehavior: 'css-only', forcesImportant: true },
+  ltr: { order: 80, dirSelector: '[dir="ltr"] ', jsBehavior: 'css-only', forcesImportant: true },
 };
 
 // ─── Plugin modifier registry ──────────────────────────────────────────────────
@@ -182,6 +209,8 @@ function getNamedGroupPeerModifier(name: string): ModifierDef | undefined {
   const pseudo = trigger === 'hover' ? ':hover' : ':focus';
   const combinator = kind === 'group' ? ' ' : ' ~ ';
   const def: ModifierDef = {
+    // Matches the plain group-hover/group-focus/peer-hover/peer-focus order below.
+    order: trigger === 'hover' ? 10 : 20,
     ancestorSelector: `.${kind}\\/${escapedName}${pseudo}${combinator}`,
     jsBehavior: 'css-only',
     forcesImportant: true,
@@ -232,6 +261,26 @@ export function getResponsiveModifiers(): Set<string> {
     _responsiveNames = new Set(_allEntries().filter(([, d]) => d.jsBehavior === 'responsive').map(([k]) => k));
   }
   return _responsiveNames;
+}
+
+/**
+ * Cascade-order priority for a bucket key ('base', 'hover', 'sm:dark:focus', …)
+ * — see ModifierDef.order's doc comment for why this exists. 'base' (no
+ * modifiers) always sorts first. A compound modifier chain takes the MAX
+ * order among its parts, so stacking a higher-priority modifier anywhere in
+ * the chain (e.g. 'hover:disabled' alongside a plain 'hover') always wins
+ * the tie — order reflects "how urgent/dominant this state is", and a chain
+ * is exactly as urgent as its most urgent part. An unknown modifier name
+ * (already-stripped by the parser, so unreachable in practice) contributes 0.
+ */
+export function getModifierOrder(bucketKey: string): number {
+  if (bucketKey === 'base') return -1;
+  let max = 0;
+  for (const mod of bucketKey.split(':')) {
+    const order = getModifier(mod)?.order ?? 0;
+    if (order > max) max = order;
+  }
+  return max;
 }
 
 /**

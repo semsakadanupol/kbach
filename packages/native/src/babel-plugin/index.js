@@ -494,7 +494,20 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
             v => v && typeof v === 'object' && Object.keys(v).length > 0,
           );
 
-          if (existing) {
+          // existing.stylesIdentifier is null when an earlier attribute on this
+          // element was tracked but never became a real __kbachClasses/
+          // __kbachStyles pair itself — i.e. it alone resolved to no styles
+          // (e.g. `kb="group"`, a standalone marker with no styles of its
+          // own). Bug fix: that earlier attribute used to fall through the
+          // `!hasStyles` branch below and `return` WITHOUT ever calling
+          // state.kbachElementInfo.set(), so a second class attribute on the
+          // same element never saw `existing` at all — it transformed itself
+          // in isolation, silently dropping the merge and leaving the first,
+          // styleless attribute (e.g. `kb="group"`) untouched in the output
+          // instead of folded away. Tracking it here (with no styles yet)
+          // closes that gap: a later attribute now always finds `existing`,
+          // whether or not the earlier one had styles on its own.
+          if (existing && existing.stylesIdentifier) {
             if (!hasStyles) { nodePath.remove(); return; }
 
             let uid;
@@ -517,19 +530,39 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
             return;
           }
 
-          if (!hasStyles) return;
+          if (!hasStyles) {
+            // Track this attribute (styleless alone, even combined with any
+            // earlier one) so a LATER class attribute on the same element
+            // still merges with it. Neither this attribute nor any earlier
+            // tracked one is touched here — there is no __kbachClasses/
+            // __kbachStyles pair yet for anything to fold into, so removing
+            // either would just discard that attribute's class(es) with
+            // nothing taking their place. Keep the FIRST untransformed
+            // attribute's path (existing.attrPath, if any) — that's the one
+            // that will need removing once something eventually claims the
+            // merged pair, not this one.
+            state.kbachElementInfo.set(openingElement, {
+              classString: combinedClassString,
+              stylesIdentifier: null,
+              classAttrValue: null,
+              attrPath: existing ? existing.attrPath : nodePath,
+            });
+            return;
+          }
 
           if (debug) {
-            log(`Transformed "${classString}"`);
+            log(existing
+              ? `Transformed "${combinedClassString}" (merged from multiple class attributes)`
+              : `Transformed "${classString}"`);
           }
 
           let uid;
-          if (state.kbachDeclarations.has(classString)) {
-            uid = state.kbachDeclarations.get(classString).uid;
+          if (state.kbachDeclarations.has(combinedClassString)) {
+            uid = state.kbachDeclarations.get(combinedClassString).uid;
           } else {
             const astNode = resolvedStyleToAST(t, resolved);
             uid = nodePath.scope.getProgramParent().generateUidIdentifier('kbach');
-            state.kbachDeclarations.set(classString, { uid, astNode });
+            state.kbachDeclarations.set(combinedClassString, { uid, astNode });
           }
 
           const stylesIdentifier = t.identifier(uid.name);
@@ -541,9 +574,16 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
           );
 
           nodePath.node.name = t.jSXIdentifier('__kbachClasses');
+          if (t.isStringLiteral(value)) value.value = combinedClassString;
+          else value.expression.value = combinedClassString;
+
+          // An earlier attribute was tracked but never transformed (it had no
+          // styles on its own) — this attribute is taking over as the merged
+          // pair, so remove the earlier, still-untouched one now.
+          if (existing) existing.attrPath.remove();
 
           state.kbachElementInfo.set(openingElement, {
-            classString,
+            classString: combinedClassString,
             stylesIdentifier,
             classAttrValue: t.isStringLiteral(value) ? value : value.expression,
           });

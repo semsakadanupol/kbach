@@ -1,6 +1,6 @@
 {
   "name": "create-kbach",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Add Kbach to an existing React (Vite/Next.js) or React Native (Expo) project",
   "license": "MIT",
   "repository": {

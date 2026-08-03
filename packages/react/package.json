@@ -1,6 +1,6 @@
 {
   "name": "@kbach/react",
-  "version": "0.6.41",
+  "version": "0.6.42",
   "description": "React / React Native components and hooks for the Kbach framework",
   "license": "MIT",
   "repository": {

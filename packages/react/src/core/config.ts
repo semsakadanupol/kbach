@@ -307,9 +307,15 @@ export function onConfigChange(listener: ConfigListener): () => void {
 }
 
 export function updateConfig(userConfig: FrameworkConfig): void {
+  // Clear stale CSS (old theme's injected rules, including the global reset
+  // tag) BEFORE building the new config — buildConfig()'s last step calls
+  // injectGlobalStyles(), which must be the last thing to touch _globalStyleEl
+  // for this update. Clearing afterward would immediately remove the reset it
+  // just injected, leaving box-sizing/border-box (and every other BASE_RESET
+  // rule) missing until something unrelated happens to recreate the tag.
+  clearCache();
   configStore.resolved = buildConfig(userConfig);
   configStore._src = userConfig;
-  clearCache();
   for (const listener of configStore.listeners) {
     listener(configStore.resolved);
   }

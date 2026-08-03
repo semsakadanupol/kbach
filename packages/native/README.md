@@ -205,6 +205,22 @@ In a browser (Expo Web, Metro web), `@kbach/native` switches to the same CSS-cla
 - RN-only props (`onChangeText`, `source`, `secureTextEntry`, …) map to HTML equivalents
 - Register more: `registerWebElement(Animated.View, 'div')`
 - Recommended: use the Vite plugin same as `@kbach/react`'s Static CSS setup — `import { kbach } from '@kbach/react/vite'` — and import `kbach.css` in your entry file, for zero runtime cost on the web target too
+- Not using the Vite plugin (the common case for Expo/Metro web, which has no Vite build step)? Render `<KbachReset />` once near your root — e.g. Expo Router's root `app/_layout.tsx`, inside `<ThemeProvider>`:
+
+  ```jsx
+  import { KbachReset, ThemeProvider } from '@kbach/native';
+
+  export default function RootLayout() {
+    return (
+      <ThemeProvider defaultMode="system">
+        <KbachReset />
+        <Slot />
+      </ThemeProvider>
+    );
+  }
+  ```
+
+  This ships the base reset (`box-sizing: border-box`, borderless buttons, etc.) as real markup instead of relying solely on the runtime injector.
 
 ## Web-only utilities (ignored on native, no warning)
 

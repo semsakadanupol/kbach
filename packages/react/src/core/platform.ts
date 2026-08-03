@@ -9,12 +9,26 @@ export const isWeb: boolean =
 // True only in React Native — NOT in Node.js SSR. SSR runs in Node where window/document
 // are absent (same as RN) but the output is web HTML, so className and CSS shorthands
 // must behave like the browser. We detect RN by its unique globals (Hermes, Bridge, etc.).
+//
+// Includes New Architecture (Fabric/TurboModules/Bridgeless) globals alongside the
+// legacy bridge ones: __fbBatchedBridge is the OLD architecture's bridge object and
+// does not exist at all under Bridgeless mode (Expo's newArchEnabled, default since
+// SDK 53+) — an app running there that also happened to lack HermesInternal and a
+// ReactNative-flavored `navigator.product` would fall through every check and get
+// misdetected as web. That's not hypothetical: this exact gap made real native/Expo Go
+// screens render blank, because getEffectiveIsWeb() (= isWeb || !isNative) then
+// substitutes HTML tag strings ('div', 'span', …) for View/Text, which React Native
+// has no host component for at all, on ANY architecture.
 export const isNative: boolean =
   !isWeb && (
     typeof (globalThis as any).HermesInternal !== 'undefined' ||
     typeof (globalThis as any).__fbBatchedBridge !== 'undefined' ||
     (typeof navigator !== 'undefined' && (navigator as any).product === 'ReactNative') ||
-    typeof (globalThis as any).__REACT_NATIVE__ !== 'undefined'
+    typeof (globalThis as any).__REACT_NATIVE__ !== 'undefined' ||
+    typeof (globalThis as any).nativeFabricUIManager !== 'undefined' ||
+    typeof (globalThis as any).__turboModuleProxy !== 'undefined' ||
+    typeof (globalThis as any).RN$Bridgeless !== 'undefined' ||
+    typeof (globalThis as any).nativePerformanceNow !== 'undefined'
   );
 
 // Build-time tooling (the Vite plugin, the @kbach/native Babel plugin) resolves

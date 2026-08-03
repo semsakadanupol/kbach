@@ -449,6 +449,16 @@ export function generateClassCSS(
 
 // ─── Core resolver ────────────────────────────────────────────────────────────
 
+// True for utilities whose ENTIRE resolved style is `{ display: ... }` — e.g.
+// hidden, flex, block, grid, inline-flex. False for utilities that merely fold
+// `display: 'flex'` into a real property as a convenience (items-center,
+// justify-center, flex-row, flex-wrap, …, so they work without also needing a
+// separate `flex` class) — those have more than just `display` in their style.
+function isPureDisplayStyle(styles: StyleValue): boolean {
+  const keys = Object.keys(styles);
+  return keys.length === 1 && keys[0] === 'display';
+}
+
 /**
  * Resolve a class string to a ResolvedStyle object.
  *
@@ -505,7 +515,15 @@ export function resolve(
 
     // Bug #11 fix: no injectQueue allocation — inject directly in the same pass.
     if (onWeb) {
-      const order = getModifierOrder(bucketKey);
+      // Pure-display utilities (hidden, flex, block, grid, …) must always win
+      // a same-bucket cascade tie against utilities that only incidentally
+      // set display (items-center, justify-center, flex-row, …) — otherwise
+      // whichever one the app happens to resolve first wins the equal-
+      // specificity tie, so e.g. `hidden` could silently lose to
+      // `justify-center` depending on render order. +0.5 keeps it in the same
+      // bucket (tiers are spaced >=5 apart, see registry.ts) while guaranteeing
+      // it sorts after every other same-bucket rule.
+      const order = getModifierOrder(bucketKey) + (isPureDisplayStyle(styles) ? 0.5 : 0);
       for (const r of injectClassRule(parsed.original, bucketKey, styles, darkMode, parsed.important, order)) {
         rules.push({ rule: r, order });
       }

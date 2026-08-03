@@ -97,3 +97,60 @@ describe('CSS rule cascade order is independent of resolve() call order', () => 
     expect(baseIdx).toBeLessThan(hoverIdx);
   });
 });
+
+// Regression coverage for a second cascade-order gap in the same family:
+// `justify-center`, `items-center`, `flex-row`, etc. fold `display: 'flex'`
+// into their real property so they work standalone without also needing a
+// `flex` class (see layout.ts). That gives them equal specificity with
+// `hidden`/`flex`/`block` (utilities whose ENTIRE style IS `display`) — so
+// without a fixed sub-order, `hidden` could silently lose a `display` fight
+// to `justify-center` whenever the app happened to resolve `justify-center`
+// after `hidden`. This bit `className="hidden md:flex"` in a real app: on
+// some page loads `hidden` rendered nothing because a same-bucket
+// `justify-center` rule landed later in the stylesheet and won the tie.
+describe('pure-display utilities always win a same-bucket cascade tie', () => {
+  let config: ResolvedConfig;
+
+  beforeEach(() => {
+    clearCache();
+    config = buildConfig({});
+  });
+
+  it('sorts hidden after justify-center when hidden resolves first', () => {
+    resolve('hidden', config.theme, config.darkMode);
+    resolve('justify-center', config.theme, config.darkMode);
+
+    const hiddenIdx = indexOfRuleContaining('.hidden');
+    const justifyIdx = indexOfRuleContaining('.justify-center');
+    expect(hiddenIdx).toBeGreaterThanOrEqual(0);
+    expect(justifyIdx).toBeGreaterThanOrEqual(0);
+    expect(justifyIdx).toBeLessThan(hiddenIdx);
+  });
+
+  it('sorts hidden after justify-center when justify-center resolves first too (order-independent both ways)', () => {
+    resolve('justify-center', config.theme, config.darkMode);
+    resolve('hidden', config.theme, config.darkMode);
+
+    const hiddenIdx = indexOfRuleContaining('.hidden');
+    const justifyIdx = indexOfRuleContaining('.justify-center');
+    expect(justifyIdx).toBeLessThan(hiddenIdx);
+  });
+
+  it('sorts flex after items-center regardless of resolve order', () => {
+    resolve('flex', config.theme, config.darkMode);
+    resolve('items-center', config.theme, config.darkMode);
+
+    const flexIdx = indexOfRuleContaining('.flex ');
+    const itemsIdx = indexOfRuleContaining('.items-center');
+    expect(itemsIdx).toBeLessThan(flexIdx);
+  });
+
+  it('still sorts md:flex after md:hidden — responsive pure-display utilities keep the same guarantee', () => {
+    resolve('md:justify-center', config.theme, config.darkMode);
+    resolve('md:hidden', config.theme, config.darkMode);
+
+    const hiddenIdx = indexOfRuleContaining('.md\\:hidden');
+    const justifyIdx = indexOfRuleContaining('.md\\:justify-center');
+    expect(justifyIdx).toBeLessThan(hiddenIdx);
+  });
+});

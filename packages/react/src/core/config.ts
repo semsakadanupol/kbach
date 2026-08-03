@@ -231,9 +231,23 @@ export function buildConfig(userConfig: FrameworkConfig): ResolvedConfig {
 
   // 4. Propagate the default sans font so flatten() can apply it as a base inline style.
   // 'System' is the RN-only placeholder — skip it so native elements stay untouched.
+  //
+  // setDefaultFontFamily() feeds ONLY flatten()'s native-only injection (web's
+  // equivalent comes from injectGlobalStyles()'s own `body { font-family: … }`
+  // rule below, built from theme.fontFamily.sans directly). A sans value is
+  // commonly written as a CSS-style fallback list ('Tsukimi, sans-serif') —
+  // correct for that CSS rule, but invalid as a native fontFamily: RN expects
+  // a single, exact, registered font name, and an unstripped fallback list
+  // never matches anything useFonts() actually registers. Worse than just
+  // falling back to the system font: flatten() injects this into the
+  // resolved style of EVERY element (not just Text), so a malformed value
+  // here landed on plain Views too, wherever useStyles() touched them.
+  // Stripping to the first comma-separated name (and surrounding quotes)
+  // keeps native's value valid regardless of how the config was written.
   const rawSans = theme.fontFamily?.sans;
   const sansFontValue = Array.isArray(rawSans) ? rawSans[0] : rawSans;
-  setDefaultFontFamily(sansFontValue && sansFontValue !== 'System' ? sansFontValue : undefined);
+  const nativeSansFont = sansFontValue?.split(',')[0]?.trim().replace(/^['"]|['"]$/g, '');
+  setDefaultFontFamily(nativeSansFont && nativeSansFont !== 'System' ? nativeSansFont : undefined);
 
   // 5. Inject global CSS derived from the theme (web only, no-op on RN/SSR)
   injectGlobalStyles(resolved.theme);

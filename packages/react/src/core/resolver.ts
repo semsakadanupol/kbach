@@ -275,6 +275,17 @@ const CSS_UNITLESS = new Set([
   'gridColumnStart', 'gridColumnEnd', 'gridRowStart', 'gridRowEnd',
 ]);
 
+// Properties that only ever appear on TextStyle, never ViewStyle — used by
+// flatten() to decide whether a resolved style is plausibly styling a <Text>
+// before injecting the native default font (see the call site below).
+const TEXT_ONLY_STYLE_KEYS = [
+  'color', 'fontSize', 'fontWeight', 'fontStyle', 'fontVariant',
+  'letterSpacing', 'lineHeight', 'textAlign', 'textAlignVertical',
+  'textDecorationLine', 'textDecorationColor', 'textDecorationStyle',
+  'textShadowColor', 'textShadowOffset', 'textShadowRadius',
+  'textTransform', 'writingDirection', 'includeFontPadding', 'verticalAlign',
+];
+
 const RN_SHORTHAND_EXPAND: Record<string, [string, string]> = {
   marginHorizontal:  ['margin-left',   'margin-right'],
   marginVertical:    ['margin-top',    'margin-bottom'],
@@ -565,10 +576,24 @@ export function flatten(
 
   // fontFamily default is only needed on native — on web, injectGlobalStyles() sets
   // it via `body { font-family: … }` so per-element injection is redundant.
+  //
+  // Only injected when the resolved style already carries at least one other
+  // text-only property (color, fontSize, textAlign, …) — flatten() has no way
+  // to know whether the caller is styling a <Text> or a <View> (useStyles() is
+  // called directly by both, with no component-type hint at all), and
+  // fontFamily is not a valid ViewStyle key. Under React Native's New
+  // Architecture (Fabric), an unexpected style key isn't just ignored the way
+  // a stray CSS property is on web — it can take the rest of that element's
+  // style down with it, silently. A pure-layout style (width/height/padding/
+  // background, no text properties at all) is never a Text's only styling, so
+  // gating on "has a text property already" keeps real Text elements getting
+  // their default font while leaving Views alone.
   if (isNative) {
     const defaultFont = getDefaultFontFamily();
-    if (defaultFont && !('fontFamily' in (result as Record<string, unknown>))) {
-      (result as Record<string, unknown>).fontFamily = defaultFont;
+    const r = result as Record<string, unknown>;
+    const looksLikeText = TEXT_ONLY_STYLE_KEYS.some((k) => k in r);
+    if (defaultFont && looksLikeText && !('fontFamily' in r)) {
+      r.fontFamily = defaultFont;
     }
   }
 

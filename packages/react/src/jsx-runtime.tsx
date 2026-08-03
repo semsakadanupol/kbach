@@ -206,7 +206,19 @@ function processElement(
     if (getEffectiveIsWeb()) return makeElement(isStaticChildren, effectiveType, omitConsumed(workingProps), key);
     // Bug #16: use cached font sentinel — avoids globalThis lookup on every bare element.
     const defaultFont = getCachedDefaultFont();
-    if (!defaultFont) return makeElement(isStaticChildren, effectiveType, workingProps, key);
+    // This path runs for EVERY classless JSX element — not just <Text>, but
+    // <Ionicons>, <Image>, any third-party component used bare. getWebTag()
+    // (name-matched against known RN primitives, e.g. 'Text') is reused here
+    // purely as an identity check, independent of the platform gate it's
+    // normally called behind — confirms `type` really is RN's Text before
+    // touching its style at all. Without this, an icon component (which
+    // renders its glyph via its OWN required fontFamily, e.g. 'Ionicons') got
+    // that overwritten by this injected default sans font — every icon in the
+    // app silently rendered the wrong glyph (or crashed the native text
+    // layout entirely under Fabric), confirmed on a real device.
+    if (!defaultFont || getWebTag(type) !== 'span') {
+      return makeElement(isStaticChildren, effectiveType, workingProps, key);
+    }
     const { style: userStyle, ...passProps } = omitConsumed(workingProps) as any;
     const finalStyle = userStyle
       ? Array.isArray(userStyle)

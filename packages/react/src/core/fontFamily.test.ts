@@ -79,7 +79,17 @@ describe('native default font family — strips CSS-style fallback lists', () =>
     expect(getDefaultFontFamily()).toBeUndefined();
   });
 
-  it('applies the stripped font via flatten() on a plain View-style resolve, not just Text', async () => {
+  // Regression coverage for a second bug in the same area: fontFamily isn't a
+  // valid ViewStyle key at all — under React Native's New Architecture
+  // (Fabric), an unexpected style key on a View can silently take the rest of
+  // that element's style down with it (confirmed on a real Android/Expo Go
+  // device: width/height/backgroundColor all failed to apply on a plain View
+  // once a stray fontFamily was present). flatten() has no component-type
+  // hint (useStyles() is called directly by both Views and Text with no
+  // hint at all), so it gates on whether the resolved style already looks
+  // like it's styling a Text — has a text-only property like color/fontSize/
+  // textAlign — before injecting the default font.
+  it('does NOT inject fontFamily into a pure-layout style with no text properties (a View)', async () => {
     clearNativeGlobals();
     setNativeGlobals();
     vi.resetModules();
@@ -90,11 +100,29 @@ describe('native default font family — strips CSS-style fallback lists', () =>
     const config = buildConfig({
       extend: { theme: { fontFamily: { sans: 'Tsukimi, sans-serif' } } },
     } as any);
-    const resolved = resolve('w-12 h-12 rounded-full', config.theme, config.darkMode);
+    const resolved = resolve('w-12 h-12 rounded-full bg-red-6', config.theme, config.darkMode);
     const flat = flatten(resolved, false, {}, new Set()) as any;
 
     expect(flat.width).toBe(48);
     expect(flat.height).toBe(48);
+    expect(flat.fontFamily).toBeUndefined();
+  });
+
+  it('DOES inject fontFamily when the resolved style already has a text-only property (a Text)', async () => {
+    clearNativeGlobals();
+    setNativeGlobals();
+    vi.resetModules();
+
+    const { resolve, flatten } = await import('./resolver');
+    const { buildConfig } = await import('./config');
+
+    const config = buildConfig({
+      extend: { theme: { fontFamily: { sans: 'Tsukimi, sans-serif' } } },
+    } as any);
+    const resolved = resolve('text-sm text-red-6', config.theme, config.darkMode);
+    const flat = flatten(resolved, false, {}, new Set()) as any;
+
+    expect(flat.fontSize).toBeDefined();
     expect(flat.fontFamily).toBe('Tsukimi');
   });
 });

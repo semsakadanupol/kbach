@@ -12,7 +12,7 @@ import type { ReactElement } from 'react';
 import { isWeb, isNative, getEffectiveIsWeb, getConfig, onConfigChange, resolve, flatten, getDefaultFontFamily, normalizeClassString, isRuntimeCSSDisabled, getInteractiveModifiers, getModeModifiers, getResponsiveModifiers, expandModeAwareColorClasses, type ResolvedStyle } from './core';
 import { InteractiveWrapper } from './InteractiveWrapper';
 import { DarkWrapper } from './DarkWrapper';
-import { getWebTag, transformToWebProps, registerWebElement, getImpliedRNStyle } from './web-substitute';
+import { getWebTag, transformToWebProps, registerWebElement, getImpliedRNClasses } from './web-substitute';
 import { stripInternalMarkers, stripWebOnlyProps as stripWebOnlyInlineProps, composeNativeStyle } from './shared-utils';
 
 export { registerWebElement };
@@ -95,29 +95,6 @@ function omitConsumed(props: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-// ─── Substituted-RN-primitive layout compensation ─────────────────────────────
-//
-// See web-substitute.ts's getImpliedRNStyle for what's being restored and why.
-// Applied as a per-element inline style override rather than touching the
-// shared class rule — inline style always wins over class-based CSS, so this
-// can't leak into other elements using the same class, and an explicit
-// relative/absolute/flex-row/flex-col/display:block elsewhere in the same
-// className always wins over this (checked via resolvedBase, which already
-// reflects it).
-function withImpliedRNStyleIfNeeded(
-  webTag: string | null,
-  resolvedBase: Record<string, unknown> | undefined,
-  userStyle: unknown,
-): unknown {
-  const compensation = getImpliedRNStyle(webTag, resolvedBase);
-  if (!compensation) return userStyle;
-
-  // User's own explicit style still wins on conflict.
-  return Array.isArray(userStyle)
-    ? [compensation, ...userStyle]
-    : { ...compensation, ...(userStyle as object | undefined) };
-}
-
 // ─── Element factory ──────────────────────────────────────────────────────────
 
 function makeElement(
@@ -190,7 +167,7 @@ function processElement(
   // purely so the fast path below — which returns before that later point —
   // can reach theme.colors too. Cheap: a memoized singleton read.
   const config = getConfig();
-  const expandedClassStr = classStr ? expandModeAwareColorClasses(classStr, config.theme.colors) : classStr;
+  let expandedClassStr = classStr ? expandModeAwareColorClasses(classStr, config.theme.colors) : classStr;
 
   // ── Static CSS fast path ─────────────────────────────────────────────────────
   // When kbach.css is the style source (Vite plugin), resolve(), flatten(), and
@@ -245,13 +222,41 @@ function processElement(
   // resolve() runs its own (idempotent, cheap-to-skip) mode-aware expansion
   // internally too — see resolver.ts — so passing the already-expanded string
   // here is only to avoid a second wasted pass, not required for correctness.
-  const resolved: ResolvedStyle =
-    (!isWeb && (__kbachStyles as ResolvedStyle | undefined) != null)
+  //
+  // Gated on `isNative`, NOT `!isWeb`: those two are NOT equivalent. `isWeb` is
+  // false both on a real native device AND during Node.js SSR of a React
+  // Native Web app (no `window` in Node either) — but only a real native
+  // device should trust this static, build-time object. The Babel plugin
+  // resolves it with setResolveTarget('native') at BUILD time (bare numbers,
+  // no media queries, whatever breakpoint the build process assumed) — using
+  // it during SSR bakes those native/wrong-breakpoint values into the
+  // server-rendered HTML, while client-side hydration correctly falls through
+  // to resolve() (browser `isWeb` is true there) and gets real, viewport-
+  // correct, web-flavored values instead. That mismatch is a real hydration
+  // bug and shows up as wrong/flashing responsive spacing specifically on
+  // SSR'd React Native Web. `isNative` is false in both the browser and
+  // Node SSR, and true only on an actual native device — the right gate here.
+  let resolved: ResolvedStyle =
+    (isNative && (__kbachStyles as ResolvedStyle | undefined) != null)
       ? (__kbachStyles as ResolvedStyle)
       : (expandedClassStr ? resolve(expandedClassStr, config.theme, config.darkMode) : {});
 
-  const { style: rawUserStyle, ...passProps } = omitConsumed(workingProps) as any;
-  const userStyle = withImpliedRNStyleIfNeeded(webTag, resolved.base as Record<string, unknown> | undefined, rawUserStyle);
+  // Substituted-RN-primitive layout compensation (position:relative, flex
+  // defaults — see web-substitute.ts's getImpliedRNClasses for what/why).
+  // Folds Kbach's own `relative`/`flex-col` utility classes into the
+  // classString itself instead of an inline style, so it gets real,
+  // cacheable, cascade-ordered CSS like any other utility — re-resolving
+  // picks up its CSS injection the same way any other class does. Only
+  // ever non-undefined when webTag is set, which is itself only ever true
+  // when getEffectiveIsWeb() is (see webTag above) — never applies on a
+  // real native device.
+  const impliedClasses = getImpliedRNClasses(webTag, resolved.base as Record<string, unknown> | undefined);
+  if (impliedClasses) {
+    expandedClassStr = expandedClassStr ? `${expandedClassStr} ${impliedClasses}` : impliedClasses;
+    resolved = resolve(expandedClassStr, config.theme, config.darkMode);
+  }
+
+  const { style: userStyle, ...passProps } = omitConsumed(workingProps) as any;
 
   // Bug #8: bucketMods result is memoized by resolved object reference.
   const { interactive, modeOrResponsive } = bucketMods(resolved);

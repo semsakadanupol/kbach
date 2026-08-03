@@ -12,7 +12,7 @@ import { useTheme } from './context';
 import { useConditionalGlobalDarkMode } from './useGlobalDarkMode';
 import { useConditionalWidth, EMPTY_BREAKPOINTS } from './useGlobalWidth';
 import { hasResponsiveBuckets, hasInteractiveBuckets, chain, composeNativeStyle } from './shared-utils';
-import { getWebTag, transformToWebProps, getImpliedRNStyle } from './web-substitute';
+import { getWebTag, transformToWebProps, getImpliedRNClasses } from './web-substitute';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -106,7 +106,28 @@ export function styled<T extends ComponentType<any>>(
       // ── Style resolution ────────────────────────────────────────────────────
       const combined = extraClasses ? `${baseClasses} ${extraClasses}` : baseClasses;
       // eslint-disable-next-line react-hooks/exhaustive-deps
-      const resolved = useMemo(() => resolve(combined, config.theme, config.darkMode), [combined, config.theme, config.darkMode]);
+      const firstPassResolved = useMemo(() => resolve(combined, config.theme, config.darkMode), [combined, config.theme, config.darkMode]);
+
+      // On web (browser and SSR alike), substitute RN component types with HTML
+      // elements so the DOM shows clean Kbach class names instead of React Native
+      // Web's css-view-* hashes. Computed here (before the implied-class check
+      // below, which needs to know whether substitution happened) — must match
+      // on both sides of hydration, see the computedStyle comment below.
+      const webTag = isWebPlatform ? getWebTag(Component, rest) : null;
+
+      // Substituted-RN-primitive layout compensation (position:relative, flex
+      // defaults — see web-substitute.ts's getImpliedRNClasses for what/why).
+      // Folds Kbach's own `relative`/`flex-col` utility classes into the
+      // classString itself instead of an inline style, so it gets real,
+      // cacheable, cascade-ordered CSS like any other utility. Only ever
+      // non-undefined when webTag is set — never applies on a real native device.
+      const impliedClasses = getImpliedRNClasses(webTag, firstPassResolved.base as Record<string, unknown> | undefined);
+      const finalClassStr = impliedClasses ? `${combined} ${impliedClasses}` : combined;
+      // Cheap when impliedClasses is undefined (finalClassStr === combined):
+      // resolve() caches by classString, so this hits the same cache entry
+      // firstPassResolved just populated.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      const resolved = useMemo(() => resolve(finalClassStr, config.theme, config.darkMode), [finalClassStr, config.theme, config.darkMode]);
 
       const hasInteractive = useMemo(() => hasInteractiveBuckets(resolved), [resolved]);
       // Only subscribe to width when this element has responsive classes AND
@@ -127,31 +148,16 @@ export function styled<T extends ComponentType<any>>(
         [resolved, isDark, pressed, hovered, focused, disabled, checked, width, screens], // eslint-disable-line react-hooks/exhaustive-deps
       );
 
-      // On web (browser and SSR alike), substitute RN component types with HTML
-      // elements so the DOM shows clean Kbach class names instead of React Native
-      // Web's css-view-* hashes. Computed before finalStyle below — the web
-      // branch needs webTag to restore RN's implied position/flex defaults via
-      // getImpliedRNStyle (see web-substitute.ts). Must match on both sides of
-      // hydration — see the computedStyle comment below.
-      const webTag = isWebPlatform ? getWebTag(Component, rest) : null;
-
-      // Web (and SSR): CSS classes carry all Kbach styles — only forward the
-      // user's explicit style prop, plus the implied-RN-default compensation
-      // (position:relative, and display:flex/flexDirection:column when this
-      // resolves to flex) that a substituted HTML element doesn't get for free
-      // the way a real RN primitive does. DOM's style attribute must be a plain
-      // object, so an array styleProp still needs flattening here.
+      // Web (and SSR): CSS classes carry all Kbach styles, including the
+      // implied-RN-default compensation folded into finalClassStr above — only
+      // forward the user's explicit style prop. DOM's style attribute must be
+      // a plain object, so an array styleProp still needs flattening here.
       //
       // Native: composeNativeStyle() preserves styleProp's identity
       // (Reanimated-safe — e.g. `styled(Animated.View, '...')`) — see
       // shared-utils.ts.
       const finalStyle: StyleValue | unknown[] | undefined = isWebPlatform
-        ? (() => {
-            const flatStyleProp = (Array.isArray(styleProp) ? Object.assign({}, ...styleProp) : styleProp) ?? undefined;
-            const compensation = getImpliedRNStyle(webTag, resolved.base as Record<string, unknown> | undefined);
-            if (!compensation) return flatStyleProp;
-            return flatStyleProp ? { ...compensation, ...flatStyleProp } : compensation;
-          })()
+        ? ((Array.isArray(styleProp) ? Object.assign({}, ...styleProp) : styleProp) ?? undefined)
         : composeNativeStyle(computedStyle, styleProp);
 
       const effectiveComponent: unknown = webTag ?? Component;
@@ -165,7 +171,7 @@ export function styled<T extends ComponentType<any>>(
         ...effectiveRest,
         style: finalStyle,
         // className lets injected CSS rules (group-hover:, before:, print:, etc.) match the element.
-        ...(isWebPlatform && combined ? { className: normalizeClassString(combined) } : {}),
+        ...(isWebPlatform && finalClassStr ? { className: normalizeClassString(finalClassStr) } : {}),
         // Only attach state-tracking handlers when interactive modifiers are present.
         // Always forward user-provided handlers to avoid silently swallowing them.
         // Gated on isNative, not isWeb: isWeb is false during SSR too (no `window` there),

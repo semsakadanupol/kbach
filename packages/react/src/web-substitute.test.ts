@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { transformToWebProps, getWebTag, getImpliedRNStyle, registerWebElement } from './web-substitute';
+import { transformToWebProps, getWebTag, getImpliedRNClasses, registerWebElement } from './web-substitute';
 
 // Regression coverage for a fixed bug: the `horizontal` branch did a full
 // `pendingStyle = { ... }` overwrite instead of merging, unlike its sibling
@@ -104,38 +104,38 @@ describe('getWebTag', () => {
   });
 });
 
-describe('getImpliedRNStyle', () => {
+describe('getImpliedRNClasses', () => {
   it('returns undefined when there is no webTag (nothing was substituted)', () => {
-    expect(getImpliedRNStyle(null, {})).toBeUndefined();
+    expect(getImpliedRNClasses(null, {})).toBeUndefined();
   });
 
   it('returns undefined when resolvedBase is undefined', () => {
-    expect(getImpliedRNStyle('div', undefined)).toBeUndefined();
+    expect(getImpliedRNClasses('div', undefined)).toBeUndefined();
   });
 
-  it('adds position:relative when nothing already set a position', () => {
-    expect(getImpliedRNStyle('div', {})).toEqual({ position: 'relative' });
+  it('adds "relative" when nothing already set a position', () => {
+    expect(getImpliedRNClasses('div', {})).toBe('relative');
   });
 
-  it('does not override an explicit position (and returns undefined, not {}, when nothing needs compensating)', () => {
-    expect(getImpliedRNStyle('div', { position: 'absolute' })).toBeUndefined();
+  it('does not override an explicit position (and returns undefined when nothing needs compensating)', () => {
+    expect(getImpliedRNClasses('div', { position: 'absolute' })).toBeUndefined();
   });
 
-  it('adds display:flex + flexDirection:column when a flex-item prop is present with no explicit display', () => {
-    expect(getImpliedRNStyle('div', { flex: 1 })).toEqual({ position: 'relative', display: 'flex', flexDirection: 'column' });
-    expect(getImpliedRNStyle('div', { gap: 8 })).toEqual({ position: 'relative', display: 'flex', flexDirection: 'column' });
+  it('adds "flex-col" (display:flex + flexDirection:column together) when a flex-item prop is present with no explicit display', () => {
+    expect(getImpliedRNClasses('div', { flex: 1 })).toBe('relative flex-col');
+    expect(getImpliedRNClasses('div', { gap: 8 })).toBe('relative flex-col');
   });
 
-  it('does not force flexDirection when display:flex is already explicit but flexDirection is too', () => {
-    expect(getImpliedRNStyle('div', { display: 'flex', flexDirection: 'row' })).toEqual({ position: 'relative' });
+  it('does not add flex-col when display:flex is already explicit but flexDirection is too', () => {
+    expect(getImpliedRNClasses('div', { display: 'flex', flexDirection: 'row' })).toBe('relative');
   });
 
   it('does not add flex compensation when an explicit non-flex display opts out', () => {
-    expect(getImpliedRNStyle('div', { display: 'block', flex: 1 })).toEqual({ position: 'relative' });
+    expect(getImpliedRNClasses('div', { display: 'block', flex: 1 })).toBe('relative');
   });
 
-  it('returns undefined (not an empty object) when nothing needs compensating', () => {
-    expect(getImpliedRNStyle('div', { position: 'absolute', display: 'block' })).toBeUndefined();
+  it('returns undefined (not an empty string) when nothing needs compensating', () => {
+    expect(getImpliedRNClasses('div', { position: 'absolute', display: 'block' })).toBeUndefined();
   });
 });
 

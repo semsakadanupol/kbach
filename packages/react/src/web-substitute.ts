@@ -129,18 +129,25 @@ export function getWebTag(type: unknown, props?: Record<string, unknown>): strin
 // child escapes to the nearest ACTUALLY-positioned ancestor instead of this
 // one, landing in the wrong place entirely rather than just looking slightly off.
 //
-// Returns a compensation object to merge into the element's inline style (or
-// undefined if nothing needs adding) — never mutates resolvedBase. Callers
-// merge it so the user's own explicit style/classes always win on conflict.
-export function getImpliedRNStyle(
+// Returns EXTRA UTILITY CLASS NAMES to fold into the element's own className
+// (or undefined if nothing needs adding) — never an inline style. Reuses
+// Kbach's own existing `relative`/`flex-col` utilities rather than inventing
+// parallel CSS, so the compensation gets real, cacheable, cascade-ordered
+// class rules exactly like any other utility instead of a per-element inline
+// style — callers fold the result into the classString BEFORE resolving it,
+// never mutating resolvedBase, so the user's own explicit classes always win
+// (this function only ever fires for a property resolvedBase doesn't already
+// have, so there's no case where the compensation class and a real user
+// utility target the same property on the same element).
+export function getImpliedRNClasses(
   webTag: string | null,
   resolvedBase: Record<string, unknown> | undefined,
-): Record<string, string> | undefined {
+): string | undefined {
   if (!webTag || !resolvedBase) return undefined;
 
-  const compensation: Record<string, string> = {};
+  const classes: string[] = [];
 
-  if (resolvedBase.position === undefined) compensation.position = 'relative';
+  if (resolvedBase.position === undefined) classes.push('relative');
 
   const explicitDisplay = resolvedBase.display;
   // gap-x/gap-y/gap ('columnGap'/'rowGap'/'gap') are exactly as meaningless
@@ -161,12 +168,15 @@ export function getImpliedRNStyle(
   // this same compensation (flex-1, gap-2, etc.), and nothing already opted
   // OUT with an explicit non-flex display like `block`.
   const willBeFlex = explicitDisplay === 'flex' || (explicitDisplay === undefined && hasFlexItemProps);
-  if (willBeFlex) {
-    if (explicitDisplay === undefined) compensation.display = 'flex';
-    if (resolvedBase.flexDirection === undefined) compensation.flexDirection = 'column';
+  if (willBeFlex && (explicitDisplay === undefined || resolvedBase.flexDirection === undefined)) {
+    // 'flex-col' resolves to { display: 'flex', flexDirection: 'column' } —
+    // covers whichever of the two pieces is still missing. Re-asserting the
+    // other piece when it's already explicit (e.g. user wrote `flex` alone,
+    // needing only the column default) is harmless: same property, same value.
+    classes.push('flex-col');
   }
 
-  return Object.keys(compensation).length > 0 ? compensation : undefined;
+  return classes.length > 0 ? classes.join(' ') : undefined;
 }
 
 // ─── Prop transformation ──────────────────────────────────────────────────────

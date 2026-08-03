@@ -11,6 +11,7 @@ import { useSyncExternalStore } from './useSyncExternalStoreShim';
 import {
   isWeb,
   isNative,
+  getEffectiveIsWeb,
   getConfig,
   resetConfig,
   buildConfig,
@@ -262,7 +263,20 @@ export function ThemeProvider({
   // below. The real width is instead picked up once in the resize effect below,
   // which — being an effect — only ever runs post-hydration on the client.
   const [webWidth, setWebWidth] = useState<number>(0);
-  const effectiveWidth = windowWidthProp ?? (isWeb ? webWidth : 0);
+  // getEffectiveIsWeb(), NOT "windowWidthProp ?? (isWeb ? webWidth : 0)": the
+  // old `??` let windowWidthProp win outright whenever it was provided,
+  // regardless of platform — and NativeThemeProvider ALWAYS provides it (from
+  // React Native's useWindowDimensions(), never undefined). On a real native
+  // device that's correct and intended. But under React Native Web —
+  // including its SSR (Node has no `window`, so RNW's useWindowDimensions()
+  // returns some SSR default that can't match the real viewport) — this meant
+  // windowWidthProp won on the server AND the client's first hydration
+  // render, completely bypassing the careful "start at 0, correct once
+  // mounted" webWidth dance above that exists specifically to keep SSR and
+  // hydration in sync. Exactly the same class of bug as the systemScheme fix
+  // above, just for width: gate on platform (both browser and Node SSR are
+  // "effectively web"), not on whether a prop happens to be present.
+  const effectiveWidth = getEffectiveIsWeb() ? webWidth : (windowWidthProp ?? 0);
 
   // Convert string screens ('640px') to numbers before syncing — the raw theme
   // value can be in either format but the store always expects numbers.
@@ -326,7 +340,21 @@ export function ThemeProvider({
     getSystemSchemeServerSnapshot,
   );
 
-  const systemScheme: 'light' | 'dark' = isWeb
+  // getEffectiveIsWeb(), NOT raw isWeb: raw isWeb is false both on a real
+  // native device AND during Node.js SSR of a React Native Web app (no
+  // `window` in Node either). Branching on raw isWeb meant SSR (isWeb false)
+  // took the `colorScheme` prop branch while the browser's very first
+  // hydration render (isWeb true) immediately switched to `webScheme` —
+  // TWO DIFFERENT VARIABLES, not just two snapshots of the same
+  // useSyncExternalStore call, so if `colorScheme` (from RN's
+  // useColorScheme(), passed down by NativeThemeProvider) ever differed from
+  // webScheme's own SSR-safe server snapshot ('light'), that was a genuine
+  // cross-render mismatch — not the kind useSyncExternalStore's
+  // getServerSnapshot mechanism protects against, since the SERVER never
+  // even read webScheme in that case. getEffectiveIsWeb() is true in both
+  // the browser and Node SSR, so both take the same webScheme branch, and
+  // only a real native runtime reads the colorScheme prop.
+  const systemScheme: 'light' | 'dark' = getEffectiveIsWeb()
     ? webScheme
     : (colorScheme === 'dark' ? 'dark' : 'light');
 

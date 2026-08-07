@@ -220,22 +220,43 @@ describe('transformToWebProps — TextInput', () => {
     expect(out2.onKeyDown).toBe(onKeyDown);
   });
 
-  it('maps placeholderTextColor to the kbach-ph class plus a --kbach-ph-color CSS variable, merged with existing className/style', () => {
+  it('maps placeholderTextColor to a data-kbach-ph attribute plus a --kbach-ph-color CSS variable, WITHOUT touching className', () => {
     const out = transformToWebProps('TextInput', 'input', {
       placeholderTextColor: '#999999',
       className: 'text-sm',
       style: { padding: 4 },
     });
-    expect(out.className).toBe('text-sm kbach-ph');
+    // Regression: this used to be merged into className/pendingClassName,
+    // which — when the Babel plugin has renamed a static className to
+    // __kbachClasses at build time — created a SEPARATE `className` key
+    // that won jsx-runtime's `className ?? kb ?? __kbachClasses` chain
+    // outright, silently discarding every other class the element had (a
+    // TextInput's own text color class was dropped entirely, its typed text
+    // falling back to the browser's default black). A data-attribute
+    // selector can't collide with className at all.
+    expect(out.className).toBe('text-sm');
+    expect(out['data-kbach-ph']).toBe('');
     expect(out.style).toEqual({ padding: 4, '--kbach-ph-color': '#999999' });
     // Never leaks through as a raw (invalid) DOM attribute.
     expect(out.placeholderTextColor).toBeUndefined();
+  });
+
+  it('also does not touch __kbachClasses (the Babel-plugin-renamed className) when both are present', () => {
+    const out = transformToWebProps('TextInput', 'input', {
+      placeholderTextColor: '#999999',
+      __kbachClasses: 'text-sm text-text',
+      __kbachStyles: {},
+    });
+    expect(out.__kbachClasses).toBe('text-sm text-text');
+    expect(out.className).toBeUndefined();
+    expect(out['data-kbach-ph']).toBe('');
   });
 
   it('does nothing for a falsy placeholderTextColor', () => {
     const out = transformToWebProps('TextInput', 'input', { placeholderTextColor: undefined, className: 'text-sm' });
     expect(out.className).toBe('text-sm');
     expect(out.style).toBeUndefined();
+    expect(out['data-kbach-ph']).toBeUndefined();
   });
 });
 

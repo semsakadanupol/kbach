@@ -283,18 +283,28 @@ const _resizeModeMap: Record<string, string> = {
 // Fixed with one static rule (injected once, lazily) reading a per-element
 // CSS custom property, which — unlike the ::placeholder rule itself — CAN be
 // set inline and cascades from the host element into its own pseudo-element:
-//   .kbach-ph::placeholder { color: var(--kbach-ph-color); }
-// Each TextInput with this prop gets the 'kbach-ph' class (merged with the
-// element's own className, not overwriting it — see pendingClassName below)
-// plus a '--kbach-ph-color' custom property carrying the actual color.
-const PLACEHOLDER_RULE_CLASS = 'kbach-ph';
+//   [data-kbach-ph]::placeholder { color: var(--kbach-ph-color); }
+// Each TextInput with this prop gets a `data-kbach-ph` attribute (a plain
+// DOM prop, entirely separate from className) plus a '--kbach-ph-color'
+// custom property carrying the actual color.
+//
+// Deliberately a data-attribute selector, NOT a class merged into
+// className/pendingClassName: jsx-runtime resolves classes via
+// `className ?? kb ?? __kbachClasses` (see jsx-runtime.tsx) — a static
+// className gets renamed to __kbachClasses by the Babel plugin at build
+// time, so setting `out.className` here would create a SEPARATE key that
+// wins that `??` chain outright, silently discarding every other class the
+// element had (confirmed on a real app: a TextInput's own `text-text` color
+// class was dropped entirely this way, its typed text falling back to the
+// browser's default black instead of the app's configured color).
+const PLACEHOLDER_RULE_ATTR = 'data-kbach-ph';
 let _placeholderRuleInjected = false;
 function ensurePlaceholderColorRuleInjected(): void {
   if (_placeholderRuleInjected || typeof document === 'undefined') return;
   _placeholderRuleInjected = true;
   const style = document.createElement('style');
   style.setAttribute('data-kbach-placeholder', '');
-  style.textContent = `.${PLACEHOLDER_RULE_CLASS}::placeholder{color:var(--kbach-ph-color)}`;
+  style.textContent = `[${PLACEHOLDER_RULE_ATTR}]::placeholder{color:var(--kbach-ph-color)}`;
   document.head.appendChild(style);
 }
 
@@ -309,11 +319,6 @@ export function transformToWebProps(
   const isImage = originalName === 'Image' || originalName === 'ImageBackground';
   const isScrollable = originalName === 'ScrollView' || originalName === 'FlatList' || originalName === 'SectionList';
   let pendingStyle: Record<string, unknown> | null = null;
-  // Deferred like pendingStyle above — className may be processed before or
-  // after placeholderTextColor depending on prop insertion order, so
-  // appending directly during the loop risks the element's own className
-  // (handled by the generic passthrough below) overwriting it outright.
-  let pendingClassName: string | null = null;
 
   for (const [k, v] of Object.entries(props)) {
     if (_rnOnlyProps.has(k)) continue;
@@ -344,7 +349,7 @@ export function transformToWebProps(
       if (k === 'placeholderTextColor') {
         if (v) {
           ensurePlaceholderColorRuleInjected();
-          pendingClassName = PLACEHOLDER_RULE_CLASS;
+          out[PLACEHOLDER_RULE_ATTR] = '';
           pendingStyle = { ...(pendingStyle ?? {}), '--kbach-ph-color': v };
         }
         continue;
@@ -420,19 +425,11 @@ export function transformToWebProps(
     out[k] = v;
   }
 
-  // Merge pending style changes (horizontal, pointerEvents) — user style wins
+  // Merge pending style changes (horizontal, pointerEvents, placeholder color) — user style wins
   if (pendingStyle) {
     out.style = out.style
       ? { ...pendingStyle, ...(out.style as object) }
       : pendingStyle;
-  }
-
-  // Merge pending className additions (placeholderTextColor) — appended, not
-  // overwritten, alongside whatever className the element already carries.
-  if (pendingClassName) {
-    out.className = out.className
-      ? `${out.className} ${pendingClassName}`
-      : pendingClassName;
   }
 
   if (isPressable && !out.role) out.role = 'button';

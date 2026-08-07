@@ -197,6 +197,46 @@ describe('transformToWebProps — TextInput', () => {
     expect(transformToWebProps('TextInput', 'input', { editable: false }).readOnly).toBe(true);
     expect(transformToWebProps('TextInput', 'input', { maxLength: 10 }).maxLength).toBe(10);
   });
+
+  // Regression coverage for two real bugs, both confirmed via real browser
+  // console warnings on a real app: onSubmitEditing and placeholderTextColor
+  // are both valid, documented RN TextInput props that had no web mapping at
+  // all — they fell through to the generic passthrough and landed as raw,
+  // invalid DOM attributes. onSubmitEditing became an unrecognized event
+  // handler React warned about and ignored (the "press Enter to submit"
+  // behavior silently did nothing on web); placeholderTextColor became an
+  // invalid DOM attribute React warned about and dropped (the placeholder
+  // silently kept the browser's default color no matter what was configured).
+  it('maps onSubmitEditing to an Enter-key handler, unless onKeyDown is already provided', () => {
+    let submitted = 0;
+    const out = transformToWebProps('TextInput', 'input', { onSubmitEditing: () => submitted++ });
+    (out.onKeyDown as (e: unknown) => void)({ key: 'Enter' });
+    expect(submitted).toBe(1);
+    (out.onKeyDown as (e: unknown) => void)({ key: 'a' });
+    expect(submitted).toBe(1);
+
+    const onKeyDown = () => {};
+    const out2 = transformToWebProps('TextInput', 'input', { onSubmitEditing: () => submitted++, onKeyDown });
+    expect(out2.onKeyDown).toBe(onKeyDown);
+  });
+
+  it('maps placeholderTextColor to the kbach-ph class plus a --kbach-ph-color CSS variable, merged with existing className/style', () => {
+    const out = transformToWebProps('TextInput', 'input', {
+      placeholderTextColor: '#999999',
+      className: 'text-sm',
+      style: { padding: 4 },
+    });
+    expect(out.className).toBe('text-sm kbach-ph');
+    expect(out.style).toEqual({ padding: 4, '--kbach-ph-color': '#999999' });
+    // Never leaks through as a raw (invalid) DOM attribute.
+    expect(out.placeholderTextColor).toBeUndefined();
+  });
+
+  it('does nothing for a falsy placeholderTextColor', () => {
+    const out = transformToWebProps('TextInput', 'input', { placeholderTextColor: undefined, className: 'text-sm' });
+    expect(out.className).toBe('text-sm');
+    expect(out.style).toBeUndefined();
+  });
 });
 
 describe('transformToWebProps — Image', () => {

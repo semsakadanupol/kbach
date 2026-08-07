@@ -268,6 +268,36 @@ const _resizeModeMap: Record<string, string> = {
  * Remap React Native-specific props to their web equivalents.
  * Called when a component has been substituted with an HTML element.
  */
+// ─── TextInput placeholder color ───────────────────────────────────────────
+//
+// placeholderTextColor is a real, documented RN TextInput prop — but on web,
+// a substituted TextInput becomes a plain <input>/<textarea>, and there is no
+// HTML attribute for placeholder color at all: it can only be styled via the
+// ::placeholder CSS pseudo-element, which (unlike a regular color) cannot be
+// set through the DOM style property setter — it needs a real stylesheet
+// rule. Left unhandled, this prop fell through to the generic passthrough
+// below and landed as a raw, invalid DOM attribute (React warns and drops
+// it), so the placeholder silently kept the browser's default color no
+// matter what the app configured.
+//
+// Fixed with one static rule (injected once, lazily) reading a per-element
+// CSS custom property, which — unlike the ::placeholder rule itself — CAN be
+// set inline and cascades from the host element into its own pseudo-element:
+//   .kbach-ph::placeholder { color: var(--kbach-ph-color); }
+// Each TextInput with this prop gets the 'kbach-ph' class (merged with the
+// element's own className, not overwriting it — see pendingClassName below)
+// plus a '--kbach-ph-color' custom property carrying the actual color.
+const PLACEHOLDER_RULE_CLASS = 'kbach-ph';
+let _placeholderRuleInjected = false;
+function ensurePlaceholderColorRuleInjected(): void {
+  if (_placeholderRuleInjected || typeof document === 'undefined') return;
+  _placeholderRuleInjected = true;
+  const style = document.createElement('style');
+  style.setAttribute('data-kbach-placeholder', '');
+  style.textContent = `.${PLACEHOLDER_RULE_CLASS}::placeholder{color:var(--kbach-ph-color)}`;
+  document.head.appendChild(style);
+}
+
 export function transformToWebProps(
   originalName: string,
   tag: string,
@@ -279,6 +309,11 @@ export function transformToWebProps(
   const isImage = originalName === 'Image' || originalName === 'ImageBackground';
   const isScrollable = originalName === 'ScrollView' || originalName === 'FlatList' || originalName === 'SectionList';
   let pendingStyle: Record<string, unknown> | null = null;
+  // Deferred like pendingStyle above — className may be processed before or
+  // after placeholderTextColor depending on prop insertion order, so
+  // appending directly during the loop risks the element's own className
+  // (handled by the generic passthrough below) overwriting it outright.
+  let pendingClassName: string | null = null;
 
   for (const [k, v] of Object.entries(props)) {
     if (_rnOnlyProps.has(k)) continue;
@@ -295,6 +330,23 @@ export function transformToWebProps(
     if (isTextInput) {
       if (k === 'onChangeText') {
         if (!('onChange' in props)) out.onChange = (e: any) => (v as any)(e.target.value);
+        continue;
+      }
+      if (k === 'onSubmitEditing') {
+        // RN fires this on the keyboard's "submit"/"return" action, not on a
+        // generic form submit — the closest web equivalent is Enter in a
+        // (necessarily single-line) input.
+        if (!('onKeyDown' in props)) {
+          out.onKeyDown = (e: any) => { if (e.key === 'Enter') (v as any)(); };
+        }
+        continue;
+      }
+      if (k === 'placeholderTextColor') {
+        if (v) {
+          ensurePlaceholderColorRuleInjected();
+          pendingClassName = PLACEHOLDER_RULE_CLASS;
+          pendingStyle = { ...(pendingStyle ?? {}), '--kbach-ph-color': v };
+        }
         continue;
       }
       if (k === 'secureTextEntry') {
@@ -373,6 +425,14 @@ export function transformToWebProps(
     out.style = out.style
       ? { ...pendingStyle, ...(out.style as object) }
       : pendingStyle;
+  }
+
+  // Merge pending className additions (placeholderTextColor) — appended, not
+  // overwritten, alongside whatever className the element already carries.
+  if (pendingClassName) {
+    out.className = out.className
+      ? `${out.className} ${pendingClassName}`
+      : pendingClassName;
   }
 
   if (isPressable && !out.role) out.role = 'button';

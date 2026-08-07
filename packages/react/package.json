@@ -98,6 +98,7 @@
     "jsx-runtime.js",
     "jsx-dev-runtime.js",
     "kbach-react.md",
+    "KBACH.md",
     "README.md"
   ]
 }

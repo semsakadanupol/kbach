@@ -81,7 +81,7 @@ img, video, svg {
   display: block;
   max-width: 100%;
 }
-input:not([type='checkbox']):not([type='radio']), textarea {
+input:where(:not([type='checkbox']):not([type='radio'])), textarea {
   appearance: none;
   -webkit-appearance: none;
   background: transparent;

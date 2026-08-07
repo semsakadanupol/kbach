@@ -2,13 +2,13 @@
 
 Kbach is a Tailwind-like utility CSS framework for React (web) and React Native. Classes are written as `className` strings and resolved to inline styles at render time. On web, stateful and structural CSS rules are injected into a `<style>` tag so they work with the browser cascade. On native, only inline-compatible styles are applied.
 
-Two packages:
-- `@kbach/react` — React web (uses custom JSX runtime)
-- `@kbach/native` — React Native / Expo (wraps `@kbach/react`, adds Babel preset + Metro config)
+One package, `@kbach/react`, covers both platforms — React web, React Native, and Expo (Expo Go, Expo web, and native builds). The React Native/Expo pieces (a native-aware `ThemeProvider`, the Babel preset, Metro/Babel config helpers) live at the `@kbach/react/native` and `@kbach/react/babel` subpaths; everything else is the same import regardless of platform.
+
+`@kbach/native` still exists on npm but is now just a deprecated compatibility shim re-exporting `@kbach/react` — new setups should install `@kbach/react` directly (see below).
 
 ---
 
-## Setup — @kbach/react (web)
+## Setup — Web
 
 ### tsconfig.json
 ```json
@@ -51,7 +51,9 @@ import { ThemeProvider, KbachReset } from '@kbach/react';
 
 ---
 
-## Setup — @kbach/native (React Native / Expo)
+## Setup — React Native / Expo
+
+Same `npm install @kbach/react` as web — no separate package.
 
 ### babel.config.js
 ```js
@@ -60,19 +62,39 @@ module.exports = function (api) {
   return {
     presets: [
       'babel-preset-expo',
-      '@kbach/native/babel',
+      '@kbach/react/babel',
     ],
   };
 };
 ```
+Or the one-liner helper: `const { createKbachConfig } = require('@kbach/react/native'); module.exports = createKbachConfig();` — identical result. Merging into an existing config: `withKbachBabel({ presets: [...] })` (also from `@kbach/react/native`).
 
 ### Wrap app
 ```jsx
-import { ThemeProvider } from '@kbach/native';
+import { ThemeProvider } from '@kbach/react/native';
 <ThemeProvider defaultMode="system"><AppContent /></ThemeProvider>
 ```
+This is a native-aware `ThemeProvider` that wraps the base one — reads `useColorScheme()`/`useWindowDimensions()` automatically, no extra props needed. Don't import the plain `ThemeProvider` from `@kbach/react` on native; it doesn't have the automatic RN wiring.
 
 After changing babel.config.js: `npx expo start --clear`
+
+Platform-specific utility differences: see [Native-only Utilities](#native-only-utilities) and [Web-only Utilities](#web-only-utilities-gracefully-ignored-on-native) further down. `ring`/`ring-{n}`/`ring-{color}` is a partial exception — it falls back to `borderWidth`/`borderColor` on native (RN has no box-shadow), which does affect layout there and shares properties with `border-*`, so combining both on one element means whichever class comes last wins.
+
+### Expo Web / React Native Web
+In a browser (Expo Web, Metro web), `@kbach/react` switches to the same CSS-class strategy used on plain web automatically:
+- RN components substitute to HTML: `View`/`ScrollView`→`div`, `Text`→`span`, `TextInput`→`input`/`textarea`, `Image`→`img`, `Pressable`/`TouchableOpacity`→`div[role=button]`
+- RN-only props (`onChangeText`, `source`, `secureTextEntry`, …) map to HTML equivalents
+- Register more: `registerWebElement(Animated.View, 'div')`
+- Recommended: use the Vite plugin same as the web Static CSS setup above — `import { kbach } from '@kbach/react/vite'` — and import `kbach.css` in your entry file, for zero runtime cost on the web target too
+- Not using the Vite plugin (the common case for Expo/Metro web, no Vite build step)? Render `<KbachReset />` once near your root — e.g. Expo Router's root `app/_layout.tsx`, inside `<ThemeProvider>`:
+  ```jsx
+  import { KbachReset } from '@kbach/react';
+  import { ThemeProvider } from '@kbach/react/native';
+  <ThemeProvider defaultMode="system"><KbachReset /><Slot /></ThemeProvider>
+  ```
+
+### CSS inheritance
+Doesn't exist in React Native — apply font utilities to each `Text`, or define a styled component once: `const Body = styled(Text, 'font-sans text-gray-10 dark:text-white');`
 
 ---
 
@@ -89,7 +111,7 @@ Works on any element once the JSX runtime is active.
 ### styled(Component, baseClasses)
 Pre-style a component. Returns a new component that accepts a `kb` prop for extra classes.
 ```jsx
-import { styled } from '@kbach/react'; // or @kbach/native
+import { styled } from '@kbach/react'; // same import on web and React Native
 
 const Card   = styled('div', 'bg-white dark:bg-gray-9 rounded-2xl p-6 shadow');
 const Button = styled('button', 'bg-blue-7 hover:bg-blue-8 rounded-xl px-6 py-3');
@@ -837,7 +859,7 @@ peer              standalone marker class
 
 ## Native-only Utilities
 
-These only work in `@kbach/native` / React Native:
+These only work on React Native / Expo:
 ```
 tint-{color}         tintColor (Image / icon tinting)
 perspective-{n}      perspective transform
@@ -1018,5 +1040,5 @@ clearCache();
 ---
 
 ## Package Versions
-- `@kbach/react`: see `packages/react/package.json`
-- `@kbach/native`: see `packages/native/package.json` (depends on `@kbach/react`)
+- `@kbach/react`: see `packages/react/package.json` — the one package for web, React Native, and Expo
+- `@kbach/native`: see `packages/native/package.json` — deprecated compatibility shim, re-exports `@kbach/react`

@@ -31,7 +31,7 @@ export const isNative: boolean =
     typeof (globalThis as any).nativePerformanceNow !== 'undefined'
   );
 
-// Build-time tooling (the Vite plugin, the @kbach/native Babel plugin) resolves
+// Build-time tooling (the Vite plugin, the Babel plugin) resolves
 // classes inside a plain Node.js process, where neither isWeb nor isNative's
 // ambient-global detection is accurate — Node has no `window` (isWeb false)
 // AND no RN globals (isNative false), so getEffectiveIsWeb()'s fallback would

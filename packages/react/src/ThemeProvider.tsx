@@ -138,7 +138,7 @@ export interface ThemeProviderProps {
    * System color scheme for native `defaultMode="system"`.
    *
    * Pass the value of `useColorScheme()` from `react-native`. When importing
-   * `ThemeProvider` from `@kbach/native` this is handled automatically.
+   * `ThemeProvider` from `@kbach/react/native` this is handled automatically.
    *
    * @example
    * ```tsx
@@ -151,7 +151,7 @@ export interface ThemeProviderProps {
   /**
    * Current window/screen width in pixels for responsive breakpoints.
    * On web this is read from `window.innerWidth` automatically.
-   * When importing `ThemeProvider` from `@kbach/native` this is provided
+   * When importing `ThemeProvider` from `@kbach/react/native` this is provided
    * automatically from `useWindowDimensions()`.
    */
   windowWidth?: number;
@@ -333,7 +333,7 @@ export function ThemeProvider({
   // ── System scheme ──────────────────────────────────────────────────────────
   // Web: detect via matchMedia (SSR-safe — see subscribeSystemScheme above).
   // Native: caller passes colorScheme from useColorScheme() (done automatically
-  // when using ThemeProvider from @kbach/native via NativeThemeProvider).
+  // when using ThemeProvider from @kbach/react/native via NativeThemeProvider).
   const webScheme = useSyncExternalStore(
     subscribeSystemScheme,
     getSystemScheme,

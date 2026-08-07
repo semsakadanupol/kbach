@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import type { Context } from 'react';
 import type { ThemeMode, ResolvedConfig } from './core';
 
 export interface ThemeContextValue {
@@ -16,20 +17,37 @@ export interface ThemeContextValue {
   config: ResolvedConfig;
 }
 
-// package.json's "." export deliberately points BOTH the "import" and
-// "require" conditions at the same dist/index.js. Metro picks the "import" vs
-// "require" condition per individual call site (based on whether that
-// specific line used `import` or `require()`, not one choice for the whole
-// bundle) — so a dual ESM/CJS build would give <ThemeProvider> (reached via
-// @kbach/native's CJS require()) and a component's own `import { useTheme }
-// from '@kbach/react'` two DIFFERENT copies of this module, each with its own
-// createContext() call. useTheme() would then read a Context that no
-// Provider in the tree ever writes to, throwing this hook's "must be called
-// inside a <ThemeProvider>" error even with a <ThemeProvider> correctly
-// wrapping the app root. Web bundlers (Vite) don't have this per-call-site
-// split, so this only costs @kbach/react's web build some ESM tree-shaking —
-// a fine trade for React Native not silently getting two Contexts.
-export const ThemeContext = createContext<ThemeContextValue | null>(null);
+// package.json's "." export keeps a REAL dual ESM/CJS build (separate
+// dist/index.mjs and dist/index.js) — required for Vite/Rollup web builds,
+// which need genuine ESM to statically detect named exports; a CJS-only
+// build broke apps/docs's real `vite build` (Rollup's static CJS-named-export
+// detection isn't reliable on esbuild-emitted CJS — see RULES.md rule 7).
+//
+// Confirmed (not just theoretical) on Metro: Metro's web target resolves the
+// "import" vs "require" package.json condition per individual call site, so
+// an app that writes `import { useTheme } from '@kbach/react'` directly
+// (dist/index.mjs) alongside `<ThemeProvider>` from `@kbach/react/native`
+// (which reaches this package via a real `require('@kbach/react')` —
+// dist/index.js) got two DIFFERENT createContext() instances — verified by
+// exporting a real Expo Web bundle and running it: useTheme() threw "must be
+// called inside a <ThemeProvider>" even with one correctly mounted. Two
+// bundlers with directly conflicting requirements (Rollup needs real ESM;
+// Metro needs one physical file) rules out a "make them the same module"
+// fix — so this Context specifically falls back to the globalThis-keyed
+// singleton this codebase used everywhere before core/ became its own
+// shared build entry (see darkModeStore.ts's header comment for that
+// history) — RULES.md rule 3's documented-and-necessary exception. Every
+// duplicated copy of this module reads/creates the same Context object
+// here, so <ThemeProvider>/useTheme() interoperate regardless of which
+// physical file either one loaded through.
+declare global {
+  // eslint-disable-next-line no-var
+  var __kbachThemeContext: Context<ThemeContextValue | null> | undefined;
+}
+
+export const ThemeContext: Context<ThemeContextValue | null> =
+  globalThis.__kbachThemeContext ??
+  (globalThis.__kbachThemeContext = createContext<ThemeContextValue | null>(null));
 
 export function useTheme(): ThemeContextValue {
   const ctx = useContext(ThemeContext);

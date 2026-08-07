@@ -83,7 +83,7 @@ function printWebAppRootSnippet(includeReset: boolean): void {
 
 function printNativeAppRootSnippet(): void {
   log('  Your app root — wrap with ThemeProvider:');
-  log('    import { ThemeProvider } from \'@kbach/native\';');
+  log('    import { ThemeProvider } from \'@kbach/react/native\';');
   log('    export default function App() {');
   log('      return <ThemeProvider defaultMode="system"><AppContent /></ThemeProvider>;');
   log('    }');
@@ -91,7 +91,7 @@ function printNativeAppRootSnippet(): void {
 
 function printBabelMergeSnippet(): void {
   log('  babel.config.js already exists — add these to it by hand:');
-  log('    presets: [ /* ...your existing presets, */ \'@kbach/native/babel\' ]');
+  log('    presets: [ /* ...your existing presets, */ \'@kbach/react/babel\' ]');
   log('  Then clear the Metro cache: npx expo start --clear');
 }
 
@@ -119,7 +119,10 @@ async function main(): Promise<void> {
 
   const { platform, setup } = await resolveAnswers(info.platform, flags);
   const pm = flags.pm ?? info.packageManager;
-  const pkgName = platform === 'native' ? '@kbach/native' : '@kbach/react';
+  // @kbach/react works across every platform now — React Native/Expo support
+  // (ThemeProvider, the Babel preset) lives at its './native' and './babel'
+  // subpaths, so there's no longer a separate package to pick between.
+  const pkgName = '@kbach/react';
 
   // Computed once, up front, so the pre-flight summary below and the actual
   // write phase further down agree on exactly the same facts — no re-check

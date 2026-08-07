@@ -39,6 +39,7 @@ That's the only setting needed — Vite, Next.js, and React Router all read it. 
 | Vite, React Router library mode, CRA, other Vite-based | **[Static CSS setup](#static-css-setup)** (recommended) — zero runtime cost, catches typos at build time. [Runtime setup](#runtime-setup) is there if you'd rather skip the plugin for now. |
 | React Router, framework mode | **[Static CSS setup](#static-css-setup)** — and skip `@vitejs/plugin-react`, see note in that section |
 | Next.js | **[Runtime setup](#runtime-setup)** — Static CSS doesn't apply (webpack/Turbopack, not Vite) |
+| React Native, Expo | **[React Native / Expo setup](#react-native--expo-setup)** — different setup entirely (Babel preset, not the JSX runtime step above) |
 
 ## Static CSS setup
 
@@ -119,6 +120,81 @@ Using a custom `kbach.config.js`? Pass it to `ThemeProvider` too — see [Wiring
 
 Don't also set up Static CSS above in the same app — pick one.
 
+## React Native / Expo setup
+
+Same `npm install @kbach/react` — no separate package. Everything below (API, modifiers, color system) is the same import as web; only setup differs.
+
+**1. babel.config.js:**
+
+```js
+module.exports = function (api) {
+  api.cache(true);
+  return {
+    presets: [
+      'babel-preset-expo',
+      '@kbach/react/babel',
+    ],
+  };
+};
+```
+
+Or the one-liner helper: `const { createKbachConfig } = require('@kbach/react/native'); module.exports = createKbachConfig();` — identical result. Merging into an existing config: `withKbachBabel({ presets: [...] })`, also from `@kbach/react/native`. After changing this file, clear the Metro cache: `npx expo start --clear`.
+
+**2. Wrap your app:**
+
+```jsx
+import { ThemeProvider } from '@kbach/react/native';
+
+export default function App() {
+  return (
+    <ThemeProvider defaultMode="system">
+      <AppContent />
+    </ThemeProvider>
+  );
+}
+```
+
+This is a native-aware `ThemeProvider` — reads `useColorScheme()`/`useWindowDimensions()` automatically, no extra props needed. Import it from `@kbach/react/native`, not the plain `ThemeProvider` from `@kbach/react` — that one has no automatic RN wiring (colors scheme/window width would need to be passed in by hand).
+
+### Platform differences
+
+A handful of utilities are native-only or web-only:
+
+| | |
+|---|---|
+| Native-only | `tint-{color}` (Image/icon tinting), `perspective-{n}`, `backface-hidden`, `text-shadow`/`text-shadow-lg` |
+| Web-only, ignored on native (no warning) | `caret-*` `accent-*` `stroke-*` `fill-*` `touch-*` `float-*` `clear-*` `line-clamp-*` `scroll-*` `animate-*` `transition` `filter` `backdrop-filter` `print:` `before:` `after:` `selection:` `first-letter:` `first-line:` `marker:` `landscape:` `portrait:` `motion-reduce:` `motion-safe:` `contrast-more:` `contrast-less:` `rtl:` `ltr:` `grid` `grid-cols-*` `ring-offset-*` `outline-*` `cursor-*` `bg-gradient-*` |
+
+`ring`/`ring-{n}`/`ring-{color}` is a partial exception — RN has no box-shadow, so it falls back to `borderWidth`/`borderColor`, which *does* affect layout and shares properties with `border-*` (whichever class comes last wins if you combine both).
+
+CSS inheritance doesn't exist in React Native — apply font utilities to each `Text`, or define a styled component once: `const Body = styled(Text, 'font-sans text-gray-10 dark:text-white');`.
+
+### Expo Web / React Native Web
+
+In a browser (Expo Web, Metro web), `@kbach/react` switches to the same CSS-class strategy as plain web automatically:
+
+- RN components substitute to HTML: `View`/`ScrollView`→`div`, `Text`→`span`, `TextInput`→`input`/`textarea`, `Image`→`img`, `Pressable`/`TouchableOpacity`→`div[role=button]`
+- RN-only props (`onChangeText`, `source`, `secureTextEntry`, …) map to HTML equivalents
+- Register more: `registerWebElement(Animated.View, 'div')`
+- Recommended: use the Vite plugin same as [Static CSS setup](#static-css-setup) above — `import { kbach } from '@kbach/react/vite'` — and import `kbach.css` in your entry file, for zero runtime cost on the web target too
+- Not using the Vite plugin (the common case for Expo/Metro web, which has no Vite build step)? Render `<KbachReset />` once near your root — e.g. Expo Router's root `app/_layout.tsx`, inside `<ThemeProvider>`:
+
+  ```jsx
+  import { KbachReset } from '@kbach/react';
+  import { ThemeProvider } from '@kbach/react/native';
+
+  export default function RootLayout() {
+    return (
+      <ThemeProvider defaultMode="system">
+        <KbachReset />
+        <Slot />
+      </ThemeProvider>
+    );
+  }
+  ```
+
+  This ships the base reset as real markup instead of relying solely on the runtime injector.
+
 ## Dark mode
 
 `<ThemeProvider>` powers every `dark:` class — detects OS color scheme, persists the user's choice, re-renders on change.
@@ -135,7 +211,7 @@ Don't also set up Static CSS above in the same app — pick one.
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `defaultMode` | `'light' \| 'dark' \| 'system'` | `'system'` | Starting mode |
-| `disablePersistence` | `boolean` | `false` | Skip saving to `localStorage` |
+| `disablePersistence` | `boolean` | `false` | Skip saving to `localStorage` (web) / `AsyncStorage` (native) |
 | `config` | `FrameworkConfig` | global config | Scope a different config to this subtree |
 
 `darkMode` in `kbach.config.js` picks the matching strategy: `'attribute'` (default), `'class'`, or `'media'` (system-only). Toggle it with `useTheme()`'s `toggle()`/`setMode()` — see [API](#api).
@@ -364,6 +440,6 @@ Skipping the runtime one is an easy mistake under Static CSS setup specifically 
 
 ## Full reference
 
-[kbach-react.md](./kbach-react.md) — complete utility list, every modifier, all config options.
+[kbach-react.md](./kbach-react.md) — complete utility list, every modifier, all config options, covers web and React Native/Expo.
 
-React Native / Expo: [`@kbach/native`](https://www.npmjs.com/package/@kbach/native).
+`@kbach/native` still exists on npm but is now just a deprecated compatibility shim re-exporting this package — install `@kbach/react` directly for new projects.

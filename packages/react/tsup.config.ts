@@ -34,19 +34,20 @@ const CLIENT_ENTRIES = ['src/index.ts', 'src/jsx-runtime.tsx', 'src/jsx-dev-runt
 // like shared-utils.ts's `import type { ResolvedStyle } from './core/types'`
 // are erased before this matters and don't need to go through the barrel.)
 //
-// CJS-only. package.json's exports map routes BOTH the "import" and
-// "require" conditions for these three entries to the SAME dist/*.js (CJS)
-// file — dist/*.mjs isn't part of the published contract for them (unlike
-// ./vite, which does differentiate import vs require). So only the CJS
-// build actually needs this fix. The ESM build is left exactly as it was:
-// core inlined, shared correctly across dist/index.mjs / jsx-runtime.mjs /
-// jsx-dev-runtime.mjs via tsup's own multi-entry ESM code-splitting (a real
-// shared chunk file) — esbuild supports that for ESM, just not CJS, which is
-// the actual bug this fixes. Externalizing core for ESM too would trade that
-// already-correct behavior for a plain relative './core' import, which fails
-// under Node's strict ESM resolver (ERR_UNSUPPORTED_DIR_IMPORT — a directory
-// import needs an explicit file segment there) for zero benefit, since ESM
-// never had the CJS bundle-splitting problem to begin with.
+// CJS-only fix. package.json's exports map keeps a REAL dual ESM/CJS build
+// for these three entries (dist/*.mjs is a genuine, separately-built file,
+// same as ./vite) — required for Vite/Rollup, which needs real ESM to
+// statically detect named exports (RULES.md rule 7: a CJS-only build broke
+// apps/docs's real `vite build`). So only the CJS build needs this fix. The
+// ESM build is left exactly as it was: core inlined, shared correctly across
+// dist/index.mjs / jsx-runtime.mjs / jsx-dev-runtime.mjs via tsup's own
+// multi-entry ESM code-splitting (a real shared chunk file) — esbuild
+// supports that for ESM, just not CJS, which is the actual bug this fixes.
+// Externalizing core for ESM too would trade that already-correct behavior
+// for a plain relative './core' import, which fails under Node's strict ESM
+// resolver (ERR_UNSUPPORTED_DIR_IMPORT — a directory import needs an
+// explicit file segment there) for zero benefit, since ESM never had the CJS
+// bundle-splitting problem to begin with.
 const CORE_EXTERNAL = ['./core'];
 
 export default defineConfig([
@@ -88,5 +89,30 @@ export default defineConfig([
     dts: true,
     clean: false,
     external: ['vite'],
+  },
+  {
+    // React Native / Expo entry point (@kbach/react/native — see
+    // src/native/index.ts). CJS-only: package.json's "./native" export routes
+    // BOTH "import" and "require" to this same dist/native.js — see
+    // NativeThemeProvider.tsx's comment for why a real ESM build would break
+    // Metro's require() detection.
+    //
+    // '@kbach/react' is marked external (NativeThemeProvider.tsx imports it
+    // by bare specifier, not a relative path) so this bundle reaches
+    // ThemeProvider/ThemeContext via a real require('@kbach/react') —
+    // resolving to the exact same dist/index.js instance every other
+    // consumer gets — instead of esbuild inlining its own private copy of
+    // ThemeProvider.tsx/context.tsx, which would split ThemeContext in two.
+    // Named-entry form ({ native: ... }) makes esbuild emit a flat
+    // dist/native.js in outDir rather than a nested dist/native/index.js —
+    // doesn't matter for a bare-specifier external like this one (unlike a
+    // relative one, it isn't rewritten based on output depth), but keeps the
+    // dist layout flat and predictable alongside the other entries.
+    entry: { native: 'src/native/index.ts' },
+    format: ['cjs'],
+    dts: true,
+    clean: false,
+    external: ['@kbach/react'],
+    banner: { js: "'use client';" },
   },
 ]);

@@ -434,6 +434,11 @@ function writeKbachToFile(filePath: string, css: string): boolean {
 // what's already on disk so an unrelated restart with an unchanged theme
 // doesn't touch the file's mtime (and doesn't spuriously invalidate a
 // language server's cache of it) — same pattern as writeKbachToFile above.
+//
+// Kept in sync BY HAND with native/babel-plugin/index.js's own
+// writeKbachTypesDts — not extracted into a shared module because that file
+// ships as raw, unbuilt CommonJS and can't require() TypeScript. Update both
+// if this logic changes.
 function writeKbachTypesDts(root: string, theme: ThemeConfig): void {
   const filePath = join(root, 'kbach-types.d.ts');
   const content = generateKbachTypesDts(theme);

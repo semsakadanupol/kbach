@@ -1,7 +1,7 @@
 {
   "name": "@kbach/native",
   "version": "0.6.49",
-  "description": "Single-package Kbach install for React Native and Expo — includes core, components, Babel plugin, and Metro config",
+  "description": "Deprecated — React Native/Expo support has moved into @kbach/react itself. This package now only re-exports @kbach/react for backward compatibility; install @kbach/react instead.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -42,23 +42,18 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@kbach/react": "^0.6.0"
+    "@kbach/react": "^0.7.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.7",
     "@types/react": "^19.2.0",
     "tsup": "^8.0.0",
     "vitest": "^1.0.0"
   },
   "peerDependencies": {
-    "@babel/core": "^7.0.0",
     "react": ">=18.0.0",
     "react-native": ">=0.70.0"
   },
   "peerDependenciesMeta": {
-    "@babel/core": {
-      "optional": true
-    },
     "react-native": {
       "optional": true
     }

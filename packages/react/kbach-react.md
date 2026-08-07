@@ -71,6 +71,32 @@ export default { plugins: [kbach(), reactRouter()] };
 ```
 Default scan dirs include `app/`. Library mode (client-only, no meta-framework Vite plugin involved) needs no special handling beyond the standard Vite setup above.
 
+### React Native / Expo
+Same `npm install @kbach/react` — no separate package. `@kbach/native` still exists but is now a deprecated compatibility shim that re-exports this package.
+
+```js
+// babel.config.js
+module.exports = function (api) {
+  api.cache(true);
+  return { presets: ['babel-preset-expo', '@kbach/react/babel'] };
+};
+```
+One-liner: `const { createKbachConfig } = require('@kbach/react/native'); module.exports = createKbachConfig();`. Merge into an existing config with `withKbachBabel({ presets: [...] })` (same module). After editing this file: `npx expo start --clear`.
+
+```jsx
+import { ThemeProvider } from '@kbach/react/native';
+<ThemeProvider defaultMode="system"><App /></ThemeProvider>
+```
+Native-aware — reads `useColorScheme()`/`useWindowDimensions()` automatically. The plain `ThemeProvider` from `@kbach/react` (no `/native`) has no automatic RN wiring; import the `/native` one on React Native.
+
+`disablePersistence` on `<ThemeProvider>` saves to `AsyncStorage` on native (vs. `localStorage` on web) — same prop, platform-appropriate storage.
+
+Utility Reference below is tagged inline: `(web only)` entries no-op silently on native. Native-only additions not in the main tables: `tint-{color}` (Image/icon tinting), `perspective-{n}`, `backface-hidden`, `text-shadow`/`text-shadow-lg`. `ring-*` is a partial exception — falls back to `borderWidth`/`borderColor` on native (no box-shadow in RN), which *does* affect layout and shares properties with `border-*`.
+
+In a browser (Expo Web, Metro web), `@kbach/react` switches to the same CSS-class strategy as plain web automatically — RN components substitute to HTML elements (`View`→`div`, `Text`→`span`, etc.), RN-only props map to HTML equivalents, and either the Vite plugin (recommended, same as Static CSS setup above) or a `<KbachReset />` near the root covers the base reset.
+
+CSS inheritance doesn't exist in React Native — apply font utilities to each `Text`, or define a styled component once: `const Body = styled(Text, 'font-sans text-gray-10 dark:text-white');`.
+
 ---
 
 ## Vite Plugin
@@ -189,7 +215,7 @@ colors.white              // '#ffffff'
 colors['white/20']        // 'rgba(255,255,255,0.2)'
 colors.alpha('#ff6b35', 60) // 'rgba(255,107,53,0.6)'
 ```
-Typed against the built-in theme by default — `colors.blu` (typo) is a compile error. Custom `kbach.config.js` colors work too, with **zero setup**: the Vite plugin (and `@kbach/native`'s Babel plugin) automatically generate a `kbach-types.d.ts` next to your config, kept in sync every time the dev server / Metro picks up an edit to it — safe to add to `.gitignore`. `useColors()`/`useSpacing()` see your custom names immediately, no type parameter needed, same typo-catching as the built-in ones.
+Typed against the built-in theme by default — `colors.blu` (typo) is a compile error. Custom `kbach.config.js` colors work too, with **zero setup**: the Vite plugin (and the Babel plugin, on React Native) automatically generate a `kbach-types.d.ts` next to your config, kept in sync every time the dev server / Metro picks up an edit to it — safe to add to `.gitignore`. `useColors()`/`useSpacing()` see your custom names immediately, no type parameter needed, same typo-catching as the built-in ones.
 
 If you'd rather commit the types instead of generating them (a library package with no dev server/bundler step of its own, for instance), hand-author the same thing in any `.d.ts` your tsconfig includes:
 

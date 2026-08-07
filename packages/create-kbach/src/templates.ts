@@ -1,7 +1,7 @@
 // Content generators for the files this CLI creates. Kept byte-for-byte
-// consistent with what packages/react/README.md and packages/native/README.md
-// document as the manual setup steps, so there's no drift between what a
-// developer would copy-paste by hand and what this CLI generates.
+// consistent with what packages/react/README.md documents as the manual
+// setup steps, so there's no drift between what a developer would
+// copy-paste by hand and what this CLI generates.
 
 export function kbachConfigTemplate(): string {
   return `// kbach.config.js
@@ -49,7 +49,7 @@ export function babelConfigTemplate(preset: string): string {
   return {
     presets: [
       '${preset}',
-      '@kbach/native/babel',
+      '@kbach/react/babel',
     ],
   };
 };

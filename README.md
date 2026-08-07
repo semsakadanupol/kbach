@@ -42,14 +42,15 @@ className="bg-white dark:bg-gray-10 p-4" + <style> <- web
 
 ## Setup
 
-Kbach ships as two packages, one per platform:
+One package, `@kbach/react`, covers web, React Native, and Expo:
 
-| Package | Platform | Setup guide | npm |
-|---|---|---|---|
-| `@kbach/react` | React web | [README](packages/react/README.md) | [npmjs.com/package/@kbach/react](https://www.npmjs.com/package/@kbach/react) |
-| `@kbach/native` | React Native / Expo | [README](packages/native/README.md) | [npmjs.com/package/@kbach/native](https://www.npmjs.com/package/@kbach/native) |
+```
+npm install @kbach/react
+```
 
-Follow the README for whichever platform you're targeting -- it has the full install and configuration steps.
+[README](packages/react/README.md) · [npmjs.com/package/@kbach/react](https://www.npmjs.com/package/@kbach/react) -- has the full install and configuration steps for both platforms, including the React Native/Expo section.
+
+`@kbach/native` still exists on npm but is now a deprecated compatibility shim re-exporting `@kbach/react` -- see [its README](packages/native/README.md) if you're migrating an existing install.
 
 ---
 
@@ -77,10 +78,7 @@ Wrap your entire app once. Manages light/dark/system mode, persists the choice, 
 Access and control the theme from any component inside `ThemeProvider`.
 
 ```tsx
-// web
-import { useTheme } from '@kbach/react';
-// native
-import { useTheme } from '@kbach/native';
+import { useTheme } from '@kbach/react'; // same import on web and native
 
 function Header() {
   const { mode, resolvedMode, isDark, setMode, toggle } = useTheme();
@@ -110,7 +108,7 @@ function Header() {
 Shorthand hook when you only need the dark-mode boolean — avoids destructuring `useTheme()`.
 
 ```tsx
-import { useIsDark } from '@kbach/react'; // or '@kbach/native'
+import { useIsDark } from '@kbach/react';
 
 const isDark = useIsDark();
 ```
@@ -120,7 +118,7 @@ const isDark = useIsDark();
 Returns the active theme color palette as a smart proxy. Values match exactly what `bg-`, `text-`, `border-`, and other color utilities resolve to.
 
 ```tsx
-import { useColors } from '@kbach/react'; // or '@kbach/native'
+import { useColors } from '@kbach/react';
 
 const colors = useColors();
 
@@ -166,7 +164,7 @@ The primary way to style. Works on any HTML element or React Native component vi
 Create a pre-styled component from any base component. Handles interaction states automatically.
 
 ```tsx
-import { styled } from '@kbach/native'; // or '@kbach/react'
+import { styled } from '@kbach/react';
 import { View, Text, TouchableOpacity, TextInput } from 'react-native';
 
 const Card = styled(View, 'bg-white dark:bg-gray-9 rounded-2xl p-6 shadow');
@@ -197,7 +195,7 @@ Pass additional classes at use time with the `kb` prop:
 Resolve classes imperatively inside a component. Useful when you need a style object for the `style` prop.
 
 ```tsx
-import { useStyles } from '@kbach/native'; // or '@kbach/react'
+import { useStyles } from '@kbach/react';
 import { View, Text } from 'react-native';
 
 function Badge() {
@@ -218,7 +216,7 @@ Resolve classes outside of a component, for use in `StyleSheet.create()` or stat
 
 ```tsx
 import { StyleSheet } from 'react-native';
-import { kb } from '@kbach/native'; // or '@kbach/react'
+import { kb } from '@kbach/react';
 
 const styles = StyleSheet.create({
   container: kb('flex-1 bg-white p-4') as object,
@@ -231,7 +229,7 @@ const styles = StyleSheet.create({
 Conditionally join class names. Falsy values are safely ignored.
 
 ```tsx
-import { cx } from '@kbach/native'; // or '@kbach/react'
+import { cx } from '@kbach/react';
 
 <View className={cx(
   'p-4 rounded-xl',
@@ -418,8 +416,10 @@ import kbachConfig from '../kbach.config.js';
 
 ```
 packages/
-  react         -- @kbach/react: core engine, components, hooks, JSX runtime (web)
-  native        -- @kbach/native: everything in react + Metro/Babel setup (native)
+  react         -- @kbach/react: core engine, components, hooks, JSX runtime,
+                   Vite plugin (web) and Babel preset/Metro setup (native) --
+                   the one package for both platforms
+  native        -- @kbach/native: deprecated compatibility shim, re-exports @kbach/react
 ```
 
 ### Scripts

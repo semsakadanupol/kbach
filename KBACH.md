@@ -2,30 +2,25 @@
 
 Kbach is a Tailwind-like utility CSS framework for React (web) and React Native. Classes are written as `className` strings and resolved to inline styles at render time. On web, stateful and structural CSS rules are injected into a `<style>` tag so they work with the browser cascade. On native, only inline-compatible styles are applied.
 
-Two packages:
-- `@kbach/react` — React web (uses custom JSX runtime)
-- `@kbach/native` — React Native / Expo (wraps `@kbach/react`, adds Babel preset + Metro config)
+One package, `@kbach/react`, covers both platforms — React web, React Native, and Expo (Expo Go, Expo web, and native builds). The React Native/Expo pieces (a native-aware `ThemeProvider`, the Babel preset, Metro/Babel config helpers) live at the `@kbach/react/native` and `@kbach/react/babel` subpaths; everything else is the same import regardless of platform.
+
+`@kbach/native` still exists on npm but is now just a deprecated compatibility shim re-exporting `@kbach/react` — new setups should install `@kbach/react` directly (see below).
 
 ---
 
-## Setup — @kbach/react (web)
+## Setup — Web
 
 ### tsconfig.json
 ```json
 { "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@kbach/react" } }
 ```
 
-### vite.config.ts — Static CSS (recommended, plain Vite only)
+### vite.config.ts (plain Vite only — skip if a meta-framework already provides its own Vite/React plugin, e.g. React Router's reactRouter())
 Not installed by `@kbach/react` itself: `npm install -D vite @vitejs/plugin-react`.
 ```ts
 import react from '@vitejs/plugin-react';
-import { kbach } from '@kbach/react/vite';
-export default { plugins: [react({ jsxImportSource: '@kbach/react' }), kbach()] };
+export default { plugins: [react({ jsxImportSource: '@kbach/react' })] };
 ```
-Then create `src/kbach.css` with `/* kbach:start */` / `/* kbach:end */` markers and `import './kbach.css'` once in your entry file — that import is what actually switches the app to Static CSS (zero runtime cost, build-time typo warnings); `kbach()` alone only generates the file, it doesn't disable runtime injection by itself. Skip if a meta-framework already provides its own Vite/React plugin, e.g. React Router's `reactRouter()` — see below.
-
-### vite.config.ts — Runtime setup (any bundler, no plugin)
-Skip `kbach()`/`kbach.css` above; just wrap the app in `<ThemeProvider>` (see "Wrap app" below). Right choice for Next.js (Static CSS doesn't apply there — webpack/Turbopack, not Vite) or for skipping the plugin for now.
 
 ### Per-file (no config needed)
 ```jsx
@@ -34,14 +29,15 @@ Skip `kbach()`/`kbach.css` above; just wrap the app in `<ThemeProvider>` (see "W
 
 ### Wrap app
 ```jsx
-import { ThemeProvider } from '@kbach/react';
-<ThemeProvider defaultMode="system"><App /></ThemeProvider>
+import { ThemeProvider, KbachReset } from '@kbach/react';
+<ThemeProvider defaultMode="system"><KbachReset /><App /></ThemeProvider>
 ```
+`<KbachReset />` renders Kbach's base browser-default reset (borderless button/input, visible checkbox/radio, no arrow-less `<select>`, `a`/`h1-h6`/`p`/`ul`/`ol`/`img` normalized, etc.) as a real `<style>` tag — needed for SSR under runtime-only setups (no JS runs server-side, but this is just JSX so it still renders), a no-op-but-harmless nice-to-have for plain CSR. Skip it if using static `kbach.css` (below) — that file already includes the same reset, and the runtime injector auto-detects `<KbachReset />` and skips re-adding it either way, so having both is harmless too.
 
 ### Next.js
 - tsconfig `jsxImportSource` setup above applies as-is (SWC reads it like Vite does).
-- No Vite plugin / static `kbach.css` for Next.js (webpack/Turbopack, not Vite) — falls back to runtime CSS injection, which only runs in the browser, so expect a brief flash of unstyled content on first paint before hydration. Known limitation.
-- `@kbach/react`'s compiled output ships its own `"use client"` directive (`dist/index.js`, `dist/jsx-runtime.js`, `dist/jsx-dev-runtime.js`), so App Router Server Components can use `className`, `styled()`, hooks, and `<ThemeProvider>` directly — no manual `'use client'` wrapper needed.
+- No Vite plugin / static `kbach.css` for Next.js (webpack/Turbopack, not Vite) — always runtime-only. Render `<KbachReset />` once in the root App Router `layout.tsx` (in `<head>`, or right after `<ThemeProvider>` opens) so Server Component HTML has the base reset without waiting on hydration; without it, expect a flash of raw browser defaults (native button border, arrow-less `<select>`, etc.) on first paint until hydration completes. Utility classes beyond the base reset still wait on hydration either way — this is a known limitation of the runtime-only path, not a per-project bug.
+- `@kbach/react`'s compiled output ships its own `"use client"` directive (`dist/index.js`, `dist/jsx-runtime.js`, `dist/jsx-dev-runtime.js`), so App Router Server Components can use `className`, `styled()`, hooks, `<ThemeProvider>`, and `<KbachReset>` directly — no manual `'use client'` wrapper needed.
 
 ### React Router
 - Framework mode (v7+, SSR): do NOT add `@vitejs/plugin-react` — `reactRouter()` already includes its own JSX transform + Fast Refresh integration. Adding both makes each inject its own Fast Refresh preamble into the same module, crashing the page (`Identifier 'RefreshRuntime' has already been declared`) before React hydrates — every class on the page silently fails to style because the app never mounts. tsconfig `jsxImportSource` alone is enough; `reactRouter()` reads it the same way plain Vite does:
@@ -50,12 +46,14 @@ import { ThemeProvider } from '@kbach/react';
   import { kbach } from '@kbach/react/vite'; // omit if not using static CSS
   export default { plugins: [kbach(), reactRouter()] };
   ```
-  Default scan dirs already include `app/`. Static `kbach.css` avoids the Next.js FOUC issue since there's no runtime-injection gap.
+  Default scan dirs already include `app/`. The Static CSS setup is recommended here since it's SSR — it avoids the runtime-injection FOUC gap entirely, for every class, not just the base reset. If skipping it in favor of Runtime setup, render `<KbachReset />` in `root.tsx`'s `<Layout>` at minimum.
 - Library mode (client-only, no meta-framework Vite plugin involved): identical to any Vite + React app — the vite.config.ts section above.
 
 ---
 
-## Setup — @kbach/native (React Native / Expo)
+## Setup — React Native / Expo
+
+Same `npm install @kbach/react` as web — no separate package.
 
 ### babel.config.js
 ```js
@@ -64,19 +62,39 @@ module.exports = function (api) {
   return {
     presets: [
       'babel-preset-expo',
-      '@kbach/native/babel',
+      '@kbach/react/babel',
     ],
   };
 };
 ```
+Or the one-liner helper: `const { createKbachConfig } = require('@kbach/react/native'); module.exports = createKbachConfig();` — identical result. Merging into an existing config: `withKbachBabel({ presets: [...] })` (also from `@kbach/react/native`).
 
 ### Wrap app
 ```jsx
-import { ThemeProvider } from '@kbach/native';
+import { ThemeProvider } from '@kbach/react/native';
 <ThemeProvider defaultMode="system"><AppContent /></ThemeProvider>
 ```
+This is a native-aware `ThemeProvider` that wraps the base one — reads `useColorScheme()`/`useWindowDimensions()` automatically, no extra props needed. Don't import the plain `ThemeProvider` from `@kbach/react` on native; it doesn't have the automatic RN wiring.
 
 After changing babel.config.js: `npx expo start --clear`
+
+Platform-specific utility differences: see [Native-only Utilities](#native-only-utilities) and [Web-only Utilities](#web-only-utilities-gracefully-ignored-on-native) further down. `ring`/`ring-{n}`/`ring-{color}` is a partial exception — it falls back to `borderWidth`/`borderColor` on native (RN has no box-shadow), which does affect layout there and shares properties with `border-*`, so combining both on one element means whichever class comes last wins.
+
+### Expo Web / React Native Web
+In a browser (Expo Web, Metro web), `@kbach/react` switches to the same CSS-class strategy used on plain web automatically:
+- RN components substitute to HTML: `View`/`ScrollView`→`div`, `Text`→`span`, `TextInput`→`input`/`textarea`, `Image`→`img`, `Pressable`/`TouchableOpacity`→`div[role=button]`
+- RN-only props (`onChangeText`, `source`, `secureTextEntry`, …) map to HTML equivalents
+- Register more: `registerWebElement(Animated.View, 'div')`
+- Recommended: use the Vite plugin same as the web Static CSS setup above — `import { kbach } from '@kbach/react/vite'` — and import `kbach.css` in your entry file, for zero runtime cost on the web target too
+- Not using the Vite plugin (the common case for Expo/Metro web, no Vite build step)? Render `<KbachReset />` once near your root — e.g. Expo Router's root `app/_layout.tsx`, inside `<ThemeProvider>`:
+  ```jsx
+  import { KbachReset } from '@kbach/react';
+  import { ThemeProvider } from '@kbach/react/native';
+  <ThemeProvider defaultMode="system"><KbachReset /><Slot /></ThemeProvider>
+  ```
+
+### CSS inheritance
+Doesn't exist in React Native — apply font utilities to each `Text`, or define a styled component once: `const Body = styled(Text, 'font-sans text-gray-10 dark:text-white');`
 
 ---
 
@@ -93,7 +111,7 @@ Works on any element once the JSX runtime is active.
 ### styled(Component, baseClasses)
 Pre-style a component. Returns a new component that accepts a `kb` prop for extra classes.
 ```jsx
-import { styled } from '@kbach/react'; // or @kbach/native
+import { styled } from '@kbach/react'; // same import on web and React Native
 
 const Card   = styled('div', 'bg-white dark:bg-gray-9 rounded-2xl p-6 shadow');
 const Button = styled('button', 'bg-blue-7 hover:bg-blue-8 rounded-xl px-6 py-3');
@@ -152,7 +170,6 @@ colors.white              // '#ffffff'
 colors['white/20']        // 'rgba(255,255,255,0.2)'
 colors.alpha('#ff6b35', 60) // 'rgba(255,107,53,0.6)'
 ```
-Typed against the built-in theme by default — `colors.blu` (typo) is a compile error. Custom `kbach.config.js` colors aren't visible to TypeScript (runtime-loaded plain `.js`), so widen manually: `useColors<DefaultColorName | 'brand'>()`. `useSpacing()` is the same pattern for the spacing scale (`spacing[4]` → `16`, `spacing.full` → `'100%'`).
 
 ---
 
@@ -329,6 +346,14 @@ Wrap any value in `[]` to use it directly.
 <div className="grid-cols-[1fr_2fr_1fr]" />
 <div className="will-change-[transform,opacity]" />
 ```
+
+### Arbitrary properties (web only)
+No utility prefix — `[property:value]` on its own, for a CSS property with no named utility:
+```jsx
+<div className="[mask-type:luminance]" />
+<div className="[--my-var:10px]" />   {/* custom property */}
+```
+Underscores → spaces like any other arbitrary value. Only the FIRST `:` splits property from value, so `[background:url(http://x/a.png)]` keeps the URL's own `:` intact.
 
 ---
 
@@ -679,6 +704,9 @@ animate-spin        rotate 360deg loop
 animate-ping        scale + fade ping
 animate-pulse       opacity pulse
 animate-bounce      translate-y bounce
+animate-{name}      custom, from theme.extend.animation (see Theme Configuration)
+animate-[value]     arbitrary animation shorthand, e.g. animate-[wiggle_2s_ease-in-out]
+                    — auto-injects theme.extend.keyframes[name] if the first word matches one
 
 transition          transition: all 150ms ease (web only)
 duration-{n}        transitionDuration: 75 100 150 200 300 500 700 1000
@@ -831,7 +859,7 @@ peer              standalone marker class
 
 ## Native-only Utilities
 
-These only work in `@kbach/native` / React Native:
+These only work on React Native / Expo:
 ```
 tint-{color}         tintColor (Image / icon tinting)
 perspective-{n}      perspective transform
@@ -879,6 +907,14 @@ module.exports = {
       colors: { brand: { 6: '#6366f1' } },
       spacing: { 18: 72, 22: 88 },
       fontSize: { '10xl': 160 },
+      // Custom @keyframes (web only) — declaration values are plain CSS strings.
+      // Reference by name from `animation`, then use that name as animate-{name}.
+      keyframes: {
+        wiggle: { '0%, 100%': { transform: 'rotate(-3deg)' }, '50%': { transform: 'rotate(3deg)' } },
+      },
+      animation: {
+        wiggle: 'wiggle 1s ease-in-out infinite',
+      },
     },
   },
 
@@ -1004,5 +1040,5 @@ clearCache();
 ---
 
 ## Package Versions
-- `@kbach/react`: see `packages/react/package.json`
-- `@kbach/native`: see `packages/native/package.json` (depends on `@kbach/react`)
+- `@kbach/react`: see `packages/react/package.json` — the one package for web, React Native, and Expo
+- `@kbach/native`: see `packages/native/package.json` — deprecated compatibility shim, re-exports `@kbach/react`

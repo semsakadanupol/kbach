@@ -6,13 +6,6 @@
  * Native bundles but will never execute there.
  */
 
-// This file only runs inside Node.js build tooling, but this package's
-// tsconfig has no @types/node (kept minimal for the RN app bundle), so
-// `process`/`node:process` aren't typed here. A minimal local ambient
-// declaration for just what's used below avoids pulling in the full
-// @types/node dependency for one warning helper.
-declare const process: { stdout?: { isTTY?: boolean }; env: Record<string, string | undefined> };
-
 export interface KbachOptions {
   /** Path to kbach.config.js, relative to project root. Default: 'kbach.config.js' */
   configFile?: string;
@@ -25,8 +18,18 @@ export interface KbachOptions {
 // ─── Terminal color helper ──────────────────────────────────────────────────────
 // Plain ANSI escapes — no-ops when stdout isn't a color-capable TTY (CI logs,
 // redirected output) or NO_COLOR is set.
+//
+// This file is bundled together with NativeThemeProvider.tsx into the same
+// dist/native/index.js (both are exported from native/index.ts), so it must
+// stay safe to load inside a real Metro/Hermes runtime even though warn()
+// itself only ever runs in Node build tooling. global.d.ts's ambient
+// `process` (narrowed to `{ env }` for exactly this reason) is cast locally
+// here rather than widened globally or replaced with a `node:process`
+// import — a real import would inject a require('node:process') into the
+// shared runtime bundle, which doesn't exist under Metro/Hermes.
 function warn(message: string): void {
-  const useColor = !!process.stdout?.isTTY && !process.env.NO_COLOR;
+  const proc = process as unknown as { stdout?: { isTTY?: boolean }; env: Record<string, string | undefined> };
+  const useColor = !!proc.stdout?.isTTY && !proc.env.NO_COLOR;
   const paint = (code: string, s: string) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
   console.warn(`${paint('1', paint('35', '[kbach]'))} ${paint('33', message)}`);
 }
@@ -39,7 +42,7 @@ function warn(message: string): void {
  * metro.config.js (Expo):
  * ```js
  * const { getDefaultConfig } = require('expo/metro-config');
- * const { withKbach } = require('@kbach/native');
+ * const { withKbach } = require('@kbach/react/native');
  * const config = getDefaultConfig(__dirname);
  * module.exports = withKbach(config);
  * ```
@@ -47,7 +50,7 @@ function warn(message: string): void {
  * metro.config.js (bare React Native):
  * ```js
  * const { getDefaultConfig } = require('@react-native/metro-config');
- * const { withKbach } = require('@kbach/native');
+ * const { withKbach } = require('@kbach/react/native');
  * const config = getDefaultConfig(__dirname);
  * module.exports = withKbach(config);
  * ```
@@ -71,7 +74,7 @@ export function withKbach(
  *
  * babel.config.js:
  * ```js
- * const { withKbachBabel } = require('@kbach/native');
+ * const { withKbachBabel } = require('@kbach/react/native');
  * module.exports = withKbachBabel({
  *   presets: ['babel-preset-expo'],
  * });
@@ -108,11 +111,11 @@ export function withKbachBabel(
       // the DEFAULT JSX pragma for every file this preset transforms — which,
       // for babel-preset-expo, is every file Metro bundles, including
       // node_modules and react-native's own internals (renderApplication.js,
-      // AppContainer.js, etc.). Pointing that default at @kbach/native breaks
-      // those files, since @kbach/native/jsx-runtime's jsx()/jsxDEV() run
+      // AppContainer.js, etc.). Pointing that default at @kbach/react breaks
+      // those files, since @kbach/react/jsx-runtime's jsx()/jsxDEV() run
       // Kbach's className/kb resolution logic, which those files know nothing
       // about. The Kbach babel plugin's pre() hook (babel-plugin/index.js)
-      // instead injects a per-FILE `@jsxImportSource @kbach/native` pragma
+      // instead injects a per-FILE `@jsxImportSource @kbach/react` pragma
       // comment, and explicitly skips node_modules — that comment overrides
       // this preset's default (which stays 'react') only for the user's own
       // app files, which is the only place it should apply.
@@ -124,7 +127,7 @@ export function withKbachBabel(
   // Append kbach preset last — presets run in reverse order, so this runs first
   return {
     ...babelConfig,
-    presets: [...presets, ['@kbach/native/babel', { configFile, attributes, debug }]],
+    presets: [...presets, ['@kbach/react/babel', { configFile, attributes, debug }]],
   };
 }
 
@@ -136,7 +139,7 @@ export function withKbachBabel(
  *
  * babel.config.js:
  * ```js
- * const { createKbachConfig } = require('@kbach/native');
+ * const { createKbachConfig } = require('@kbach/react/native');
  * module.exports = createKbachConfig();
  * ```
  *
@@ -147,13 +150,13 @@ export function withKbachBabel(
  *   return {
  *     presets: [
  *       'babel-preset-expo',
- *       '@kbach/native/babel',
+ *       '@kbach/react/babel',
  *     ],
  *   };
  * };
  * ```
  *
- * Do NOT pass `jsxImportSource: '@kbach/native'` to babel-preset-expo here —
+ * Do NOT pass `jsxImportSource: '@kbach/react'` to babel-preset-expo here —
  * that sets the default JSX pragma for every file Metro transforms, including
  * node_modules and react-native's own internals, which breaks them. See the
  * comment in withKbachBabel above for why the per-file pragma comment the
@@ -163,7 +166,7 @@ export function createKbachConfig(options: KbachOptions = {}): Record<string, un
   return {
     presets: [
       'babel-preset-expo',
-      ['@kbach/native/babel', {
+      ['@kbach/react/babel', {
         configFile: options.configFile ?? 'kbach.config.js',
         attributes: options.attributes ?? ['kb', 'className'],
         debug: options.debug ?? false,

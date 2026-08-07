@@ -24,7 +24,7 @@ function propKey(name: string): string {
 /**
  * Generates the KbachCustomColors/KbachCustomSpacing module-augmentation
  * source for every color/spacing key `extend.theme` added beyond the built-in
- * defaults. Called by both the Vite plugin and @kbach/native's Babel plugin —
+ * defaults. Called by both the Vite plugin and the Babel plugin (@kbach/react/babel-plugin) —
  * kept here, shared, so "which colors count as custom" and "flat string vs.
  * ColorScale" can't drift between the two.
  *

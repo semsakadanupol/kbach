@@ -40,7 +40,15 @@
       "source": "./src/vite-plugin.ts",
       "import": "./dist/vite-plugin.mjs",
       "require": "./dist/vite-plugin.js"
-    }
+    },
+    "./native": {
+      "types": "./dist/native.d.ts",
+      "source": "./src/native/index.ts",
+      "import": "./dist/native.js",
+      "require": "./dist/native.js"
+    },
+    "./babel": "./src/native/babel/index.js",
+    "./babel-plugin": "./src/native/babel-plugin/index.js"
   },
   "scripts": {
     "build": "tsup",
@@ -50,6 +58,7 @@
     "postinstall": "node scripts/postinstall.js"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.7",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^20.19.42",
     "@types/react": "^19.2.0",
@@ -61,11 +70,15 @@
     "vitest": "^1.0.0"
   },
   "peerDependencies": {
+    "@babel/core": "^7.0.0",
     "react": ">=18.0.0",
     "react-native": ">=0.70.0",
     "vite": ">=4.0.0"
   },
   "peerDependenciesMeta": {
+    "@babel/core": {
+      "optional": true
+    },
     "react-native": {
       "optional": true
     },
@@ -79,6 +92,8 @@
   "files": [
     "dist",
     "scripts",
+    "src/native/babel-plugin",
+    "src/native/babel",
     "types.d.ts",
     "jsx-runtime.js",
     "jsx-dev-runtime.js",

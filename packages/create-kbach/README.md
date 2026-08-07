@@ -12,13 +12,13 @@ npm create kbach@latest
 
 Detects your package manager (from the lockfile) and platform (Vite/Next.js/Expo, from `package.json` and known config files), then:
 
-- Installs `@kbach/react` or `@kbach/native`
+- Installs `@kbach/react` — the one package for web, React Native, and Expo
 - Creates `kbach.config.js` (skipped if one already exists)
 - Merges `compilerOptions.jsx`/`jsxImportSource` into `tsconfig.json` (or `tsconfig.app.json`, whichever your project actually uses) — skipped if already set, or if it conflicts with something already there
 - Static CSS setup (Vite web only): creates `src/kbach.css` with the marker comments
 - Native: creates `babel.config.js` with the Kbach preset — only if you don't already have one
 
-It deliberately does **not** edit `vite.config.ts`, your app's root component, or an existing `babel.config.js` — those are arbitrary source files, and blindly patching them risks producing broken code. Instead it prints the exact snippet to paste, copy-paste identical to what [`@kbach/react`'s README](../react/README.md) / [`@kbach/native`'s README](../native/README.md) document.
+It deliberately does **not** edit `vite.config.ts`, your app's root component, or an existing `babel.config.js` — those are arbitrary source files, and blindly patching them risks producing broken code. Instead it prints the exact snippet to paste, copy-paste identical to what [`@kbach/react`'s README](../react/README.md) documents (including the React Native/Expo section).
 
 ## Flags
 
@@ -32,4 +32,4 @@ It deliberately does **not** edit `vite.config.ts`, your app's root component, o
 
 ## Full setup reference
 
-[`@kbach/react` README](../react/README.md) · [`@kbach/native` README](../native/README.md)
+[`@kbach/react` README](../react/README.md)

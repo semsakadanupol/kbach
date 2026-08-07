@@ -38,7 +38,7 @@ That's the only setting needed — Vite, Next.js, and React Router all read it. 
 |---|---|
 | Vite, React Router library mode, CRA, other Vite-based | **[Static CSS setup](#static-css-setup)** (recommended) — zero runtime cost, catches typos at build time. [Runtime setup](#runtime-setup) is there if you'd rather skip the plugin for now. |
 | React Router, framework mode | **[Static CSS setup](#static-css-setup)** — and skip `@vitejs/plugin-react`, see note in that section |
-| Next.js | **[Runtime setup](#runtime-setup)** — Static CSS doesn't apply (webpack/Turbopack, not Vite) |
+| Next.js | **[Next.js setup](#nextjs-setup)** — Runtime setup, plus one App Router-specific detail |
 | React Native, Expo | **[React Native / Expo setup](#react-native--expo-setup)** — different setup entirely (Babel preset, not the JSX runtime step above) |
 
 ## Static CSS setup
@@ -99,7 +99,7 @@ export default defineConfig({ plugins: [kbach(), reactRouter()] });
 
 ## Runtime setup
 
-Client-side CSS injection — works with any bundler (Vite, webpack, Turbopack, Metro-for-web, …), no build plugin. The right choice for Next.js (Static CSS doesn't apply there), or if you'd rather not wire up a Vite plugin yet. This is the whole setup:
+Client-side CSS injection — works with any bundler (Vite, webpack, Turbopack, Metro-for-web, …), no build plugin. Next.js always uses this (see [Next.js setup](#nextjs-setup) below for the one extra detail), or use it on Vite if you'd rather not wire up the plugin yet. This is the whole setup:
 
 ```jsx
 import { ThemeProvider, KbachReset } from '@kbach/react';
@@ -114,11 +114,39 @@ export default function Root() {
 }
 ```
 
-That's it — done. `<KbachReset />` renders the base reset (see [CSS resets](#css-resets)) as real markup instead of waiting on client JS — matters most for SSR, where it avoids a flash of unstyled browser defaults before hydration. `@kbach/react` ships its own `"use client"` directive, so this works in a Next.js Server Component tree with no wrapper needed — in Next.js, render it once in the root `layout.tsx`.
+That's it — done. `<KbachReset />` renders the base reset (see [CSS resets](#css-resets)) as real markup instead of waiting on client JS — matters most for SSR, where it avoids a flash of unstyled browser defaults before hydration.
 
 Using a custom `kbach.config.js`? Pass it to `ThemeProvider` too — see [Wiring the config in](#wiring-the-config-in--required-for-both-setups).
 
 Don't also set up Static CSS above in the same app — pick one.
+
+## Next.js setup
+
+Next.js is always [Runtime setup](#runtime-setup) above — Static CSS doesn't apply (webpack/Turbopack, not Vite). The `tsconfig.json` step from [Setup](#setup) applies as-is; SWC reads `jsxImportSource` the same way Vite does.
+
+The one Next.js-specific detail: render `<KbachReset />` once in the root App Router `layout.tsx` (inside `<head>`, or right after `<ThemeProvider>` opens) so the Server Component HTML has the base reset without waiting on hydration:
+
+```jsx
+// app/layout.tsx
+import { ThemeProvider, KbachReset } from '@kbach/react';
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>
+        <ThemeProvider defaultMode="system">
+          <KbachReset />
+          {children}
+        </ThemeProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+Without `<KbachReset />` there, expect a flash of raw browser defaults (native button border, arrow-less `<select>`, etc.) on first paint until hydration completes. Utility classes beyond the base reset still wait on hydration either way — a known limitation of the runtime-only path (Static CSS isn't available for webpack/Turbopack), not a per-project bug.
+
+`@kbach/react`'s compiled output ships its own `"use client"` directive, so App Router Server Components can use `className`, `styled()`, hooks, `<ThemeProvider>`, and `<KbachReset>` directly — no manual `'use client'` wrapper needed anywhere in your own components.
 
 ## React Native / Expo setup
 

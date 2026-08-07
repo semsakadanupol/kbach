@@ -19,7 +19,16 @@ export const BASE_RESET = [
   // plain text. Text-like inputs, textarea, and button don't have that problem
   // (their native chrome is just a skin around content utilities can fully
   // restyle), so they keep the blank-canvas treatment.
-  "input:not([type='checkbox']):not([type='radio']), textarea { appearance: none; -webkit-appearance: none; background: transparent; padding: 0; margin: 0; font: inherit; color: inherit; line-height: inherit; }",
+  // :where() wraps the :not() exclusions so they contribute ZERO specificity
+  // (unlike a bare `input:not([type='checkbox']):not([type='radio'])`, whose
+  // two :not([attr]) clauses each add a class-level specificity point — (0,2,1)
+  // total, MORE than any single utility class (0,1,0)). Without :where(), this
+  // reset's `color: inherit` always won the cascade over a text-* color
+  // utility applied directly to a <input>/<textarea> regardless of source
+  // order, since author rules only override on a tie or higher specificity —
+  // confirmed on a real app: a TextInput's own text color utility resolved
+  // and injected correctly, class and all, but silently never painted.
+  "input:where(:not([type='checkbox']):not([type='radio'])), textarea { appearance: none; -webkit-appearance: none; background: transparent; padding: 0; margin: 0; font: inherit; color: inherit; line-height: inherit; }",
   // Native checkbox/radio/range still get typography + spacing normalized, and
   // accent-color re-themes their native indicator to the current text color
   // instead of the browser/OS default blue, so they stay on-brand without

@@ -1,6 +1,6 @@
 {
   "name": "@kbach/native",
-  "version": "0.6.49",
+  "version": "0.6.50",
   "description": "Deprecated — React Native/Expo support has moved into @kbach/react itself. This package now only re-exports @kbach/react for backward compatibility; install @kbach/react instead.",
   "license": "MIT",
   "repository": {
@@ -42,7 +42,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@kbach/react": "^0.7.0"
+    "@kbach/react": "^0.6.50"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",

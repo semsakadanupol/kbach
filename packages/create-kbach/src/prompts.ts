@@ -1,5 +1,6 @@
 import prompts from 'prompts';
 import type { Platform } from './detect';
+import { TAG, dim, rule } from './theme';
 
 export interface CliFlags {
   platform?: Platform;
@@ -27,9 +28,12 @@ function exitOnCancel(): never {
  * whole batch couldn't do. Skipped entirely under --yes.
  */
 export function printPlan(summaryLines: string[]): void {
-  console.log('[kbach] Here\'s what create-kbach found, and what it may do:');
-  for (const line of summaryLines) console.log(`  • ${line}`);
+  rule();
+  console.log(`${TAG()} Here's what create-kbach found, and what it may do:`);
   console.log();
+  for (const line of summaryLines) console.log(`  ${dim('›')} ${line}`);
+  console.log();
+  rule();
 }
 
 /**

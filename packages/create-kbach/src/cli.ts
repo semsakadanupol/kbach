@@ -8,19 +8,7 @@ import {
   installPackage, installExpoPackage, ensureGitignoreEntry,
 } from './actions';
 import { findThemeProviderWiring, findKbachCssImport, viteConfigHasPlugin, babelConfigHasPreset, checkPeerDependencyCompat } from './verify';
-
-// ─── Color helpers ─────────────────────────────────────────────────────────
-// Matches packages/ui/src/vite-plugin.ts's ANSI convention exactly (same
-// codes, same [kbach] tag shape), so create-kbach's terminal output looks
-// consistent with the Vite/Babel plugins' own [kbach] messages instead of
-// being the one plain-text corner of the toolchain.
-const useColor = !!process.stdout?.isTTY && !process.env.NO_COLOR;
-const paint = (code: string, s: string) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
-const purple = (s: string) => paint('35', s);
-const yellow = (s: string) => paint('33', s);
-const green = (s: string) => paint('32', s);
-const bold = (s: string) => paint('1', s);
-const TAG = () => bold(purple('[kbach]'));
+import { TAG, yellow, bold, rule, ICON_OK, ICON_SKIP, ICON_DECLINE, ICON_WARN } from './theme';
 
 function log(message = ''): void {
   console.log(message);
@@ -31,14 +19,14 @@ function logTag(message: string): void {
   console.log(`${TAG()} ${message}`);
 }
 
-/** Yellow — install failures, peer-dependency mismatches, declined actions, anything needing attention. */
+/** Yellow — install failures, peer-dependency mismatches, anything needing attention. */
 function logWarn(message: string): void {
   console.log(`${TAG()} ${yellow(message)}`);
 }
 
-/** Green checkmark — a Tier 2 step (or the whole run) that's already done, nothing to do. */
-function logDone(message: string): void {
-  log(`  ${green('✓')} ${message}`);
+/** One outcome line, icon + label, e.g. "✓ Created  kbach.config.js". */
+function logItem(icon: string, label: string, message: string): void {
+  log(`  ${icon} ${bold(label.padEnd(9))}${message}`);
 }
 
 // ─── Flag parsing ───────────────────────────────────────────────────────────
@@ -336,11 +324,13 @@ async function main(): Promise<void> {
   // 'no-git-repo': nothing to report — not a git project, nothing was skipped or created.
 
   log();
+  rule();
   logTag('Done.');
-  if (created.length) log(`  Created/updated: ${bold(created.join(', '))}`);
-  if (skipped.length) log(`  Already present (left untouched): ${skipped.join(', ')}`);
-  if (declined.length) logWarn(`Declined, left for you to do by hand: ${declined.join(', ')}`);
-  if (tsconfigNote) logWarn(tsconfigNote);
+  log();
+  for (const item of created) logItem(ICON_OK, 'Created', item);
+  for (const item of skipped) logItem(ICON_SKIP, 'Skipped', item);
+  for (const item of declined) logItem(ICON_DECLINE, 'Declined', item);
+  if (tsconfigNote) log(`  ${ICON_WARN} ${yellow(tsconfigNote)}`);
 
   // Each snippet below only prints when verify.ts's read-only checks didn't
   // already find it done — never auto-applied either way (RULES.md rule 5:
@@ -351,7 +341,7 @@ async function main(): Promise<void> {
   let remaining = 0;
   const printOrConfirm = (alreadyDone: boolean, doneMessage: string, print: () => void) => {
     if (alreadyDone) {
-      logDone(doneMessage);
+      log(`  ${ICON_OK} ${doneMessage}`);
       return;
     }
     remaining++;
@@ -359,6 +349,7 @@ async function main(): Promise<void> {
   };
 
   log();
+  rule();
   logTag('Manual edits — see README/kbach-ui.md for full detail:');
   log();
 
@@ -383,10 +374,11 @@ async function main(): Promise<void> {
   }
 
   if (remaining === 0) {
-    logDone('Everything above already looks wired up — nothing left to do by hand.');
+    log(`  ${ICON_OK} Everything above already looks wired up — nothing left to do by hand.`);
   }
 
   log();
+  rule();
   if (setup === 'static') {
     log('  Using a custom kbach.config.js? It needs to be passed to ThemeProvider (and to kbach() too, for Static CSS) — see "Wiring the config in" in the README.');
   } else {

@@ -1,11 +1,11 @@
 // Content generators for the files this CLI creates. Kept byte-for-byte
-// consistent with what packages/react/README.md documents as the manual
+// consistent with what packages/ui/README.md documents as the manual
 // setup steps, so there's no drift between what a developer would
 // copy-paste by hand and what this CLI generates.
 
 export function kbachConfigTemplate(): string {
   return `// kbach.config.js
-// Full reference: https://github.com/semsakadanupol/kbach (or your installed kbach-react.md / kbach-native.md)
+// Full reference: https://github.com/semsakadanupol/kbach (or your installed kbach-ui.md / kbach-native.md)
 module.exports = {
   darkMode: 'attribute', // 'attribute' | 'class' | 'media'
 
@@ -49,7 +49,7 @@ export function babelConfigTemplate(preset: string): string {
   return {
     presets: [
       '${preset}',
-      '@kbach/react/babel',
+      '@kbach/ui/babel',
     ],
   };
 };

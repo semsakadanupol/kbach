@@ -3,7 +3,7 @@
   "version": "0.1.15",
   "private": true,
   "license": "MIT",
-  "description": "Kbach documentation site — dogfoods @kbach/react's own Static CSS setup",
+  "description": "Kbach documentation site — dogfoods @kbach/ui's own Static CSS setup",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -11,7 +11,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@kbach/react": "^0.6.0",
+    "@kbach/ui": "^0.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.18.2",

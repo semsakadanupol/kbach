@@ -22,8 +22,8 @@ export interface ColorScale {
  * identical problem. Put this in any .d.ts your tsconfig includes:
  *
  * ```ts
- * import '@kbach/react'; // or '@kbach/native' — either works, native re-exports react's types
- * declare module '@kbach/react' {
+ * import '@kbach/ui'; // or '@kbach/native' — either works, native re-exports react's types
+ * declare module '@kbach/ui' {
  *   interface KbachCustomColors {
  *     primary: string;    // a flat color, like the built-in `white`/`black`
  *     brand: ColorScale;  // a 1–12 shade scale, like the built-in `blue`/`red`

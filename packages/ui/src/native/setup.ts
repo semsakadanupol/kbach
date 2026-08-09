@@ -42,7 +42,7 @@ function warn(message: string): void {
  * metro.config.js (Expo):
  * ```js
  * const { getDefaultConfig } = require('expo/metro-config');
- * const { withKbach } = require('@kbach/react/native');
+ * const { withKbach } = require('@kbach/ui/native');
  * const config = getDefaultConfig(__dirname);
  * module.exports = withKbach(config);
  * ```
@@ -50,7 +50,7 @@ function warn(message: string): void {
  * metro.config.js (bare React Native):
  * ```js
  * const { getDefaultConfig } = require('@react-native/metro-config');
- * const { withKbach } = require('@kbach/react/native');
+ * const { withKbach } = require('@kbach/ui/native');
  * const config = getDefaultConfig(__dirname);
  * module.exports = withKbach(config);
  * ```
@@ -74,7 +74,7 @@ export function withKbach(
  *
  * babel.config.js:
  * ```js
- * const { withKbachBabel } = require('@kbach/react/native');
+ * const { withKbachBabel } = require('@kbach/ui/native');
  * module.exports = withKbachBabel({
  *   presets: ['babel-preset-expo'],
  * });
@@ -111,11 +111,11 @@ export function withKbachBabel(
       // the DEFAULT JSX pragma for every file this preset transforms — which,
       // for babel-preset-expo, is every file Metro bundles, including
       // node_modules and react-native's own internals (renderApplication.js,
-      // AppContainer.js, etc.). Pointing that default at @kbach/react breaks
-      // those files, since @kbach/react/jsx-runtime's jsx()/jsxDEV() run
+      // AppContainer.js, etc.). Pointing that default at @kbach/ui breaks
+      // those files, since @kbach/ui/jsx-runtime's jsx()/jsxDEV() run
       // Kbach's className/kb resolution logic, which those files know nothing
       // about. The Kbach babel plugin's pre() hook (babel-plugin/index.js)
-      // instead injects a per-FILE `@jsxImportSource @kbach/react` pragma
+      // instead injects a per-FILE `@jsxImportSource @kbach/ui` pragma
       // comment, and explicitly skips node_modules — that comment overrides
       // this preset's default (which stays 'react') only for the user's own
       // app files, which is the only place it should apply.
@@ -127,7 +127,7 @@ export function withKbachBabel(
   // Append kbach preset last — presets run in reverse order, so this runs first
   return {
     ...babelConfig,
-    presets: [...presets, ['@kbach/react/babel', { configFile, attributes, debug }]],
+    presets: [...presets, ['@kbach/ui/babel', { configFile, attributes, debug }]],
   };
 }
 
@@ -139,7 +139,7 @@ export function withKbachBabel(
  *
  * babel.config.js:
  * ```js
- * const { createKbachConfig } = require('@kbach/react/native');
+ * const { createKbachConfig } = require('@kbach/ui/native');
  * module.exports = createKbachConfig();
  * ```
  *
@@ -150,13 +150,13 @@ export function withKbachBabel(
  *   return {
  *     presets: [
  *       'babel-preset-expo',
- *       '@kbach/react/babel',
+ *       '@kbach/ui/babel',
  *     ],
  *   };
  * };
  * ```
  *
- * Do NOT pass `jsxImportSource: '@kbach/react'` to babel-preset-expo here —
+ * Do NOT pass `jsxImportSource: '@kbach/ui'` to babel-preset-expo here —
  * that sets the default JSX pragma for every file Metro transforms, including
  * node_modules and react-native's own internals, which breaks them. See the
  * comment in withKbachBabel above for why the per-file pragma comment the
@@ -166,7 +166,7 @@ export function createKbachConfig(options: KbachOptions = {}): Record<string, un
   return {
     presets: [
       'babel-preset-expo',
-      ['@kbach/react/babel', {
+      ['@kbach/ui/babel', {
         configFile: options.configFile ?? 'kbach.config.js',
         attributes: options.attributes ?? ['kb', 'className'],
         debug: options.debug ?? false,

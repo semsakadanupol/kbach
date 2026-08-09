@@ -10,7 +10,7 @@
  * dist/jsx-runtime.js (esbuild doesn't support code-splitting CJS output),
  * so Metro loading each by path got independent copies of this module with
  * independent top-level state. core/ is now built as its own dist/core/
- * entry and required externally by both (see packages/react/tsup.config.ts),
+ * entry and required externally by both (see packages/ui/tsup.config.ts),
  * so there's only ever one real instance of this module to begin with — a
  * plain module-level object is enough.
  */

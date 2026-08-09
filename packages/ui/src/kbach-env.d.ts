@@ -5,11 +5,11 @@
  * so TypeScript accepts Kbach utility classes without casting.
  *
  * For projects using the published npm package, add one of:
- *   • tsconfig.json → "types": ["@kbach/react/types"]
- *   • Any .d.ts file → /// <reference types="@kbach/react/types" />
+ *   • tsconfig.json → "types": ["@kbach/ui/types"]
+ *   • Any .d.ts file → /// <reference types="@kbach/ui/types" />
  *
  * For monorepo dev (test-app), this file is picked up automatically because
- * apps/test-app/tsconfig.json includes ../../packages/react/src.
+ * apps/test-app/tsconfig.json includes ../../packages/ui/src.
  */
 
 // export {} makes this file a module so declare module blocks are augmentations.

@@ -25,9 +25,9 @@ export interface ThemeContextValue {
 //
 // Confirmed (not just theoretical) on Metro: Metro's web target resolves the
 // "import" vs "require" package.json condition per individual call site, so
-// an app that writes `import { useTheme } from '@kbach/react'` directly
-// (dist/index.mjs) alongside `<ThemeProvider>` from `@kbach/react/native`
-// (which reaches this package via a real `require('@kbach/react')` —
+// an app that writes `import { useTheme } from '@kbach/ui'` directly
+// (dist/index.mjs) alongside `<ThemeProvider>` from `@kbach/ui/native`
+// (which reaches this package via a real `require('@kbach/ui')` —
 // dist/index.js) got two DIFFERENT createContext() instances — verified by
 // exporting a real Expo Web bundle and running it: useTheme() threw "must be
 // called inside a <ThemeProvider>" even with one correctly mounted. Two

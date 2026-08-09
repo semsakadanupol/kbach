@@ -48,7 +48,7 @@ function safeStatMtime(filePath) {
 // ─── Load core lazily, reloading when the dist changes ───────────────────────
 //
 // This plugin runs inside a plain Node.js process (a Metro/Babel worker), where
-// @kbach/react's isWeb and isNative both read false — there's no `window` and no
+// @kbach/ui's isWeb and isNative both read false — there's no `window` and no
 // RN device globals. Left alone, getEffectiveIsWeb() would default to "web" and
 // bake web-flavored values (e.g. padding: '10px' as a string) into the
 // __kbachStyles this plugin injects, which the actual native runtime then uses
@@ -67,7 +67,7 @@ function getCore() {
   if (_core && isFresh(_lastStatMs, STAT_INTERVAL_MS)) return _core;
 
   try {
-    if (!_corePath) _corePath = require.resolve('@kbach/react');
+    if (!_corePath) _corePath = require.resolve('@kbach/ui');
     const mtime = fs.statSync(_corePath).mtimeMs;
     _lastStatMs = Date.now();
     if (_core && mtime === _coreMtime) return _core;
@@ -76,7 +76,7 @@ function getCore() {
         delete require.cache[id];
       }
     }
-    _core = require('@kbach/react');
+    _core = require('@kbach/ui');
     _core.setResolveTarget?.('native');
     _coreMtime = mtime;
     _configCache.clear();
@@ -87,16 +87,16 @@ function getCore() {
       // No previously loaded copy to fall back to — let this propagate as a
       // real build error rather than swallowing it, since there's nothing
       // usable to silently continue with.
-      _core = require('@kbach/react');
+      _core = require('@kbach/ui');
       _core.setResolveTarget?.('native');
     } else if (!_coreWarned) {
       // A previously loaded copy exists — fall back to it, but only silently
-      // once. Otherwise a persistent reload failure (e.g. @kbach/react briefly
+      // once. Otherwise a persistent reload failure (e.g. @kbach/ui briefly
       // mid-write on disk, or a broken reinstall) never surfaces anywhere in
       // the Metro/Babel output, and every class resolved afterward silently
       // uses a stale copy of the core engine with no indication why.
       _coreWarned = true;
-      warn(`Failed to reload @kbach/react (${err.message}) — using the previously loaded copy.`);
+      warn(`Failed to reload @kbach/ui (${err.message}) — using the previously loaded copy.`);
     }
   }
   return _core;
@@ -116,7 +116,7 @@ const _configCache = new Map(); // cfgPath -> { config, mtime, lastStatMs }
 const CFG_STAT_INTERVAL_MS = 500;
 
 // Gives useColors()/useSpacing() autocomplete for a project's custom
-// colors/spacing keys with zero manual setup — see @kbach/react's
+// colors/spacing keys with zero manual setup — see @kbach/ui's
 // generateTypesDts.ts for what actually gets generated and why. Written next
 // to kbach.config.js itself (not the project root — unlike the Vite plugin,
 // this function already has the config file's own resolved path, which is
@@ -137,7 +137,7 @@ function writeKbachTypesDts(cfgPath, resolvedConfig) {
   try {
     content = getCore().generateKbachTypesDts(resolvedConfig.theme);
   } catch {
-    return; // Best-effort — an old @kbach/react without this export shouldn't break the build.
+    return; // Best-effort — an old @kbach/ui without this export shouldn't break the build.
   }
 
   let existing = null;
@@ -276,7 +276,7 @@ function resolvedStyleToAST(t, resolved) {
 // Generates a call injected into every transformed file:
 //
 //   ;(function(){
-//     try { require('@kbach/react').initConfig(require('/path/to/kbach.config.js')); } catch(_e) {}
+//     try { require('@kbach/ui').initConfig(require('/path/to/kbach.config.js')); } catch(_e) {}
 //   })();
 //
 // Metro bundles kbach.config.js into the app, so plugins (functions) are
@@ -294,7 +294,7 @@ function buildConfigInitAST(t, cfgAbsPath) {
   const initCall = t.expressionStatement(
     t.callExpression(
       t.memberExpression(
-        t.callExpression(t.identifier('require'), [t.stringLiteral('@kbach/react')]),
+        t.callExpression(t.identifier('require'), [t.stringLiteral('@kbach/ui')]),
         t.identifier('initConfig'),
       ),
       [t.callExpression(t.identifier('require'), [t.stringLiteral(cfgAbsPath)])],
@@ -339,7 +339,7 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
       `Custom class attribute(s) ${customAttributes.map((a) => `"${a}"`).join(', ')} are ` +
       'only resolved for STATIC string classes at build time. A dynamic expression ' +
       '(template literal, ternary, computed value) on them is not recognized by the ' +
-      '@kbach/react runtime, which only reads className/kb — it will render unstyled ' +
+      '@kbach/ui runtime, which only reads className/kb — it will render unstyled ' +
       'with no warning at runtime. Use className or kb for any dynamic class string.',
     );
   }
@@ -351,7 +351,7 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
 
     // JSX runtime setup: pre() injects a @jsxImportSource comment so that
     // @babel/plugin-transform-react-jsx (from babel-preset-expo or any React preset)
-    // uses @kbach/react/jsx-runtime. Our pre() runs before the preset's pre(), so the
+    // uses @kbach/ui/jsx-runtime. Our pre() runs before the preset's pre(), so the
     // comment is in place when the JSX transform reads it.
     //
     // NOTE: Do NOT add plugins dynamically inside manipulateOptions. By the time
@@ -371,7 +371,7 @@ module.exports = function kbachBabelPlugin(api, options = {}) {
       if (!Array.isArray(comments)) return;
       const alreadySet = comments.some(c => /@jsxImportSource|@jsxRuntime/.test(c.value));
       if (!alreadySet) {
-        comments.unshift({ type: 'CommentLine', value: ' @jsxImportSource @kbach/react' });
+        comments.unshift({ type: 'CommentLine', value: ' @jsxImportSource @kbach/ui' });
       }
     },
 

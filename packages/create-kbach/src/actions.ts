@@ -6,7 +6,7 @@ import { kbachConfigTemplate, kbachCssTemplate, babelConfigTemplate } from './te
 
 export type FileResult = 'created' | 'skipped-exists';
 
-/** Never overwrites an existing file — matches packages/react/scripts/postinstall.js's convention. */
+/** Never overwrites an existing file — matches packages/ui/scripts/postinstall.js's convention. */
 function writeFileIfMissing(filePath: string, content: string): FileResult {
   if (fs.existsSync(filePath)) return 'skipped-exists';
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -92,7 +92,7 @@ export function mergeTsconfigJsx(root: string): { status: TsconfigMergeStatus; p
   }
 
   const co = parsed.compilerOptions;
-  if (co && co.jsxImportSource === '@kbach/react' && co.jsx === 'react-jsx') {
+  if (co && co.jsxImportSource === '@kbach/ui' && co.jsx === 'react-jsx') {
     return { status: 'already-set', path: tsconfigPath };
   }
   if (co && ('jsx' in co || 'jsxImportSource' in co)) {
@@ -111,7 +111,7 @@ export function mergeTsconfigJsx(root: string): { status: TsconfigMergeStatus; p
   if (!blockMatch) return { status: 'no-compiler-options-block', path: tsconfigPath };
 
   const insertAt = blockMatch.index + blockMatch[0].length;
-  const insertion = `\n    "jsx": "react-jsx",\n    "jsxImportSource": "@kbach/react",`;
+  const insertion = `\n    "jsx": "react-jsx",\n    "jsxImportSource": "@kbach/ui",`;
   const next = raw.slice(0, insertAt) + insertion + raw.slice(insertAt);
   fs.writeFileSync(tsconfigPath, next, 'utf-8');
   return { status: 'merged', path: tsconfigPath };
@@ -125,7 +125,7 @@ export type GitignoreResult = 'added' | 'already-present' | 'created' | 'no-git-
  * Adds one entry to the project's .gitignore, creating the file if missing —
  * for kbach-types.d.ts, the file the Vite plugin / native's Babel plugin
  * auto-generate at dev time from kbach.config.js's custom colors/spacing (see
- * generateKbachTypesDts() in @kbach/react). Skipped entirely outside a git
+ * generateKbachTypesDts() in @kbach/ui). Skipped entirely outside a git
  * repo (no .git directory found walking up from root) — writing a .gitignore
  * into a project that isn't using git at all wouldn't do anything useful.
  * Idempotent: never duplicates the entry on a second run.

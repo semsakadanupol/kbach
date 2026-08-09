@@ -40,7 +40,7 @@ const _cache = new WeakMap<object, string | null>();
  *
  * ```ts
  * import { Animated } from 'react-native';
- * import { registerWebElement } from '@kbach/react';
+ * import { registerWebElement } from '@kbach/ui';
  * registerWebElement(Animated.View, 'div');
  * ```
  */
@@ -158,7 +158,7 @@ export function getImpliedRNClasses(
   // no-op on web without this. Not folded into the CSS-class-level fix above
   // (core/resolvers/layout.ts's items-center etc.) for the same reason flex-1
   // wasn't: forcing display:flex onto gap's own shared `.gap-2 { }` rule would
-  // fight a `grid gap-2` combo in plain @kbach/react web usage (gap and grid
+  // fight a `grid gap-2` combo in plain @kbach/ui web usage (gap and grid
   // land in different CSS rule-generation groups — see vite-plugin.ts's
   // GROUPS — so whichever rule is emitted later in the stylesheet would win
   // regardless of which the caller actually wrote first).

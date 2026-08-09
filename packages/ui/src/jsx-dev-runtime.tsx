@@ -1,5 +1,5 @@
 /**
- * @kbach/react/jsx-dev-runtime
+ * @kbach/ui/jsx-dev-runtime
  *
  * Development variant of the custom JSX runtime.
  * Babel uses jsxDEV (instead of jsx/jsxs) in dev builds.

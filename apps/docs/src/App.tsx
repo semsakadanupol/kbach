@@ -13,7 +13,7 @@ export function App() {
         <Route path="/web" element={<Web />} />
         <Route path="/cli" element={<Cli />} />
         <Route path="/reference/web" element={<ReferenceWeb />} />
-        {/* @kbach/react's own README/reference now cover React Native/Expo
+        {/* @kbach/ui's own README/reference now cover React Native/Expo
             too (see its "React Native / Expo setup" section) — @kbach/native
             no longer has separate docs to render. Redirects, not removed
             routes, so old bookmarks/links to these paths still land

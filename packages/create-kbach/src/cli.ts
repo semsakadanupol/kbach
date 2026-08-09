@@ -49,12 +49,12 @@ function log(message = ''): void {
 
 // ─── Tier 2 snippets ─────────────────────────────────────────────────────────
 // Printed verbatim, never auto-applied — see the plan's "design principle"
-// for why. Kept in sync by hand with packages/react/README.md; if that
+// for why. Kept in sync by hand with packages/ui/README.md; if that
 // changes, update these too.
 
 function printViteConfigSnippet(): void {
   log('  vite.config.ts — add the Kbach plugin:');
-  log('    import { kbach } from \'@kbach/react/vite\';');
+  log('    import { kbach } from \'@kbach/ui/vite\';');
   log('    export default defineConfig({ plugins: [kbach(), /* your other plugins */] });');
 }
 
@@ -70,7 +70,7 @@ function printKbachCssImportSnippet(relativeCssPath: string): void {
 
 function printWebAppRootSnippet(includeReset: boolean): void {
   log('  Your app root — wrap with ThemeProvider' + (includeReset ? ' + KbachReset' : '') + ':');
-  log(`    import { ThemeProvider${includeReset ? ', KbachReset' : ''} } from '@kbach/react';`);
+  log(`    import { ThemeProvider${includeReset ? ', KbachReset' : ''} } from '@kbach/ui';`);
   log('    export default function Root() {');
   log('      return (');
   log('        <ThemeProvider defaultMode="system">');
@@ -83,7 +83,7 @@ function printWebAppRootSnippet(includeReset: boolean): void {
 
 function printNativeAppRootSnippet(): void {
   log('  Your app root — wrap with ThemeProvider:');
-  log('    import { ThemeProvider } from \'@kbach/react/native\';');
+  log('    import { ThemeProvider } from \'@kbach/ui/native\';');
   log('    export default function App() {');
   log('      return <ThemeProvider defaultMode="system"><AppContent /></ThemeProvider>;');
   log('    }');
@@ -91,7 +91,7 @@ function printNativeAppRootSnippet(): void {
 
 function printBabelMergeSnippet(): void {
   log('  babel.config.js already exists — add these to it by hand:');
-  log('    presets: [ /* ...your existing presets, */ \'@kbach/react/babel\' ]');
+  log('    presets: [ /* ...your existing presets, */ \'@kbach/ui/babel\' ]');
   log('  Then clear the Metro cache: npx expo start --clear');
 }
 
@@ -119,10 +119,10 @@ async function main(): Promise<void> {
 
   const { platform, setup } = await resolveAnswers(info.platform, flags);
   const pm = flags.pm ?? info.packageManager;
-  // @kbach/react works across every platform now — React Native/Expo support
+  // @kbach/ui works across every platform now — React Native/Expo support
   // (ThemeProvider, the Babel preset) lives at its './native' and './babel'
   // subpaths, so there's no longer a separate package to pick between.
-  const pkgName = '@kbach/react';
+  const pkgName = '@kbach/ui';
 
   // Computed once, up front, so the pre-flight summary below and the actual
   // write phase further down agree on exactly the same facts — no re-check
@@ -238,9 +238,9 @@ async function main(): Promise<void> {
     } else if (merge.status === 'conflict') {
       tsconfigNote = `${path.relative(cwd, merge.path!)} already sets "jsx"/"jsxImportSource" to something else — check it manually.`;
     } else if (merge.status === 'no-file') {
-      tsconfigNote = 'No tsconfig.json/tsconfig.app.json found — if this is a TypeScript project, set compilerOptions.jsx="react-jsx" and jsxImportSource="@kbach/react" by hand. JS-only projects need this set via your bundler\'s esbuild/babel JSX options instead.';
+      tsconfigNote = 'No tsconfig.json/tsconfig.app.json found — if this is a TypeScript project, set compilerOptions.jsx="react-jsx" and jsxImportSource="@kbach/ui" by hand. JS-only projects need this set via your bundler\'s esbuild/babel JSX options instead.';
     } else if (merge.status === 'no-compiler-options-block' || merge.status === 'unparseable') {
-      tsconfigNote = `Couldn't safely auto-edit ${path.relative(cwd, merge.path!)} — add "jsx": "react-jsx" and "jsxImportSource": "@kbach/react" under compilerOptions by hand.`;
+      tsconfigNote = `Couldn't safely auto-edit ${path.relative(cwd, merge.path!)} — add "jsx": "react-jsx" and "jsxImportSource": "@kbach/ui" under compilerOptions by hand.`;
     }
   }
 
@@ -265,7 +265,7 @@ async function main(): Promise<void> {
   }
 
   log();
-  log('[kbach] A few things still need a manual edit — see README/kbach-react.md for full detail:');
+  log('[kbach] A few things still need a manual edit — see README/kbach-ui.md for full detail:');
   log();
 
   if (platform === 'web' && setup === 'static') {

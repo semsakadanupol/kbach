@@ -27,7 +27,7 @@ const CLIENT_ENTRIES = ['src/index.ts', 'src/jsx-runtime.tsx', 'src/jsx-dev-runt
 //
 // The core build below only produces one bundled dist/core/index.js (not a
 // file per submodule), so every runtime (non-type-only) import under
-// packages/react/src/*.ts must go through the './core' barrel rather than a
+// packages/ui/src/*.ts must go through the './core' barrel rather than a
 // submodule path directly — esbuild's `external` matches import specifiers
 // literally, and a direct './core/devWarn'-style import would otherwise try
 // to resolve a dist/core/devWarn.js that doesn't exist. (Type-only imports
@@ -91,15 +91,15 @@ export default defineConfig([
     external: ['vite'],
   },
   {
-    // React Native / Expo entry point (@kbach/react/native — see
+    // React Native / Expo entry point (@kbach/ui/native — see
     // src/native/index.ts). CJS-only: package.json's "./native" export routes
     // BOTH "import" and "require" to this same dist/native.js — see
     // NativeThemeProvider.tsx's comment for why a real ESM build would break
     // Metro's require() detection.
     //
-    // '@kbach/react' is marked external (NativeThemeProvider.tsx imports it
+    // '@kbach/ui' is marked external (NativeThemeProvider.tsx imports it
     // by bare specifier, not a relative path) so this bundle reaches
-    // ThemeProvider/ThemeContext via a real require('@kbach/react') —
+    // ThemeProvider/ThemeContext via a real require('@kbach/ui') —
     // resolving to the exact same dist/index.js instance every other
     // consumer gets — instead of esbuild inlining its own private copy of
     // ThemeProvider.tsx/context.tsx, which would split ThemeContext in two.
@@ -112,7 +112,7 @@ export default defineConfig([
     format: ['cjs'],
     dts: true,
     clean: false,
-    external: ['@kbach/react'],
+    external: ['@kbach/ui'],
     banner: { js: "'use client';" },
   },
 ]);

@@ -1,4 +1,4 @@
-# @kbach/react
+# @kbach/ui
 
 Tailwind-like utility classes for React (web). Write `className` strings — a custom JSX runtime resolves them at render time. An optional Vite plugin outputs a static `kbach.css` for zero runtime cost.
 
@@ -13,10 +13,10 @@ Tailwind-like utility classes for React (web). Write `className` strings — a c
 ## Install
 
 ```
-npm install @kbach/react
+npm install @kbach/ui
 ```
 
-[npm package](https://www.npmjs.com/package/@kbach/react)
+[npm package](https://www.npmjs.com/package/@kbach/ui)
 
 ## Setup
 
@@ -27,7 +27,7 @@ One step is always required, then pick **one** of the two setups below — they'
 **tsconfig.json:**
 
 ```json
-{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@kbach/react" } }
+{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@kbach/ui" } }
 ```
 
 That's the only setting needed — Vite, Next.js, and React Router all read it. Don't *also* set `jsxImportSource` on a bundler plugin (e.g. `@vitejs/plugin-react`); one source of truth avoids conflicts.
@@ -50,7 +50,7 @@ Vite only, and the recommended setup for any Vite-based app — a build-time plu
 ```ts
 // vite.config.ts
 import { defineConfig } from 'vite';
-import { kbach } from '@kbach/react/vite';
+import { kbach } from '@kbach/ui/vite';
 
 export default defineConfig({ plugins: [kbach()] });
 ```
@@ -73,7 +73,7 @@ This import is what actually switches the app over to Static CSS — the plugin 
 **3. Wrap your app — no `<KbachReset />` here, `kbach.css` already includes the reset:**
 
 ```jsx
-import { ThemeProvider } from '@kbach/react';
+import { ThemeProvider } from '@kbach/ui';
 
 export default function Root() {
   return <ThemeProvider defaultMode="system"><App /></ThemeProvider>;
@@ -90,7 +90,7 @@ Using a custom `kbach.config.js`? It needs to be wired in **twice** here — onc
 // vite.config.ts
 import { reactRouter } from '@react-router/dev/vite';
 import { defineConfig } from 'vite';
-import { kbach } from '@kbach/react/vite'; // omit if using Runtime setup instead
+import { kbach } from '@kbach/ui/vite'; // omit if using Runtime setup instead
 
 export default defineConfig({ plugins: [kbach(), reactRouter()] });
 ```
@@ -102,7 +102,7 @@ export default defineConfig({ plugins: [kbach(), reactRouter()] });
 Client-side CSS injection — works with any bundler (Vite, webpack, Turbopack, Metro-for-web, …), no build plugin. Next.js always uses this (see [Next.js setup](#nextjs-setup) below for the one extra detail), or use it on Vite if you'd rather not wire up the plugin yet. This is the whole setup:
 
 ```jsx
-import { ThemeProvider, KbachReset } from '@kbach/react';
+import { ThemeProvider, KbachReset } from '@kbach/ui';
 
 export default function Root() {
   return (
@@ -128,7 +128,7 @@ The one Next.js-specific detail: render `<KbachReset />` once in the root App Ro
 
 ```jsx
 // app/layout.tsx
-import { ThemeProvider, KbachReset } from '@kbach/react';
+import { ThemeProvider, KbachReset } from '@kbach/ui';
 
 export default function RootLayout({ children }) {
   return (
@@ -146,11 +146,11 @@ export default function RootLayout({ children }) {
 
 Without `<KbachReset />` there, expect a flash of raw browser defaults (native button border, arrow-less `<select>`, etc.) on first paint until hydration completes. Utility classes beyond the base reset still wait on hydration either way — a known limitation of the runtime-only path (Static CSS isn't available for webpack/Turbopack), not a per-project bug.
 
-`@kbach/react`'s compiled output ships its own `"use client"` directive, so App Router Server Components can use `className`, `styled()`, hooks, `<ThemeProvider>`, and `<KbachReset>` directly — no manual `'use client'` wrapper needed anywhere in your own components.
+`@kbach/ui`'s compiled output ships its own `"use client"` directive, so App Router Server Components can use `className`, `styled()`, hooks, `<ThemeProvider>`, and `<KbachReset>` directly — no manual `'use client'` wrapper needed anywhere in your own components.
 
 ## React Native / Expo setup
 
-Same `npm install @kbach/react` — no separate package. Everything below (API, modifiers, color system) is the same import as web; only setup differs.
+Same `npm install @kbach/ui` — no separate package. Everything below (API, modifiers, color system) is the same import as web; only setup differs.
 
 **1. babel.config.js:**
 
@@ -160,18 +160,18 @@ module.exports = function (api) {
   return {
     presets: [
       'babel-preset-expo',
-      '@kbach/react/babel',
+      '@kbach/ui/babel',
     ],
   };
 };
 ```
 
-Or the one-liner helper: `const { createKbachConfig } = require('@kbach/react/native'); module.exports = createKbachConfig();` — identical result. Merging into an existing config: `withKbachBabel({ presets: [...] })`, also from `@kbach/react/native`. After changing this file, clear the Metro cache: `npx expo start --clear`.
+Or the one-liner helper: `const { createKbachConfig } = require('@kbach/ui/native'); module.exports = createKbachConfig();` — identical result. Merging into an existing config: `withKbachBabel({ presets: [...] })`, also from `@kbach/ui/native`. After changing this file, clear the Metro cache: `npx expo start --clear`.
 
 **2. Wrap your app:**
 
 ```jsx
-import { ThemeProvider } from '@kbach/react/native';
+import { ThemeProvider } from '@kbach/ui/native';
 
 export default function App() {
   return (
@@ -182,7 +182,7 @@ export default function App() {
 }
 ```
 
-This is a native-aware `ThemeProvider` — reads `useColorScheme()`/`useWindowDimensions()` automatically, no extra props needed. Import it from `@kbach/react/native`, not the plain `ThemeProvider` from `@kbach/react` — that one has no automatic RN wiring (colors scheme/window width would need to be passed in by hand).
+This is a native-aware `ThemeProvider` — reads `useColorScheme()`/`useWindowDimensions()` automatically, no extra props needed. Import it from `@kbach/ui/native`, not the plain `ThemeProvider` from `@kbach/ui` — that one has no automatic RN wiring (colors scheme/window width would need to be passed in by hand).
 
 ### Platform differences
 
@@ -199,17 +199,17 @@ CSS inheritance doesn't exist in React Native — apply font utilities to each `
 
 ### Expo Web / React Native Web
 
-In a browser (Expo Web, Metro web), `@kbach/react` switches to the same CSS-class strategy as plain web automatically:
+In a browser (Expo Web, Metro web), `@kbach/ui` switches to the same CSS-class strategy as plain web automatically:
 
 - RN components substitute to HTML: `View`/`ScrollView`→`div`, `Text`→`span`, `TextInput`→`input`/`textarea`, `Image`→`img`, `Pressable`/`TouchableOpacity`→`div[role=button]`
 - RN-only props (`onChangeText`, `source`, `secureTextEntry`, …) map to HTML equivalents
 - Register more: `registerWebElement(Animated.View, 'div')`
-- Recommended: use the Vite plugin same as [Static CSS setup](#static-css-setup) above — `import { kbach } from '@kbach/react/vite'` — and import `kbach.css` in your entry file, for zero runtime cost on the web target too
+- Recommended: use the Vite plugin same as [Static CSS setup](#static-css-setup) above — `import { kbach } from '@kbach/ui/vite'` — and import `kbach.css` in your entry file, for zero runtime cost on the web target too
 - Not using the Vite plugin (the common case for Expo/Metro web, which has no Vite build step)? Render `<KbachReset />` once near your root — e.g. Expo Router's root `app/_layout.tsx`, inside `<ThemeProvider>`:
 
   ```jsx
-  import { KbachReset } from '@kbach/react';
-  import { ThemeProvider } from '@kbach/react/native';
+  import { KbachReset } from '@kbach/ui';
+  import { ThemeProvider } from '@kbach/ui/native';
 
   export default function RootLayout() {
     return (
@@ -257,7 +257,7 @@ In a browser (Expo Web, Metro web), `@kbach/react` switches to the same CSS-clas
 ### styled(Component, classes)
 
 ```jsx
-import { styled } from '@kbach/react';
+import { styled } from '@kbach/ui';
 
 const Card = styled('div', 'bg-white dark:bg-gray-9 rounded-2xl p-6 shadow');
 const Button = styled('button', 'bg-blue-7 hover:bg-blue-8 rounded-xl px-6 py-3');
@@ -272,7 +272,7 @@ Extra classes at use time via `kb` merge with the base classes.
 ### cx(...classes)
 
 ```jsx
-import { cx } from '@kbach/react';
+import { cx } from '@kbach/ui';
 
 <div className={cx('p-4 rounded-xl', isSelected && 'border-2 border-blue-6', isDisabled && 'opacity-50')} />
 ```
@@ -329,7 +329,7 @@ colors.alpha('#ff6b35', 60) // 'rgba(255,107,53,0.6)'
 `useColors()` and `useSpacing()` are typed against the built-in theme by default (`DefaultColorName`/`DefaultSpacingKey`), so TypeScript autocompletes real color/spacing names and flags a typo (`colors.blu`, `spacing.ful`) as an error — no setup needed if you're on the default theme.
 
 ```ts
-import { useSpacing } from '@kbach/react';
+import { useSpacing } from '@kbach/ui';
 
 const spacing = useSpacing();
 spacing[4]      // 16
@@ -340,7 +340,7 @@ spacing['1/2']  // '50%'
 A customized `kbach.config.js` isn't visible to TypeScript — it's a plain `.js` file loaded at runtime, not a statically-analyzed module — so a project with extra colors or spacing keys needs to widen the type parameter by hand:
 
 ```ts
-import { useColors, type DefaultColorName } from '@kbach/react';
+import { useColors, type DefaultColorName } from '@kbach/ui';
 
 const colors = useColors<DefaultColorName | 'brand'>();
 colors.brand[6] // now type-checks
@@ -444,7 +444,7 @@ module.exports = {
 - **Runtime** — dark mode strategy, `useColors()`, custom `@keyframes`/`animation`, and (for SSR) the default-font fallback rendered before your stylesheet takes over. Needed by **both** [Runtime setup](#runtime-setup) and [Static CSS setup](#static-css-setup) — pass it to `ThemeProvider`:
 
   ```jsx
-  import { ThemeProvider } from '@kbach/react';
+  import { ThemeProvider } from '@kbach/ui';
   import kbachConfig from '../kbach.config';
 
   <ThemeProvider defaultMode="system" config={kbachConfig}>
@@ -458,7 +458,7 @@ module.exports = {
 
   ```ts
   // vite.config.ts
-  import { kbach } from '@kbach/react/vite';
+  import { kbach } from '@kbach/ui/vite';
   import kbachConfig from './kbach.config';
 
   export default defineConfig({ plugins: [kbach(kbachConfig)] });
@@ -468,6 +468,6 @@ Skipping the runtime one is an easy mistake under Static CSS setup specifically 
 
 ## Full reference
 
-[kbach-react.md](./kbach-react.md) — complete utility list, every modifier, all config options, covers web and React Native/Expo.
+[kbach-ui.md](./kbach-ui.md) — complete utility list, every modifier, all config options, covers web and React Native/Expo.
 
-`@kbach/native` is deprecated and no longer maintained — its last published npm version is frozen as a compatibility shim re-exporting this package. Install `@kbach/react` directly for new projects.
+`@kbach/native` is deprecated and no longer maintained — its last published npm version is frozen as a compatibility shim re-exporting this package. Install `@kbach/ui` directly for new projects.

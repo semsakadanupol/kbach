@@ -6,7 +6,7 @@
  * bundle core/ separately into each of them (esbuild doesn't support
  * code-splitting CJS output). core/ is now built as its own dist/core/
  * entry and required externally by all three (see
- * packages/react/tsup.config.ts), so there's only ever one real instance of
+ * packages/ui/tsup.config.ts), so there's only ever one real instance of
  * this module to begin with — a plain module-level object is enough.
  */
 

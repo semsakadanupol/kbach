@@ -8,15 +8,15 @@ import type { Components } from 'react-markdown';
 import { collectHeadings, TableOfContents, type TocHeading } from './TableOfContents';
 
 // Cross-references inside the SOURCE .md files point at sibling .md files
-// (e.g. packages/react/README.md links to "./kbach-react.md") — those paths
+// (e.g. packages/ui/README.md links to "./kbach-ui.md") — those paths
 // don't exist as routes on the site. Mapped here to the actual route that
 // renders each target file, so in-doc navigation keeps working instead of
 // silently 404ing. Anchor-only links (#some-heading) need no rewrite —
 // rehype-slug below generates the same ids GitHub does, which is what these
 // links were written against.
 const LINK_REWRITES: Record<string, string> = {
-  './kbach-react.md': '/reference/web',
-  'kbach-react.md': '/reference/web',
+  './kbach-ui.md': '/reference/web',
+  'kbach-ui.md': '/reference/web',
   '../react/README.md': '/web',
 };
 

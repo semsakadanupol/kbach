@@ -11,8 +11,8 @@ import type { ThemeSpacing, DefaultSpacingKey } from './core';
  * call site:
  *
  * ```ts
- * import '@kbach/react'; // or '@kbach/native'
- * declare module '@kbach/react' {
+ * import '@kbach/ui'; // or '@kbach/native'
+ * declare module '@kbach/ui' {
  *   interface KbachCustomSpacing {
  *     18: true; // value doesn't matter — only the key is read (see SpacingAPI)
  *   }

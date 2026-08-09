@@ -165,7 +165,7 @@ function buildColorVarMap(
       // resolveColor()/withOpacityVar() already converted the hex to decimal channels by
       // the time this function ever sees the CSS text, so the hex-scan above can never
       // find these — they need their own scan for the "r,g,b," triplet exactly as
-      // withOpacityVar() emits it (packages/react/src/core/utilities.ts), anchored to
+      // withOpacityVar() emits it (packages/ui/src/core/utilities.ts), anchored to
       // "rgba(" so an unrelated color's channel numbers can never accidentally match
       // (each rgba( only ever starts one specific color's triplet).
       const rgb = parseHexRgb(val);
@@ -844,7 +844,7 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
     name: 'kbach',
     enforce: 'pre',
 
-    // Without this, Vite only discovers @kbach/react needs pre-bundling once it
+    // Without this, Vite only discovers @kbach/ui needs pre-bundling once it
     // actually crawls into an import of it — typically the FIRST page load — and
     // has to stop, optimize it, and force a full reload mid-render. That reload
     // can land in the middle of a render pass (React hooks resolving against a
@@ -855,7 +855,7 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
     config() {
       return {
         optimizeDeps: {
-          include: ['@kbach/react', '@kbach/react/jsx-runtime', '@kbach/react/jsx-dev-runtime'],
+          include: ['@kbach/ui', '@kbach/ui/jsx-runtime', '@kbach/ui/jsx-dev-runtime'],
         },
       };
     },
@@ -903,7 +903,7 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
       // line in the dev server's own terminal output is the trail back to why.
       warn(`disableRuntimeCSS() auto-triggered by an import in ${id.replace(/\\/g, '/')}`);
       return {
-        code: `import { disableRuntimeCSS } from '@kbach/react';\ndisableRuntimeCSS();\n${code}`,
+        code: `import { disableRuntimeCSS } from '@kbach/ui';\ndisableRuntimeCSS();\n${code}`,
         map: null,
       };
     },

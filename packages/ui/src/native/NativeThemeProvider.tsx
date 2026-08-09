@@ -12,14 +12,14 @@ import type { ThemeProviderProps } from '../ThemeProvider';
  * hook name ensures the React Compiler and all linters handle it correctly, and
  * useSyncExternalStore inside the hook properly subscribes to Appearance events.
  *
- * Exported as `ThemeProvider` from @kbach/react/native — no API change for
+ * Exported as `ThemeProvider` from @kbach/ui/native — no API change for
  * existing @kbach/native users (that package now re-exports this).
  *
  * `react-native` is required here lazily (inside the function body) rather
  * than via a top-level `import`. native/index.ts bundles this file together
  * with setup.ts's Node-only helpers (createKbachConfig, withKbach,
  * withKbachBabel), which babel.config.js loads by calling
- * `require('@kbach/react/native')` in a plain Node.js process — no Metro, no
+ * `require('@kbach/ui/native')` in a plain Node.js process — no Metro, no
  * Babel/Flow transform for react-native's own source. A top-level import
  * would make Node eagerly require the real `react-native` package just to
  * read createKbachConfig off the module, which crashes immediately
@@ -39,17 +39,17 @@ import type { ThemeProviderProps } from '../ThemeProvider';
  * CJS build's plain `require('react-native')` call doesn't have this
  * problem, so both "import" and "require" conditions point at dist/native.js.
  *
- * '@kbach/react' itself is required the same lazy way, for a different
+ * '@kbach/ui' itself is required the same lazy way, for a different
  * reason: this file is bundled into its own dist/native.js (see
  * tsup.config.ts), separate from dist/index.js/.mjs. A top-level `import`
  * would make esbuild inline a SECOND, independent copy of
  * ThemeProvider.tsx/context.tsx (its own createContext() call) into
- * dist/native.js, splitting ThemeContext between "@kbach/react" and
- * "@kbach/react/native" consumers — require('@kbach/react') instead resolves
+ * dist/native.js, splitting ThemeContext between "@kbach/ui" and
+ * "@kbach/ui/native" consumers — require('@kbach/ui') instead resolves
  * through Node/npm workspaces' self-reference and tsup's default of treating
  * anything outside the entry's own source tree as external, reaching the
  * exact same dist/index.js instance every other consumer gets (verified by
- * building and grepping dist/native.js for a literal require("@kbach/react")
+ * building and grepping dist/native.js for a literal require("@kbach/ui")
  * rather than an inlined copy). `typeof import(...)` for the type would hit
  * the same self-reference resolution tsup's DTS step can't handle during its
  * own package's build (unlike esbuild's JS bundling, which resolves it
@@ -58,7 +58,7 @@ import type { ThemeProviderProps } from '../ThemeProvider';
  */
 export function NativeThemeProvider(props: ThemeProviderProps): React.JSX.Element {
   const { useColorScheme, useWindowDimensions } = require('react-native') as typeof import('react-native');
-  const { ThemeProvider } = require('@kbach/react') as {
+  const { ThemeProvider } = require('@kbach/ui') as {
     ThemeProvider: React.ComponentType<ThemeProviderProps>;
   };
   const raw = useColorScheme();

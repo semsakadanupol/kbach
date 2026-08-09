@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { useTheme } from '@kbach/react';
+import { useTheme } from '@kbach/ui';
 
 const NAV_GROUPS = [
   {

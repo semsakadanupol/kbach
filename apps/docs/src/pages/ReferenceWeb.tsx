@@ -1,4 +1,4 @@
-import content from '../../../../packages/react/kbach-react.md?raw';
+import content from '../../../../packages/ui/kbach-ui.md?raw';
 import { MarkdownPage } from '../components/MarkdownPage';
 
 export function ReferenceWeb() {

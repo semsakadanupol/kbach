@@ -1,4 +1,4 @@
-/** @type {import('@kbach/react').FrameworkConfig} */
+/** @type {import('@kbach/ui').FrameworkConfig} */
 module.exports = {
   // 'attribute' adds data-theme attr on <html>, 'media' uses prefers-color-scheme, 'class' uses .dark class
   darkMode: 'attribute',

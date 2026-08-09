@@ -1,5 +1,5 @@
 /**
- * @kbach/react/jsx-runtime
+ * @kbach/ui/jsx-runtime
  *
  * Drop-in replacement for react/jsx-runtime.
  * Intercepts `className` and `kb` props on EVERY JSX element — React Native

@@ -36,21 +36,21 @@ style={{ backgroundColor: '#fff', padding: 16 }}   <- native
 className="bg-white dark:bg-gray-10 p-4" + <style> <- web
 ```
 
-`@kbach/react`'s runtime output ships its own `"use client"` directive, so Next.js App Router Server Components can use `className`, `styled()`, hooks, and `<ThemeProvider>` without adding `"use client"` themselves.
+`@kbach/ui`'s runtime output ships its own `"use client"` directive, so Next.js App Router Server Components can use `className`, `styled()`, hooks, and `<ThemeProvider>` without adding `"use client"` themselves.
 
 ---
 
 ## Setup
 
-One package, `@kbach/react`, covers web, React Native, and Expo:
+One package, `@kbach/ui`, covers web, React Native, and Expo:
 
 ```
-npm install @kbach/react
+npm install @kbach/ui
 ```
 
-[README](packages/react/README.md) · [npmjs.com/package/@kbach/react](https://www.npmjs.com/package/@kbach/react) -- has the full install and configuration steps for both platforms, including the React Native/Expo section.
+[README](packages/ui/README.md) · [npmjs.com/package/@kbach/ui](https://www.npmjs.com/package/@kbach/ui) -- has the full install and configuration steps for both platforms, including the React Native/Expo section.
 
-`@kbach/native` is deprecated and no longer maintained in this repo -- it's frozen on npm at its last published version (0.6.51), which re-exports `@kbach/react` for existing installs. Migrating: swap `@kbach/native` imports for `@kbach/react` (`ThemeProvider` moves to `@kbach/react/native`, the Babel preset to `@kbach/react/babel`) -- see the Next.js/React Native section of [the README](packages/react/README.md).
+`@kbach/native` is deprecated and no longer maintained in this repo -- it's frozen on npm at its last published version (0.6.51), which re-exports `@kbach/ui` for existing installs. Migrating: swap `@kbach/native` imports for `@kbach/ui` (`ThemeProvider` moves to `@kbach/ui/native`, the Babel preset to `@kbach/ui/babel`) -- see the Next.js/React Native section of [the README](packages/ui/README.md).
 
 ---
 
@@ -78,7 +78,7 @@ Wrap your entire app once. Manages light/dark/system mode, persists the choice, 
 Access and control the theme from any component inside `ThemeProvider`.
 
 ```tsx
-import { useTheme } from '@kbach/react'; // same import on web and native
+import { useTheme } from '@kbach/ui'; // same import on web and native
 
 function Header() {
   const { mode, resolvedMode, isDark, setMode, toggle } = useTheme();
@@ -108,7 +108,7 @@ function Header() {
 Shorthand hook when you only need the dark-mode boolean — avoids destructuring `useTheme()`.
 
 ```tsx
-import { useIsDark } from '@kbach/react';
+import { useIsDark } from '@kbach/ui';
 
 const isDark = useIsDark();
 ```
@@ -118,7 +118,7 @@ const isDark = useIsDark();
 Returns the active theme color palette as a smart proxy. Values match exactly what `bg-`, `text-`, `border-`, and other color utilities resolve to.
 
 ```tsx
-import { useColors } from '@kbach/react';
+import { useColors } from '@kbach/ui';
 
 const colors = useColors();
 
@@ -164,7 +164,7 @@ The primary way to style. Works on any HTML element or React Native component vi
 Create a pre-styled component from any base component. Handles interaction states automatically.
 
 ```tsx
-import { styled } from '@kbach/react';
+import { styled } from '@kbach/ui';
 import { View, Text, TouchableOpacity, TextInput } from 'react-native';
 
 const Card = styled(View, 'bg-white dark:bg-gray-9 rounded-2xl p-6 shadow');
@@ -195,7 +195,7 @@ Pass additional classes at use time with the `kb` prop:
 Resolve classes imperatively inside a component. Useful when you need a style object for the `style` prop.
 
 ```tsx
-import { useStyles } from '@kbach/react';
+import { useStyles } from '@kbach/ui';
 import { View, Text } from 'react-native';
 
 function Badge() {
@@ -216,7 +216,7 @@ Resolve classes outside of a component, for use in `StyleSheet.create()` or stat
 
 ```tsx
 import { StyleSheet } from 'react-native';
-import { kb } from '@kbach/react';
+import { kb } from '@kbach/ui';
 
 const styles = StyleSheet.create({
   container: kb('flex-1 bg-white p-4') as object,
@@ -229,7 +229,7 @@ const styles = StyleSheet.create({
 Conditionally join class names. Falsy values are safely ignored.
 
 ```tsx
-import { cx } from '@kbach/react';
+import { cx } from '@kbach/ui';
 
 <View className={cx(
   'p-4 rounded-xl',
@@ -394,7 +394,7 @@ module.exports = {
 
 ```tsx
 // src/main.tsx (or index.tsx) — import BEFORE anything renders
-import { updateConfig } from '@kbach/react';
+import { updateConfig } from '@kbach/ui';
 import kbachConfig from '../kbach.config.js';
 
 updateConfig(kbachConfig);
@@ -416,12 +416,12 @@ import kbachConfig from '../kbach.config.js';
 
 ```
 packages/
-  react         -- @kbach/react: core engine, components, hooks, JSX runtime,
+  react         -- @kbach/ui: core engine, components, hooks, JSX runtime,
                    Vite plugin (web) and Babel preset/Metro setup (native) --
                    the one package for both platforms
 ```
 
-`@kbach/native` (React Native/Expo support before it merged into `@kbach/react`) is deprecated and no longer in this repo — its last published version stays on npm as a compatibility shim. See [Setup](#setup) above.
+`@kbach/native` (React Native/Expo support before it merged into `@kbach/ui`) is deprecated and no longer in this repo — its last published version stays on npm as a compatibility shim. See [Setup](#setup) above.
 
 ### Scripts
 
@@ -436,6 +436,6 @@ npm run clean   # delete all dist/ folders and node_modules
 ### Publishing
 
 ```bash
-npm run publish:react   # build @kbach/react, bump patch, publish @kbach/react
+npm run publish:react   # build @kbach/ui, bump patch, publish @kbach/ui
 npm run publish:all     # build everything, bump patch, publish every non-private workspace
 ```

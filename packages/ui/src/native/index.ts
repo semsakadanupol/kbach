@@ -1,4 +1,4 @@
-// React Native / Expo entry point — @kbach/react/native.
+// React Native / Expo entry point — @kbach/ui/native.
 //
 // Separate from the main index.ts barrel (not re-exported there) because
 // setup.ts is Node-only build tooling (Metro/Babel config generators): pulling

@@ -21,21 +21,31 @@ function exitOnCancel(): never {
 }
 
 /**
- * Shown right before the confirm prompt so "Proceed?" is an informed yes/no,
- * not a blind one — cli.ts builds `summaryLines` from the actual platform/
- * setup/pm choices and real file-existence checks in the target directory.
- * Skipped entirely under --yes (nothing to confirm unattended).
+ * Prints the plan as context — never a confirmation gate itself. Actual
+ * permission is per-action (see confirmAction below): declining one file
+ * doesn't block the others, which a single blanket "Proceed?" over the
+ * whole batch couldn't do. Skipped entirely under --yes.
  */
-export async function confirmPlan(summaryLines: string[]): Promise<void> {
-  console.log('[kbach] This will, in the current directory:');
+export function printPlan(summaryLines: string[]): void {
+  console.log('[kbach] Here\'s what create-kbach found, and what it may do:');
   for (const line of summaryLines) console.log(`  • ${line}`);
   console.log();
+}
 
+/**
+ * Per-action y/n confirmation — asked individually right before each file
+ * create/change (kbach.config.js, babel.config.js, kbach.css,
+ * tsconfig.json), so declining one doesn't block the others. Always true
+ * under --yes (nothing to confirm unattended). Ctrl+C during a prompt still
+ * exits cleanly via exitOnCancel, matching every other prompts() call here.
+ */
+export async function confirmAction(message: string, flags: CliFlags): Promise<boolean> {
+  if (flags.yes) return true;
   const res = await prompts(
-    { type: 'confirm', name: 'confirmed', message: 'Proceed?', initial: true },
+    { type: 'confirm', name: 'confirmed', message, initial: true },
     { onCancel: exitOnCancel },
   );
-  if (!res.confirmed) exitOnCancel();
+  return !!res.confirmed;
 }
 
 /**

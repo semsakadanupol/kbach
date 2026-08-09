@@ -43,13 +43,13 @@ export function writeBabelConfig(root: string, preset: string): { result: FileRe
 // unexpected shape just means falling back to Tier 2 (print instructions),
 // not a corrupted write.
 
-export type TsconfigMergeStatus =
-  | 'merged'
-  | 'already-set'
-  | 'no-file'
-  | 'unparseable'
-  | 'conflict'
-  | 'no-compiler-options-block';
+export type TsconfigCheckResult =
+  | { status: 'mergeable'; path: string; raw: string; insertAt: number; insertion: string }
+  | { status: 'already-set'; path: string }
+  | { status: 'no-file' }
+  | { status: 'unparseable'; path: string }
+  | { status: 'conflict'; path: string }
+  | { status: 'no-compiler-options-block'; path: string };
 
 // Best-effort only — used purely to decide whether the splice below is safe,
 // never to regenerate the file, so a string like "//" inside a path value
@@ -78,7 +78,13 @@ function findTsconfigPath(root: string): string | null {
   return null;
 }
 
-export function mergeTsconfigJsx(root: string): { status: TsconfigMergeStatus; path?: string } {
+/**
+ * Read-only — figures out whether (and how) tsconfig.json's jsx/jsxImportSource
+ * would be merged in, without writing anything. Split from the actual write
+ * (applyTsconfigJsxMerge below) so the caller can ask for permission in
+ * between: this computes the exact splice, that one performs it verbatim.
+ */
+export function checkTsconfigJsxMerge(root: string): TsconfigCheckResult {
   const tsconfigPath = findTsconfigPath(root);
   if (!tsconfigPath) return { status: 'no-file' };
 
@@ -112,9 +118,13 @@ export function mergeTsconfigJsx(root: string): { status: TsconfigMergeStatus; p
 
   const insertAt = blockMatch.index + blockMatch[0].length;
   const insertion = `\n    "jsx": "react-jsx",\n    "jsxImportSource": "@kbach/ui",`;
-  const next = raw.slice(0, insertAt) + insertion + raw.slice(insertAt);
-  fs.writeFileSync(tsconfigPath, next, 'utf-8');
-  return { status: 'merged', path: tsconfigPath };
+  return { status: 'mergeable', path: tsconfigPath, raw, insertAt, insertion };
+}
+
+/** Performs the splice a 'mergeable' checkTsconfigJsxMerge() result already computed. */
+export function applyTsconfigJsxMerge(check: Extract<TsconfigCheckResult, { status: 'mergeable' }>): void {
+  const next = check.raw.slice(0, check.insertAt) + check.insertion + check.raw.slice(check.insertAt);
+  fs.writeFileSync(check.path, next, 'utf-8');
 }
 
 // ─── .gitignore entry ───────────────────────────────────────────────────────
@@ -169,4 +179,22 @@ export function installPackage(pm: PackageManager, packageName: string, cwd: str
   const [cmd, baseArgs] = INSTALL_COMMAND[pm];
   const result = spawnSync(cmd, [...baseArgs, packageName], { cwd, stdio: 'inherit', shell: process.platform === 'win32' });
   return result.status === 0;
+}
+
+/**
+ * Installs an Expo-ecosystem package (babel-preset-expo, etc.) via
+ * `npx expo install` instead of the user's plain package manager. Expo SDK
+ * releases pin compatible versions of packages like babel-preset-expo (SDK
+ * 52 wants babel-preset-expo ^12, SDK 51 wants ^11, …) — `expo install`
+ * reads the project's installed `expo` version and resolves the matching
+ * one from Expo's own compatibility manifest. A plain `npm install` grabs
+ * latest regardless of SDK version, which can silently mismatch and break
+ * Metro. Falls back to the user's package manager if this fails (offline,
+ * `expo` CLI unavailable, package not in Expo's manifest) so an Expo-install
+ * hiccup never blocks setup entirely.
+ */
+export function installExpoPackage(packageName: string, cwd: string, pm: PackageManager): boolean {
+  const result = spawnSync('npx', ['expo', 'install', packageName], { cwd, stdio: 'inherit', shell: process.platform === 'win32' });
+  if (result.status === 0) return true;
+  return installPackage(pm, packageName, cwd);
 }

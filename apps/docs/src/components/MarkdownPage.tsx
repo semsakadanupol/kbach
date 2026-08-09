@@ -17,7 +17,7 @@ import { collectHeadings, TableOfContents, type TocHeading } from './TableOfCont
 const LINK_REWRITES: Record<string, string> = {
   './kbach-ui.md': '/reference/web',
   'kbach-ui.md': '/reference/web',
-  '../react/README.md': '/web',
+  '../ui/README.md': '/web',
 };
 
 function rewriteHref(href: string): string | null {

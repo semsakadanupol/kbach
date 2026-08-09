@@ -470,4 +470,4 @@ Skipping the runtime one is an easy mistake under Static CSS setup specifically 
 
 [kbach-react.md](./kbach-react.md) — complete utility list, every modifier, all config options, covers web and React Native/Expo.
 
-`@kbach/native` still exists on npm but is now just a deprecated compatibility shim re-exporting this package — install `@kbach/react` directly for new projects.
+`@kbach/native` is deprecated and no longer maintained — its last published npm version is frozen as a compatibility shim re-exporting this package. Install `@kbach/react` directly for new projects.

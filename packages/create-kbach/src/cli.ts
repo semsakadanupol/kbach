@@ -49,8 +49,8 @@ function log(message = ''): void {
 
 // ─── Tier 2 snippets ─────────────────────────────────────────────────────────
 // Printed verbatim, never auto-applied — see the plan's "design principle"
-// for why. Kept in sync by hand with packages/react/README.md and
-// packages/native/README.md; if those change, update these too.
+// for why. Kept in sync by hand with packages/react/README.md; if that
+// changes, update these too.
 
 function printViteConfigSnippet(): void {
   log('  vite.config.ts — add the Kbach plugin:');

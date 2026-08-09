@@ -41,10 +41,10 @@ export function Home() {
 
       <div className="flex gap-3 mb-10">
         <Link to="/web" className="bg-blue-6 hover:bg-blue-7 text-white font-semibold rounded-lg px-5 py-2.5 transition-colors">
-          Web setup
+          Get started
         </Link>
-        <Link to="/native" className="bg-gray-2 dark:bg-gray-9 hover:bg-gray-3 dark:hover:bg-gray-8 text-gray-10 dark:text-white font-semibold rounded-lg px-5 py-2.5 transition-colors">
-          Native setup
+        <Link to="/web#react-native--expo-setup" className="bg-gray-2 dark:bg-gray-9 hover:bg-gray-3 dark:hover:bg-gray-8 text-gray-10 dark:text-white font-semibold rounded-lg px-5 py-2.5 transition-colors">
+          React Native / Expo setup
         </Link>
       </div>
 

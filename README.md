@@ -50,7 +50,7 @@ npm install @kbach/react
 
 [README](packages/react/README.md) · [npmjs.com/package/@kbach/react](https://www.npmjs.com/package/@kbach/react) -- has the full install and configuration steps for both platforms, including the React Native/Expo section.
 
-`@kbach/native` still exists on npm but is now a deprecated compatibility shim re-exporting `@kbach/react` -- see [its README](packages/native/README.md) if you're migrating an existing install.
+`@kbach/native` is deprecated and no longer maintained in this repo -- it's frozen on npm at its last published version (0.6.51), which re-exports `@kbach/react` for existing installs. Migrating: swap `@kbach/native` imports for `@kbach/react` (`ThemeProvider` moves to `@kbach/react/native`, the Babel preset to `@kbach/react/babel`) -- see the Next.js/React Native section of [the README](packages/react/README.md).
 
 ---
 
@@ -419,8 +419,9 @@ packages/
   react         -- @kbach/react: core engine, components, hooks, JSX runtime,
                    Vite plugin (web) and Babel preset/Metro setup (native) --
                    the one package for both platforms
-  native        -- @kbach/native: deprecated compatibility shim, re-exports @kbach/react
 ```
+
+`@kbach/native` (React Native/Expo support before it merged into `@kbach/react`) is deprecated and no longer in this repo — its last published version stays on npm as a compatibility shim. See [Setup](#setup) above.
 
 ### Scripts
 
@@ -434,13 +435,7 @@ npm run clean   # delete all dist/ folders and node_modules
 
 ### Publishing
 
-`@kbach/react` and `@kbach/native` are always version-locked — every publish script
-bumps both packages' version in lockstep (via `npm version patch --workspaces`),
-even when only one of them is actually uploaded to npm, so the two `package.json`
-versions never drift apart.
-
 ```bash
-npm run publish:react   # bump both, build @kbach/react, publish @kbach/react only
-npm run publish:native  # bump both, build @kbach/native (and its @kbach/react dependency), publish @kbach/native only
-npm run publish:all     # bump both, build everything, publish both
+npm run publish:react   # build @kbach/react, bump patch, publish @kbach/react
+npm run publish:all     # build everything, bump patch, publish every non-private workspace
 ```

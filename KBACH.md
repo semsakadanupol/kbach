@@ -4,7 +4,7 @@ Kbach is a Tailwind-like utility CSS framework for React (web) and React Native.
 
 One package, `@kbach/react`, covers both platforms — React web, React Native, and Expo (Expo Go, Expo web, and native builds). The React Native/Expo pieces (a native-aware `ThemeProvider`, the Babel preset, Metro/Babel config helpers) live at the `@kbach/react/native` and `@kbach/react/babel` subpaths; everything else is the same import regardless of platform.
 
-`@kbach/native` still exists on npm but is now just a deprecated compatibility shim re-exporting `@kbach/react` — new setups should install `@kbach/react` directly (see below).
+`@kbach/native` is deprecated and no longer maintained — its last published npm version stays available as a compatibility shim re-exporting `@kbach/react`, but new setups should install `@kbach/react` directly (see below).
 
 ---
 
@@ -1041,4 +1041,4 @@ clearCache();
 
 ## Package Versions
 - `@kbach/react`: see `packages/react/package.json` — the one package for web, React Native, and Expo
-- `@kbach/native`: see `packages/native/package.json` — deprecated compatibility shim, re-exports `@kbach/react`
+- `@kbach/native`: deprecated, no longer in this repo — frozen at its last published npm version (compatibility shim re-exporting `@kbach/react`)

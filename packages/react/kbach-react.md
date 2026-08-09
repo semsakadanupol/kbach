@@ -72,7 +72,7 @@ export default { plugins: [kbach(), reactRouter()] };
 Default scan dirs include `app/`. Library mode (client-only, no meta-framework Vite plugin involved) needs no special handling beyond the standard Vite setup above.
 
 ### React Native / Expo
-Same `npm install @kbach/react` — no separate package. `@kbach/native` still exists but is now a deprecated compatibility shim that re-exports this package.
+Same `npm install @kbach/react` — no separate package. `@kbach/native` is deprecated and no longer maintained; its last published version is frozen as a compatibility shim re-exporting this package.
 
 ```js
 // babel.config.js

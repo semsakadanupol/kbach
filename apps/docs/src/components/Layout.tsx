@@ -7,16 +7,14 @@ const NAV_GROUPS = [
     label: 'Guides',
     links: [
       { to: '/', label: 'Home', end: true },
-      { to: '/web', label: 'Web setup' },
-      { to: '/native', label: 'Native setup' },
+      { to: '/web', label: 'Setup' },
       { to: '/cli', label: 'create-kbach CLI' },
     ],
   },
   {
     label: 'Reference',
     links: [
-      { to: '/reference/web', label: 'Reference — web' },
-      { to: '/reference/native', label: 'Reference — native' },
+      { to: '/reference/web', label: 'Reference' },
     ],
   },
 ];

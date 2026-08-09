@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSlug from 'rehype-slug';
 import rehypeHighlight from 'rehype-highlight';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import type { Components } from 'react-markdown';
 import { collectHeadings, TableOfContents, type TocHeading } from './TableOfContents';
 
@@ -17,10 +17,7 @@ import { collectHeadings, TableOfContents, type TocHeading } from './TableOfCont
 const LINK_REWRITES: Record<string, string> = {
   './kbach-react.md': '/reference/web',
   'kbach-react.md': '/reference/web',
-  './kbach-native.md': '/reference/native',
-  'kbach-native.md': '/reference/native',
   '../react/README.md': '/web',
-  '../native/README.md': '/native',
 };
 
 function rewriteHref(href: string): string | null {
@@ -108,6 +105,7 @@ const components: Components = {
 export function MarkdownPage({ content }: { content: string }) {
   const articleRef = useRef<HTMLDivElement>(null);
   const [headings, setHeadings] = useState<TocHeading[]>([]);
+  const { hash } = useLocation();
 
   // Re-scan after every render triggered by a new `content` — rehype-slug's
   // ids only exist in the committed DOM, so this can't run any earlier than
@@ -116,6 +114,19 @@ export function MarkdownPage({ content }: { content: string }) {
     if (!articleRef.current) return;
     setHeadings(collectHeadings(articleRef.current));
   }, [content]);
+
+  // Browsers only auto-scroll to a URL hash on the page's OWN initial load,
+  // not on a client-side route change into a page that already has that
+  // hash (e.g. a <Link to="/web#some-heading"> from a different route) —
+  // react-router doesn't do this either without the data-router APIs'
+  // <ScrollRestoration>, which this app doesn't use. Same content-dependent
+  // timing as the heading scan above: the target id doesn't exist until
+  // rehype-slug's output is in the DOM.
+  useEffect(() => {
+    if (!hash) return;
+    const target = document.getElementById(hash.slice(1));
+    target?.scrollIntoView();
+  }, [hash, content]);
 
   return (
     <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_16rem] xl:gap-12">

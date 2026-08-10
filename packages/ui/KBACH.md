@@ -32,7 +32,7 @@ export default { plugins: [react({ jsxImportSource: '@kbach/ui' })] };
 import { ThemeProvider, KbachReset } from '@kbach/ui';
 <ThemeProvider defaultMode="system"><KbachReset /><App /></ThemeProvider>
 ```
-`<KbachReset />` renders Kbach's base browser-default reset (borderless button/input, visible checkbox/radio, no arrow-less `<select>`, `a`/`h1-h6`/`p`/`ul`/`ol`/`img` normalized, etc.) as a real `<style>` tag — needed for SSR under runtime-only setups (no JS runs server-side, but this is just JSX so it still renders), a no-op-but-harmless nice-to-have for plain CSR. Skip it if using static `kbach.css` (below) — that file already includes the same reset, and the runtime injector auto-detects `<KbachReset />` and skips re-adding it either way, so having both is harmless too.
+`<KbachReset />` renders Kbach's base browser-default reset (borderless button/input, visible checkbox/radio, no arrow-less `<select>`, `a`/`h1-h6`/`p`/`ul`/`ol`/`img` normalized, etc.) as a real `<style>` tag — needed for SSR under runtime-only setups (no JS runs server-side, but this is just JSX so it still renders), a no-op-but-harmless nice-to-have for plain CSR. Not needed if using static `kbach.css` (below) — that file already includes the same reset. `<KbachReset />` checks `disableRuntimeCSS()` (which the Vite plugin calls automatically wherever `kbach.css` gets imported) and renders nothing once it's active, so leaving it mounted alongside the static setup is safe rather than a duplicate reset on every page load.
 
 ### Next.js
 - tsconfig `jsxImportSource` setup above applies as-is (SWC reads it like Vite does).

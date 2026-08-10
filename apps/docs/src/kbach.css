@@ -801,12 +801,20 @@ table {
   transition: opacity 150ms;
 }
 
+.shadow-lg {
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
 .transition-all {
   transition: all 150ms;
 }
 
 .group:hover .group-hover\:opacity-100 {
   opacity: 1 !important;
+}
+
+.hover\:shadow-md:hover {
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
 }
 
 .hover\:-translate-y-0\.5:hover {

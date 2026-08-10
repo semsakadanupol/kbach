@@ -97,9 +97,23 @@ export const effectResolvers: Record<string, Resolver> = {
   },
 
   // ── Shadow ─────────────────────────────────────────────────────────────────
+  // Presets carry BOTH a web `boxShadow` string and native's shadow*/elevation
+  // properties (theme.ts) — picked apart here rather than left for
+  // styleValueToCSS's RN_ONLY_PROPS filter to sort out, since shadowOffset is
+  // an object (filtered out as "not a flat style value" regardless of
+  // platform) and boxShadow would otherwise leak into native's style prop as
+  // an RN doesn't understand (silently ignored there, but better to not hand
+  // native a property that was never meant for it — same branch-on-platform
+  // pattern as bg-opacity/transition/animate above).
   shadow: ({ value }, { shadow }) => {
     const key = value === '' ? 'DEFAULT' : value;
-    return shadow[key] ?? null;
+    const preset = shadow[key];
+    if (!preset) return null;
+    if (getEffectiveIsWeb()) {
+      return preset.boxShadow !== undefined ? { boxShadow: preset.boxShadow } : null;
+    }
+    const { boxShadow, ...native } = preset;
+    return Object.keys(native).length > 0 ? (native as StyleValue) : null;
   },
 
   // ── Animations (CSS keyframe animations, web-only) ────────────────────────

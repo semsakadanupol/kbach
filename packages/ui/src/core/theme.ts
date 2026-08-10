@@ -304,6 +304,15 @@ export const defaultTheme = {
     none: 'none',     // CSS: flex: none = 0 0 auto; native: mapped to 0
   },
 
+  // Each preset carries BOTH React Native's shadow*/elevation properties
+  // (used on native) and a `boxShadow` string (used on web) — see the
+  // `shadow` resolver in resolvers/effects.ts, which picks one or the other
+  // via getEffectiveIsWeb() and strips the rest. The boxShadow values are
+  // Tailwind's own default shadow scale verbatim (same offsets/blur/spread/
+  // opacity), so shadow-sm/md/lg/xl/2xl look the same as their Tailwind
+  // counterparts on web — the native shadowOffset/shadowRadius/shadowOpacity
+  // numbers were tuned independently for RN's elevation model and don't need
+  // to (and can't exactly) match the CSS values pixel-for-pixel.
   shadow: {
     sm: {
       shadowColor: '#000',
@@ -311,6 +320,7 @@ export const defaultTheme = {
       shadowOpacity: 0.05,
       shadowRadius: 2,
       elevation: 1,
+      boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
     },
     DEFAULT: {
       shadowColor: '#000',
@@ -318,6 +328,7 @@ export const defaultTheme = {
       shadowOpacity: 0.1,
       shadowRadius: 4,
       elevation: 2,
+      boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
     },
     md: {
       shadowColor: '#000',
@@ -325,6 +336,7 @@ export const defaultTheme = {
       shadowOpacity: 0.1,
       shadowRadius: 8,
       elevation: 3,
+      boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
     },
     lg: {
       shadowColor: '#000',
@@ -332,6 +344,7 @@ export const defaultTheme = {
       shadowOpacity: 0.1,
       shadowRadius: 15,
       elevation: 4,
+      boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
     },
     xl: {
       shadowColor: '#000',
@@ -339,6 +352,7 @@ export const defaultTheme = {
       shadowOpacity: 0.1,
       shadowRadius: 24,
       elevation: 6,
+      boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
     },
     '2xl': {
       shadowColor: '#000',
@@ -346,6 +360,14 @@ export const defaultTheme = {
       shadowOpacity: 0.25,
       shadowRadius: 48,
       elevation: 8,
+      boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    },
+    // Web-only — React Native has no inset-shadow equivalent (shadow*/
+    // elevation only ever draw an outer shadow), so the native side of this
+    // preset is intentionally empty rather than approximating something RN
+    // can't actually do.
+    inner: {
+      boxShadow: 'inset 0 2px 4px 0 rgb(0 0 0 / 0.05)',
     },
     none: {
       shadowColor: 'transparent',
@@ -353,6 +375,7 @@ export const defaultTheme = {
       shadowOpacity: 0,
       shadowRadius: 0,
       elevation: 0,
+      boxShadow: '0 0 #0000',
     },
   },
 

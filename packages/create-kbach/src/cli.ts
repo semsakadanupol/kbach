@@ -144,6 +144,13 @@ async function main(): Promise<void> {
   // (ThemeProvider, the Babel preset) lives at its './native' and './babel'
   // subpaths, so there's no longer a separate package to pick between.
   const pkgName = '@kbach/ui';
+  // @kbach/ui has no stable release yet — its npm "latest" tag is still
+  // stuck on an old beta (an artifact of npm auto-assigning "latest" to the
+  // very first publish, never intentionally moved since). Pinned to "beta"
+  // here so create-kbach@beta always installs the current beta, not
+  // whatever "latest" happens to point at. Remove this pin once @kbach/ui
+  // has a real stable release and "latest" means something again.
+  const installSpecifier = `${pkgName}@beta`;
 
   // Computed once, up front, so the pre-flight summary below and the actual
   // action phase further down agree on exactly the same facts — no re-check
@@ -239,10 +246,10 @@ async function main(): Promise<void> {
 
   if (flags.install) {
     logTag(`Installing ${pkgName}...`);
-    const ok = installPackage(pm, pkgName, cwd);
-    if (!ok) logWarn(`Install failed — install ${pkgName} manually and re-run, or continue and add it yourself.`);
+    const ok = installPackage(pm, installSpecifier, cwd);
+    if (!ok) logWarn(`Install failed — install ${installSpecifier} manually and re-run, or continue and add it yourself.`);
   } else {
-    logTag(`Skipped install (--no-install) — run: install ${pkgName} with ${pm} yourself.`);
+    logTag(`Skipped install (--no-install) — run: install ${installSpecifier} with ${pm} yourself.`);
   }
 
   if (fs.existsSync(path.join(cwd, 'kbach.config.js'))) {

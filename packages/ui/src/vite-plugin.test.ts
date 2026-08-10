@@ -22,6 +22,22 @@ function buildTokenCSS(tokens: string[]): Map<string, string> {
   return map;
 }
 
+// Same as buildTokenCSS, but with real numeric screens — needed to exercise
+// the responsive @media-wrapping path below (buildClassCSSRules only wraps a
+// rule in `@media (min-width: …)` when the screens map actually resolves the
+// modifier to a nonzero width; buildTokenCSS's empty `{}` screens above never
+// triggers it, which is why those tests don't need it).
+const numericScreens: Record<string, number> = {};
+for (const [k, v] of Object.entries(config.theme.screens ?? {})) {
+  numericScreens[k] = typeof v === 'number' ? v : parseInt(String(v), 10);
+}
+
+function buildResponsiveTokenCSS(tokens: string[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const t of tokens) map.set(t, generateClassCSS(t, config.theme, config.darkMode, numericScreens));
+  return map;
+}
+
 describe('formatKbachCSS — same-group rule order is independent of scan order', () => {
   it('places hover: before focus: when focus: is scanned first', () => {
     const css = formatKbachCSS(buildTokenCSS(['focus:bg-red-6', 'hover:bg-blue-6']), config.theme, responsiveRe);
@@ -80,5 +96,73 @@ describe('classifyToken (via formatKbachCSS) — every modifier gets stripped, n
     const escapedSelector = `.${token.replace(/[:.]/g, '\\$&')}`;
     expect(sectionBody(css, expectedLabel)).toContain(escapedSelector);
     expect(sectionBody(css, 'Utilities')).not.toContain(escapedSelector);
+  });
+});
+
+// Regression: escapeCSSSelector() escaped punctuation (":", ".", "[", …) but
+// not a leading digit — `.2xl\:text-lg { … }` is invalid CSS (identifiers
+// can't start with an unescaped digit) and every browser silently fails to
+// match it, so the default "2xl" breakpoint (and any other numeric-leading
+// class) never actually applied via the static stylesheet. Fixed to escape
+// a leading digit per the CSS spec: backslash + hex code point + a
+// terminating space.
+describe('formatKbachCSS — numeric-leading class names (the "2xl" breakpoint) escape to valid CSS', () => {
+  it('escapes the leading digit in "2xl:text-lg" as \\32 (hex for "2"), not a bare unescaped 2', () => {
+    const css = formatKbachCSS(buildResponsiveTokenCSS(['2xl:text-lg']), config.theme, responsiveRe);
+    expect(css).toContain('.\\32 xl\\:text-lg');
+    // The old, broken form — an unescaped digit right after the selector dot.
+    expect(css).not.toContain('.2xl\\:text-lg');
+  });
+
+  it('leaves classes with no leading digit unaffected', () => {
+    const css = formatKbachCSS(buildResponsiveTokenCSS(['sm:text-lg']), config.theme, responsiveRe);
+    expect(css).toContain('.sm\\:text-lg');
+  });
+});
+
+// Regression: every responsive class got its OWN `@media (min-width: …) { … }`
+// wrapper in the generated static CSS — correct for the runtime <style>-sheet
+// injection path (each rule inserted independently), but for the static file
+// it meant a project with many classes at the same breakpoint (`sm:p-4`,
+// `sm:text-lg`, `sm:flex`, …) repeated the identical `@media (min-width:
+// 640px)` wrapper once per class instead of once per breakpoint. Fixed by
+// merging same-condition responsive rules into one @media block.
+describe('formatKbachCSS — responsive classes at the same breakpoint share one @media block', () => {
+  it('merges multiple sm: classes into a single @media (min-width: …) wrapper', () => {
+    const css = formatKbachCSS(
+      buildResponsiveTokenCSS(['sm:text-lg', 'sm:flex', 'sm:p-4']),
+      config.theme,
+      responsiveRe,
+    );
+    const wrapper = `@media (min-width: ${numericScreens.sm}px)`;
+    const occurrences = css.split(wrapper).length - 1;
+    expect(occurrences).toBe(1);
+    expect(css).toContain('.sm\\:text-lg');
+    expect(css).toContain('.sm\\:flex');
+    expect(css).toContain('.sm\\:p-4');
+  });
+
+  it('keeps different breakpoints in their own separate @media blocks', () => {
+    const css = formatKbachCSS(
+      buildResponsiveTokenCSS(['sm:text-lg', 'md:text-lg', 'lg:text-lg']),
+      config.theme,
+      responsiveRe,
+    );
+    expect(css.split(`@media (min-width: ${numericScreens.sm}px)`).length - 1).toBe(1);
+    expect(css.split(`@media (min-width: ${numericScreens.md}px)`).length - 1).toBe(1);
+    expect(css.split(`@media (min-width: ${numericScreens.lg}px)`).length - 1).toBe(1);
+  });
+
+  it('orders merged @media blocks ascending by min-width regardless of scan order', () => {
+    const css = formatKbachCSS(
+      buildResponsiveTokenCSS(['lg:text-lg', 'sm:text-lg', 'md:text-lg']),
+      config.theme,
+      responsiveRe,
+    );
+    const smIdx = css.indexOf(`@media (min-width: ${numericScreens.sm}px)`);
+    const mdIdx = css.indexOf(`@media (min-width: ${numericScreens.md}px)`);
+    const lgIdx = css.indexOf(`@media (min-width: ${numericScreens.lg}px)`);
+    expect(smIdx).toBeLessThan(mdIdx);
+    expect(mdIdx).toBeLessThan(lgIdx);
   });
 });

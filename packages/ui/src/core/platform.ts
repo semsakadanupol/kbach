@@ -70,7 +70,19 @@ export function toNativeValue(raw: string): string | number {
 /**
  * Escape a class name for use inside a CSS selector.
  * e.g. 'bg-[#fff]'  →  'bg-\\[\\#fff\\]'
+ *
+ * Also escapes a leading digit: a CSS identifier can't start with an
+ * unescaped digit — `.2xl\:text-lg { ... }` is invalid CSS and every browser
+ * silently fails to match it, which is exactly what happens for a screen/
+ * breakpoint literally named "2xl" (or any other numeric-leading class).
+ * Escaped per the CSS spec — a backslash plus the character's hex code
+ * point, followed by one space to terminate the hex escape (always safe to
+ * include, and needed here since "2xl"'s next character "x" isn't itself a
+ * hex digit that could otherwise be read as part of the escape by mistake).
  */
 export function escapeCSSSelector(cls: string): string {
-  return cls.replace(/[ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/g, '\\$&');
+  const escaped = cls.replace(/[ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/g, '\\$&');
+  if (!/^[0-9]/.test(escaped)) return escaped;
+  const hex = escaped.charCodeAt(0).toString(16);
+  return `\\${hex} ${escaped.slice(1)}`;
 }

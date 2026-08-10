@@ -906,6 +906,18 @@ table {
     padding-left: var(--spacing-6);
     padding-right: var(--spacing-6);
   }
+  .sm\:px-8 {
+    padding-left: var(--spacing-8);
+    padding-right: var(--spacing-8);
+  }
+  .sm\:py-10 {
+    padding-top: var(--spacing-10);
+    padding-bottom: var(--spacing-10);
+  }
+  .sm\:grid-cols-2 {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (min-width: 1024px) {
@@ -913,67 +925,29 @@ table {
     padding-left: var(--spacing-8);
     padding-right: var(--spacing-8);
   }
-}
-
-@media (min-width: 1024px) {
   .lg\:hidden {
     display: none;
   }
-}
-
-@media (min-width: 1024px) {
   .lg\:flex {
     display: flex;
   }
-}
-
-@media (min-width: 576px) {
-  .sm\:px-8 {
-    padding-left: var(--spacing-8);
-    padding-right: var(--spacing-8);
-  }
-}
-
-@media (min-width: 576px) {
-  .sm\:py-10 {
-    padding-top: var(--spacing-10);
-    padding-bottom: var(--spacing-10);
-  }
-}
-
-@media (min-width: 1024px) {
   .lg\:px-12 {
     padding-left: var(--spacing-12);
     padding-right: var(--spacing-12);
   }
-}
-
-@media (min-width: 1024px) {
   .lg\:py-12 {
     padding-top: var(--spacing-12);
     padding-bottom: var(--spacing-12);
   }
-}
-
-@media (min-width: 1024px) {
   .lg\:sticky {
     position: sticky !important;
   }
-}
-
-@media (min-width: 1024px) {
   .lg\:w-64 {
     width: var(--spacing-64);
   }
-}
-
-@media (min-width: 1024px) {
   .lg\:transition-none {
     transition: none;
   }
-}
-
-@media (min-width: 1024px) {
   .lg\:translate-x-0 {
     transform: translateX(var(--spacing-0));
   }
@@ -983,31 +957,15 @@ table {
   .xl\:grid {
     display: grid !important;
   }
-}
-
-@media (min-width: 1280px) {
   .xl\:grid-cols-\[minmax\(0\,1fr\)_16rem\] {
     display: grid !important;
     grid-template-columns: minmax(0,1fr) 16rem;
   }
-}
-
-@media (min-width: 1280px) {
   .xl\:gap-12 {
     gap: var(--spacing-12);
   }
-}
-
-@media (min-width: 1280px) {
   .xl\:block {
     display: block;
-  }
-}
-
-@media (min-width: 576px) {
-  .sm\:grid-cols-2 {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 /* kbach:end */

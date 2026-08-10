@@ -625,8 +625,9 @@ rounded-tl/tr/bl/br border radius on one corner
 
 ### Shadow
 ```
-shadow-sm/DEFAULT/md/lg/xl/2xl/none
+shadow-sm/DEFAULT/md/lg/xl/2xl/inner/none
 ```
+Web: real `box-shadow` (Tailwind's own default values). Native: RN's shadowColor/shadowOffset/shadowOpacity/shadowRadius/elevation, tuned independently for RN's elevation model — not derived from the web value. `shadow-inner` is web-only (no native inset-shadow equivalent). Customize/add sizes via `theme.extend.shadow` — each preset key merges independently (see Theme Configuration below).
 
 ### Opacity
 ```
@@ -906,6 +907,14 @@ module.exports = {
       colors: { brand: { 6: '#6366f1' } },
       spacing: { 18: 72, 22: 88 },
       fontSize: { '10xl': 160 },
+      // Each preset key merges independently — overriding lg's boxShadow
+      // (the web value) leaves its native shadowColor/shadowOffset/etc.
+      // untouched, and a brand-new key (e.g. '3xl') adds a new shadow-3xl
+      // utility alongside the defaults.
+      shadow: {
+        lg: { boxShadow: '0 10px 40px -10px rgba(99, 102, 241, 0.4)' },
+        '3xl': { boxShadow: '0 35px 60px -15px rgba(0, 0, 0, 0.3)' },
+      },
       // Custom @keyframes (web only) — declaration values are plain CSS strings.
       // Reference by name from `animation`, then use that name as animate-{name}.
       keyframes: {

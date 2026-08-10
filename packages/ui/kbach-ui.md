@@ -586,8 +586,9 @@ rounded-t/r/b/l  rounded-tl/tr/bl/br
 
 ### Shadow
 ```
-shadow-sm / shadow / shadow-md / shadow-lg / shadow-xl / shadow-2xl / shadow-none
+shadow-sm / shadow / shadow-md / shadow-lg / shadow-xl / shadow-2xl / shadow-inner / shadow-none
 ```
+Web: real `box-shadow` (Tailwind's own default values). Native: RN's shadowColor/shadowOffset/shadowOpacity/shadowRadius/elevation, tuned independently for RN's elevation model — not derived from the web value, so they don't need to match pixel-for-pixel. `shadow-inner` is web-only (RN has no inset-shadow equivalent). Customize or add sizes via `theme.extend.shadow` — see [Theme Configuration](#theme-configuration) below; each preset key merges independently, so overriding one size's `boxShadow` doesn't touch its native properties or any other size.
 
 ### Opacity
 ```
@@ -739,6 +740,16 @@ module.exports = {
       fontSize: { '10xl': 160 },
       fontFamily: {
         sans: 'Inter, sans-serif',
+      },
+      shadow: {
+        // Deep-merged into the existing preset, not replaced — lg keeps its
+        // native shadowColor/shadowOffset/shadowOpacity/shadowRadius/
+        // elevation, only boxShadow (the web value) changes here.
+        lg: { boxShadow: '0 10px 40px -10px rgba(99, 102, 241, 0.4)' },
+        // A brand-new key adds a new shadow-3xl utility alongside the
+        // defaults (sm/DEFAULT/md/lg/xl/2xl/inner/none) — web-only here,
+        // since it has no native shadow*/elevation properties.
+        '3xl': { boxShadow: '0 35px 60px -15px rgba(0, 0, 0, 0.3)' },
       },
     },
   },

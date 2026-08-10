@@ -352,9 +352,28 @@ export function formatKbachCSS(tokenCSS: Map<string, string>, theme: ThemeConfig
   // keeps this safe even if a future case this reasoning missed slips through.
   const sortedReplacements = [...replacements].sort(([a], [b]) => b.length - a.length);
 
+  // Regression: a plain .split(pattern).join(replacement) matches `pattern`
+  // (a color's literal hex value, or its "rgba(r,g,b," triplet prefix)
+  // ANYWHERE in the rule text — including inside the SELECTOR, not just the
+  // declaration this substitution is meant for. An arbitrary-value class
+  // that happens to use that exact value as part of its own class name
+  // (e.g. `bg-[#6366f1]`, matching a real theme color's hex) escapes to
+  // `.bg-\[\#6366f1\]` — which contains the literal substring "#6366f1"
+  // right after its escaping backslash. A blind replace there turns
+  // `\#6366f1` into `\` + the replacement text, silently corrupting the
+  // selector's escape structure (confirmed: produced `.bg-\[\var(--color-
+  // indigo-6)\]`, which lightningcss's minifier then refused to parse at
+  // all — "Expected identifier in class selector"). Declaration values are
+  // never preceded by a backslash in this codebase (only escapeCSSSelector
+  // ever emits one), so a negative lookbehind for `\` reliably tells the
+  // two apart: skip any match that's actually part of an escaped selector.
+  const varPatternRes = sortedReplacements.map(
+    ([pattern, replacement]) => [new RegExp(`(?<!\\\\)${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'g'), replacement] as const,
+  );
+
   function applyVars(css: string): string {
-    for (const [pattern, replacement] of sortedReplacements)
-      css = css.split(pattern).join(replacement);
+    for (const [re, replacement] of varPatternRes)
+      css = css.replace(re, () => replacement);
     return css;
   }
 

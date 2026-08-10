@@ -166,3 +166,30 @@ describe('formatKbachCSS — responsive classes at the same breakpoint share one
     expect(mdIdx).toBeLessThan(lgIdx);
   });
 });
+
+// Regression: buildColorVarMap's hex/rgba-triplet → var() substitution used
+// a plain .split(pattern).join(replacement), which matches `pattern`
+// ANYWHERE in a rule's text — including inside the SELECTOR, not just the
+// declaration it's meant for. An arbitrary-value class using the same raw
+// value as a real theme color (e.g. `bg-[#6366f1]`, indigo-6's exact hex)
+// escapes to `.bg-\[\#6366f1\]`, which contains the literal substring
+// "#6366f1" right after its escaping backslash — the blind replace turned
+// that into `.bg-\[\var(--color-indigo-6)\]`, corrupting the selector's
+// escape structure so badly that lightningcss's CSS minifier refused to
+// parse it at all ("Expected identifier in class selector"). Confirmed live
+// against a real project build. Fixed with a negative lookbehind for `\` —
+// declaration values are never backslash-prefixed in this codebase, only
+// escapeCSSSelector's output is, so that reliably tells the two apart.
+describe('formatKbachCSS — color-variable substitution does not corrupt arbitrary-value selectors', () => {
+  it('leaves a hex-arbitrary-value selector untouched even when it matches a real theme color', () => {
+    const css = formatKbachCSS(buildTokenCSS(['bg-[#6366f1]']), config.theme, responsiveRe);
+    // Correctly escaped selector, hex value intact.
+    expect(css).toContain('.bg-\\[\\#6366f1\\]');
+    // The old, corrupted form — an orphaned backslash migrated in front of
+    // "var(...)" instead of staying in front of the hex value.
+    expect(css).not.toContain('\\var(');
+    // The declaration itself should still get var()-substituted — this
+    // isn't "never touch matching text," only the selector must be spared.
+    expect(css).toContain('var(--color-indigo-6-rgb)');
+  });
+});

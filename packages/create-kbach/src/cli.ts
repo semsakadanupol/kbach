@@ -104,7 +104,7 @@ function printWebAppRootSnippet(includeReset: boolean): void {
 
 function printNativeAppRootSnippet(): void {
   log('  Your app root — wrap with ThemeProvider:');
-  log('    import { ThemeProvider } from \'@kbach/ui/native\';');
+  log('    import { ThemeProvider } from \'@kbach/ui\';');
   log('    export default function App() {');
   log('      return <ThemeProvider defaultMode="system"><AppContent /></ThemeProvider>;');
   log('    }');

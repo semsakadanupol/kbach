@@ -1,14 +1,15 @@
 /**
  * Global responsive width store.
  *
- * Used to be backed by globalThis so all CJS bundle splits (index.js,
- * jsx-runtime.js, jsx-dev-runtime.js) shared one instance — tsup used to
- * bundle core/ separately into each of them (esbuild doesn't support
- * code-splitting CJS output). core/ is now built as its own dist/core/
- * entry and required externally by all three (see
- * packages/ui/tsup.config.ts), so there's only ever one real instance of
- * this module to begin with — a plain module-level object is enough.
+ * Backed by getGlobalSingleton() (globalThis-keyed) — see
+ * darkModeStore.ts's header comment for why a plain module-level object
+ * isn't enough: core/ being its own shared dist/core/ entry only covers the
+ * CJS build (dist/index.js, dist/jsx-runtime.js, dist/jsx-dev-runtime.js);
+ * the separate ESM build inlines its own copy, and Metro can route
+ * different call sites in the same app through either one.
  */
+
+import { getGlobalSingleton } from './globalSingleton';
 
 type WidthListener = () => void;
 
@@ -29,7 +30,12 @@ interface ResponsiveStore {
   listeners: Set<WidthListener>;
 }
 
-const store: ResponsiveStore = { width: 0, notifiedWidth: 0, screens: {}, listeners: new Set<WidthListener>() };
+const store: ResponsiveStore = getGlobalSingleton('responsiveStore', () => ({
+  width: 0,
+  notifiedWidth: 0,
+  screens: {},
+  listeners: new Set<WidthListener>(),
+}));
 
 /** Synchronous write for use in the render phase. */
 export function syncGlobalWidth(width: number): void {

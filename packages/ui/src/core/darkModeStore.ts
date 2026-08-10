@@ -5,15 +5,20 @@
  * synchronously during render without needing context. ThemeProvider writes to it;
  * DarkWrapper / InteractiveWrapper subscribe via useSyncExternalStore.
  *
- * Used to be backed by globalThis instead of a plain module-level variable:
- * tsup used to bundle core/ separately into each of dist/index.js and
- * dist/jsx-runtime.js (esbuild doesn't support code-splitting CJS output),
- * so Metro loading each by path got independent copies of this module with
- * independent top-level state. core/ is now built as its own dist/core/
- * entry and required externally by both (see packages/ui/tsup.config.ts),
- * so there's only ever one real instance of this module to begin with — a
- * plain module-level object is enough.
+ * Backed by getGlobalSingleton() (globalThis-keyed), not a plain module-level
+ * variable — core/ being built as its own shared dist/core/ entry (see
+ * tsup.config.ts's CORE_EXTERNAL) only guarantees one instance across the CJS
+ * build (dist/index.js, dist/jsx-runtime.js, dist/jsx-dev-runtime.js). The
+ * separate ESM build (dist/index.mjs etc., required for Rollup/Vite — see
+ * context.tsx's ThemeContext comment) inlines its own copy, and Metro can
+ * route different call sites in the same app through either one. Confirmed
+ * as a real bug this way: dark:/light: classes went completely inert (while
+ * useIsDark() kept reading correctly) in an app mixing
+ * `import ... from '@kbach/ui/native'` and `import ... from '@kbach/ui'`
+ * — the two ended up on different physical copies of this store.
  */
+
+import { getGlobalSingleton } from './globalSingleton';
 
 interface KbachDarkStore {
   isDark: boolean;
@@ -33,7 +38,11 @@ interface KbachDarkStore {
   subscribers: Set<() => void>;
 }
 
-const store: KbachDarkStore = { isDark: false, notifiedIsDark: false, subscribers: new Set<() => void>() };
+const store: KbachDarkStore = getGlobalSingleton('darkModeStore', () => ({
+  isDark: false,
+  notifiedIsDark: false,
+  subscribers: new Set<() => void>(),
+}));
 
 /**
  * Silently update isDark without notifying subscribers.

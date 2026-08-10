@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { Context } from 'react';
+import { getGlobalSingleton } from './core';
 import type { ThemeMode, ResolvedConfig } from './core';
 
 export interface ThemeContextValue {
@@ -33,21 +34,16 @@ export interface ThemeContextValue {
 // called inside a <ThemeProvider>" even with one correctly mounted. Two
 // bundlers with directly conflicting requirements (Rollup needs real ESM;
 // Metro needs one physical file) rules out a "make them the same module"
-// fix — so this Context specifically falls back to the globalThis-keyed
-// singleton this codebase used everywhere before core/ became its own
-// shared build entry (see darkModeStore.ts's header comment for that
-// history) — RULES.md rule 3's documented-and-necessary exception. Every
-// duplicated copy of this module reads/creates the same Context object
-// here, so <ThemeProvider>/useTheme() interoperate regardless of which
-// physical file either one loaded through.
-declare global {
-  // eslint-disable-next-line no-var
-  var __kbachThemeContext: Context<ThemeContextValue | null> | undefined;
-}
-
+// fix — so this Context specifically falls back to getGlobalSingleton()
+// (see core/globalSingleton.ts) — the same globalThis-keyed pattern this
+// codebase used everywhere before core/ became its own shared build entry,
+// restored for exactly the cases that fix doesn't cover — RULES.md rule 3's
+// documented-and-necessary exception. Every duplicated copy of this module
+// reads/creates the same Context object here, so
+// <ThemeProvider>/useTheme() interoperate regardless of which physical file
+// either one loaded through.
 export const ThemeContext: Context<ThemeContextValue | null> =
-  globalThis.__kbachThemeContext ??
-  (globalThis.__kbachThemeContext = createContext<ThemeContextValue | null>(null));
+  getGlobalSingleton('themeContext', () => createContext<ThemeContextValue | null>(null));
 
 export function useTheme(): ThemeContextValue {
   const ctx = useContext(ThemeContext);

@@ -162,7 +162,7 @@ Or the one-liner helper: `const { createKbachConfig } = require('@kbach/ui/nativ
 **2. Wrap your app:**
 
 ```jsx
-import { ThemeProvider } from '@kbach/ui/native';
+import { ThemeProvider } from '@kbach/ui';
 
 export default function App() {
   return (
@@ -173,7 +173,7 @@ export default function App() {
 }
 ```
 
-This is a native-aware `ThemeProvider` — reads `useColorScheme()`/`useWindowDimensions()` automatically. Import it from `@kbach/ui/native`, not the plain `ThemeProvider` from `@kbach/ui` — that one has no automatic RN wiring.
+`ThemeProvider` auto-detects React Native at render time and reads `useColorScheme()`/`useWindowDimensions()` automatically — same import as web, no `/native` subpath needed.
 
 A handful of utilities are native-only or web-only, and Expo Web/React Native Web has its own notes — see [KBACH.md](./KBACH.md#native-only-utilities) for the full platform-differences reference.
 

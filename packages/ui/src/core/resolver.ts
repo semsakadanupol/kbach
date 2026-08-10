@@ -13,6 +13,7 @@ import {
   type ModifierDef,
 } from './registry';
 import { kbachWarn } from './devWarn';
+import { getGlobalSingleton } from './globalSingleton';
 
 // ─── Style cache — per-theme, bounded LRU ────────────────────────────────────
 //
@@ -71,20 +72,21 @@ function getSortedEntries(resolved: ResolvedStyle): readonly [string, StyleValue
 
 // ─── Default font family ──────────────────────────────────────────────────────
 //
-// Plain module-level variable, not globalThis — see darkModeStore.ts's header
-// comment for why globalThis is no longer needed now that core/ builds as its
-// own shared dist/core/ entry (dist/index.js, dist/jsx-runtime.js, and
-// dist/jsx-dev-runtime.js all require() the same module instance, so there's
-// only ever one copy of this state to begin with).
+// Backed by getGlobalSingleton() (globalThis-keyed), not a plain module-level
+// variable — see darkModeStore.ts's header comment for why core/ being its
+// own shared dist/core/ entry isn't enough on its own (only covers the CJS
+// build; the separate ESM build inlines its own copy). A primitive can't be
+// shared by reference the way an object/Set can, so it's boxed in a
+// single-field holder instead.
 
-let _defaultFontFamily: string | undefined;
+const _fontFamilyHolder = getGlobalSingleton('defaultFontFamily', () => ({ value: undefined as string | undefined }));
 
 export function setDefaultFontFamily(font: string | undefined): void {
-  _defaultFontFamily = font;
+  _fontFamilyHolder.value = font;
 }
 
 export function getDefaultFontFamily(): string | undefined {
-  return _defaultFontFamily;
+  return _fontFamilyHolder.value;
 }
 
 // ─── CSS injection (web only) ─────────────────────────────────────────────────
@@ -150,14 +152,14 @@ const _injectedRules = new LRUCache<string, true>(50_000, evictInjectedRule);
 
 // When kbach.css is loaded as a static stylesheet (Vite plugin), runtime CSS
 // injection is redundant. Call disableRuntimeCSS() once at startup to skip it.
-// Plain module-level flag, not globalThis — see the default-font-family
-// comment above / darkModeStore.ts's header comment for why.
-let _runtimeCSSDisabled = false;
+// Backed by getGlobalSingleton() — see the default-font-family comment above
+// / darkModeStore.ts's header comment for why.
+const _runtimeCSSHolder = getGlobalSingleton('runtimeCSSDisabled', () => ({ value: false }));
 export function disableRuntimeCSS(): void {
-  _runtimeCSSDisabled = true;
+  _runtimeCSSHolder.value = true;
 }
 export function isRuntimeCSSDisabled(): boolean {
-  return _runtimeCSSDisabled;
+  return _runtimeCSSHolder.value;
 }
 
 function getStyleEl(): HTMLStyleElement {

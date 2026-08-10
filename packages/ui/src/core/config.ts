@@ -6,6 +6,7 @@ import { registerModifier, clearPluginModifiers, type ModifierDef } from './regi
 import { isModeAwareColor, splitColorShadeRef } from './colorValue';
 import { hexToRgba } from './resolvers/color';
 import { kbachWarn } from './devWarn';
+import { getGlobalSingleton } from './globalSingleton';
 
 // ─── Deep merge ───────────────────────────────────────────────────────────────
 
@@ -31,14 +32,19 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Partial
 
 // ─── Config singleton ───────────────────────────────────────────────────────
 //
-// Used to be backed by globalThis to survive CJS bundle splits: tsup used to
-// bundle core/ separately into each of dist/index.js and dist/jsx-runtime.js
-// (esbuild doesn't support code-splitting CJS output), so Metro loading each
-// by path got independent copies of this module with independent top-level
-// state. core/ is now built as its own dist/core/ entry and required
-// externally by all client entries (see packages/ui/tsup.config.ts), so
-// there's only ever one real instance of this module to begin with — a
-// plain module-level object is enough.
+// Backed by getGlobalSingleton() (globalThis-keyed) — see
+// darkModeStore.ts's header comment for why a plain module-level object
+// isn't enough: core/ being its own shared dist/core/ entry only covers the
+// CJS build; the separate ESM build (required for Rollup/Vite) inlines its
+// own copy, and Metro can route different call sites in the same app
+// through either one. Left unfixed here specifically, this store's
+// duplication would be worse than the dark-mode one: a duplicated config
+// store means updateConfig()/initConfig() (e.g. the Babel-injected
+// per-file config sync) silently updates a DIFFERENT copy of the resolved
+// theme than the one resolve()/flatten() reads through the other physical
+// module — custom colors, spacing, and the darkMode strategy itself could
+// silently fall back to defaults depending on which file happened to
+// trigger the update.
 
 interface KbachConfigStore {
   resolved: ResolvedConfig | null;
@@ -46,7 +52,10 @@ interface KbachConfigStore {
   _src?: FrameworkConfig;
 }
 
-const configStore: KbachConfigStore = { resolved: null, listeners: new Set<ConfigListener>() };
+const configStore: KbachConfigStore = getGlobalSingleton('configStore', () => ({
+  resolved: null,
+  listeners: new Set<ConfigListener>(),
+}));
 
 /**
  * Load, merge, and cache the resolved config.

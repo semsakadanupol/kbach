@@ -91,28 +91,17 @@ export default defineConfig([
     external: ['vite'],
   },
   {
-    // React Native / Expo entry point (@kbach/ui/native — see
-    // src/native/index.ts). CJS-only: package.json's "./native" export routes
-    // BOTH "import" and "require" to this same dist/native.js — see
-    // NativeThemeProvider.tsx's comment for why a real ESM build would break
-    // Metro's require() detection.
-    //
-    // '@kbach/ui' is marked external (NativeThemeProvider.tsx imports it
-    // by bare specifier, not a relative path) so this bundle reaches
-    // ThemeProvider/ThemeContext via a real require('@kbach/ui') —
-    // resolving to the exact same dist/index.js instance every other
-    // consumer gets — instead of esbuild inlining its own private copy of
-    // ThemeProvider.tsx/context.tsx, which would split ThemeContext in two.
-    // Named-entry form ({ native: ... }) makes esbuild emit a flat
-    // dist/native.js in outDir rather than a nested dist/native/index.js —
-    // doesn't matter for a bare-specifier external like this one (unlike a
-    // relative one, it isn't rewritten based on output depth), but keeps the
-    // dist layout flat and predictable alongside the other entries.
+    // React Native / Expo build-tooling entry point (@kbach/ui/native — see
+    // src/native/index.ts). Now Node-only (Metro/Babel config generators) —
+    // ThemeProvider moved into the main entry and auto-detects native at
+    // render time instead (see ThemeProvider.tsx), so this no longer needs to
+    // be loadable inside a real Metro/Hermes runtime and can be a normal dual
+    // ESM/CJS build like vite-plugin.ts, with no external/'use client' banner.
+    // Named-entry form ({ native: ... }) keeps the flat dist/native.js /
+    // dist/native.mjs layout package.json's "./native" export already points at.
     entry: { native: 'src/native/index.ts' },
-    format: ['cjs'],
+    format: ['cjs', 'esm'],
     dts: true,
     clean: false,
-    external: ['@kbach/ui'],
-    banner: { js: "'use client';" },
   },
 ]);

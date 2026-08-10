@@ -137,22 +137,19 @@ export interface ThemeProviderProps {
   /**
    * System color scheme for native `defaultMode="system"`.
    *
-   * Pass the value of `useColorScheme()` from `react-native`. When importing
-   * `ThemeProvider` from `@kbach/ui/native` this is handled automatically.
+   * On React Native this is detected automatically via `useColorScheme()` —
+   * pass this prop only to override that (e.g. in tests, or Storybook).
    *
    * @example
    * ```tsx
-   * import { useColorScheme } from 'react-native';
-   * const colorScheme = useColorScheme();
-   * <ThemeProvider defaultMode="system" colorScheme={colorScheme}>…</ThemeProvider>
+   * <ThemeProvider defaultMode="system" colorScheme="dark">…</ThemeProvider>
    * ```
    */
   colorScheme?: 'light' | 'dark' | null;
   /**
    * Current window/screen width in pixels for responsive breakpoints.
-   * On web this is read from `window.innerWidth` automatically.
-   * When importing `ThemeProvider` from `@kbach/ui/native` this is provided
-   * automatically from `useWindowDimensions()`.
+   * Detected automatically on both web (`window.innerWidth`) and React
+   * Native (`useWindowDimensions()`) — pass this prop only to override that.
    */
   windowWidth?: number;
   /** Override the config (useful for per-tree config). Defaults to global getConfig(). */
@@ -169,6 +166,49 @@ export function ThemeProvider({
   config: configOverride,
   disablePersistence = false,
 }: ThemeProviderProps): React.JSX.Element {
+  // ── Native auto-detection ──────────────────────────────────────────────────
+  // Reads react-native's useColorScheme()/useWindowDimensions() directly, so
+  // plain `@kbach/ui` works correctly on both web and native with no separate
+  // native-specific ThemeProvider — @kbach/ui/native's ThemeProvider (formerly
+  // NativeThemeProvider, a thin wrapper around this same component) has been
+  // removed; see native/index.ts.
+  //
+  // isNative is computed once at module load from ambient globals (see
+  // core/platform.ts) and is stable for the app's entire lifetime, so every
+  // mounted instance of THIS component either always takes this branch or
+  // never does — conditionally calling these hooks here is safe for the same
+  // reason DarkWrapper.tsx documents for gating hook subscriptions on isNative.
+  //
+  // require('react-native'), not a top-level import: keeps pure-web apps
+  // (no react-native installed) from crashing at module load.
+  //
+  // This alone is NOT enough to be Metro-safe, though: esbuild's ESM output
+  // (dist/index.mjs) rewrites even a source-level require() into a
+  // `__require(...)` helper call (real ESM has no native require) — Metro's
+  // static dependency scanner only recognizes literal `require("...")`
+  // callee identifiers, so `__require("react-native")` isn't found, "react-
+  // native" never gets wired into the bundle graph, and calling it at
+  // runtime throws "Requiring unknown module 'react-native'". package.json's
+  // "." export works around this with a "react-native" condition (checked
+  // BEFORE "import"/"require" — see the ordering there) pointing straight at
+  // the real CJS dist/index.js, whose require("react-native") stays a
+  // literal string. Metro tags each call site "import" or "require" purely
+  // from which JS syntax the caller used (confirmed by reading metro-
+  // resolver's matchSubpathFromExportsLike.js directly), independent of
+  // platform — so without that condition, an app writing
+  // `import { ThemeProvider } from '@kbach/ui'` (the only way anyone imports
+  // this) would route through dist/index.mjs on a real device and hit this
+  // exact crash. Confirmed real via Expo's own @expo/metro-config, which sets
+  // unstable_conditionsByPlatform: { ios: ['react-native'], android: [...] }.
+  let nativeColorScheme: 'light' | 'dark' | null = null;
+  let nativeWindowWidth: number | undefined;
+  if (isNative) {
+    const { useColorScheme, useWindowDimensions } = require('react-native') as typeof import('react-native');
+    const raw = useColorScheme();
+    nativeColorScheme = raw === 'dark' ? 'dark' : raw === 'light' ? 'light' : null;
+    nativeWindowWidth = useWindowDimensions().width;
+  }
+
   // ── Config ─────────────────────────────────────────────────────────────────
   const [resolvedConfig, setResolvedConfig] = useState<ResolvedConfig>(() =>
     configOverride ? buildConfig(configOverride) : getConfig(),
@@ -254,7 +294,8 @@ export function ThemeProvider({
 
   // ── Responsive width ───────────────────────────────────────────────────────
   // Web: track window.innerWidth in state so children re-render on resize.
-  // Native: windowWidthProp comes from NativeThemeProvider via useWindowDimensions().
+  // Native: nativeWindowWidth comes from useWindowDimensions() above, unless
+  // windowWidthProp explicitly overrides it.
   //
   // Initial value MUST be 0 (not window.innerWidth) even though this only runs
   // on web — reading window.innerWidth here would return the real width on the
@@ -264,19 +305,20 @@ export function ThemeProvider({
   // which — being an effect — only ever runs post-hydration on the client.
   const [webWidth, setWebWidth] = useState<number>(0);
   // getEffectiveIsWeb(), NOT "windowWidthProp ?? (isWeb ? webWidth : 0)": the
-  // old `??` let windowWidthProp win outright whenever it was provided,
-  // regardless of platform — and NativeThemeProvider ALWAYS provides it (from
-  // React Native's useWindowDimensions(), never undefined). On a real native
-  // device that's correct and intended. But under React Native Web —
-  // including its SSR (Node has no `window`, so RNW's useWindowDimensions()
-  // returns some SSR default that can't match the real viewport) — this meant
-  // windowWidthProp won on the server AND the client's first hydration
-  // render, completely bypassing the careful "start at 0, correct once
-  // mounted" webWidth dance above that exists specifically to keep SSR and
-  // hydration in sync. Exactly the same class of bug as the systemScheme fix
-  // above, just for width: gate on platform (both browser and Node SSR are
-  // "effectively web"), not on whether a prop happens to be present.
-  const effectiveWidth = getEffectiveIsWeb() ? webWidth : (windowWidthProp ?? 0);
+  // old `??` let windowWidthProp/nativeWindowWidth win outright whenever
+  // provided, regardless of platform — and nativeWindowWidth is ALWAYS
+  // populated on a real native device (from React Native's
+  // useWindowDimensions(), never undefined). On a real native device that's
+  // correct and intended. But under React Native Web — including its SSR
+  // (Node has no `window`, so RNW's useWindowDimensions() returns some SSR
+  // default that can't match the real viewport) — this meant that value won
+  // on the server AND the client's first hydration render, completely
+  // bypassing the careful "start at 0, correct once mounted" webWidth dance
+  // above that exists specifically to keep SSR and hydration in sync.
+  // Exactly the same class of bug as the systemScheme fix below, just for
+  // width: gate on platform (both browser and Node SSR are "effectively
+  // web"), not on whether a value happens to be present.
+  const effectiveWidth = getEffectiveIsWeb() ? webWidth : (windowWidthProp ?? nativeWindowWidth ?? 0);
 
   // Convert string screens ('640px') to numbers before syncing — the raw theme
   // value can be in either format but the store always expects numbers.
@@ -332,8 +374,8 @@ export function ThemeProvider({
 
   // ── System scheme ──────────────────────────────────────────────────────────
   // Web: detect via matchMedia (SSR-safe — see subscribeSystemScheme above).
-  // Native: caller passes colorScheme from useColorScheme() (done automatically
-  // when using ThemeProvider from @kbach/ui/native via NativeThemeProvider).
+  // Native: nativeColorScheme, from useColorScheme() above — unless the caller
+  // passed an explicit colorScheme prop to override it.
   const webScheme = useSyncExternalStore(
     subscribeSystemScheme,
     getSystemScheme,
@@ -347,8 +389,8 @@ export function ThemeProvider({
   // hydration render (isWeb true) immediately switched to `webScheme` —
   // TWO DIFFERENT VARIABLES, not just two snapshots of the same
   // useSyncExternalStore call, so if `colorScheme` (from RN's
-  // useColorScheme(), passed down by NativeThemeProvider) ever differed from
-  // webScheme's own SSR-safe server snapshot ('light'), that was a genuine
+  // useColorScheme(), read via the native auto-detection above) ever differed
+  // from webScheme's own SSR-safe server snapshot ('light'), that was a genuine
   // cross-render mismatch — not the kind useSyncExternalStore's
   // getServerSnapshot mechanism protects against, since the SERVER never
   // even read webScheme in that case. getEffectiveIsWeb() is true in both
@@ -356,7 +398,7 @@ export function ThemeProvider({
   // only a real native runtime reads the colorScheme prop.
   const systemScheme: 'light' | 'dark' = getEffectiveIsWeb()
     ? webScheme
-    : (colorScheme === 'dark' ? 'dark' : 'light');
+    : ((colorScheme ?? nativeColorScheme) === 'dark' ? 'dark' : 'light');
 
   // ── User mode ──────────────────────────────────────────────────────────────
   // Initial state MUST ignore localStorage on first render, for the same

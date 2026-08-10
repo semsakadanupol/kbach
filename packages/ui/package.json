@@ -17,6 +17,7 @@
     ".": {
       "types": "./dist/index.d.ts",
       "source": "./src/index.ts",
+      "react-native": "./dist/index.js",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     },
@@ -44,7 +45,7 @@
     "./native": {
       "types": "./dist/native.d.ts",
       "source": "./src/native/index.ts",
-      "import": "./dist/native.js",
+      "import": "./dist/native.mjs",
       "require": "./dist/native.js"
     },
     "./babel": "./src/native/babel/index.js",

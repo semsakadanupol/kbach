@@ -2,7 +2,7 @@
 
 Kbach is a Tailwind-like utility CSS framework for React (web) and React Native. Classes are written as `className` strings and resolved to inline styles at render time. On web, stateful and structural CSS rules are injected into a `<style>` tag so they work with the browser cascade. On native, only inline-compatible styles are applied.
 
-One package, `@kbach/ui`, covers both platforms — React web, React Native, and Expo (Expo Go, Expo web, and native builds). The React Native/Expo pieces (a native-aware `ThemeProvider`, the Babel preset, Metro/Babel config helpers) live at the `@kbach/ui/native` and `@kbach/ui/babel` subpaths; everything else is the same import regardless of platform.
+One package, `@kbach/ui`, covers both platforms — React web, React Native, and Expo (Expo Go, Expo web, and native builds). `ThemeProvider` auto-detects native at render time, so it's the same import (`@kbach/ui`) on every platform. The Babel preset and Metro/Babel config helpers (Node-only build tooling) live at the `@kbach/ui/native` and `@kbach/ui/babel` subpaths.
 
 `@kbach/native` is deprecated and no longer maintained — its last published npm version stays available as a compatibility shim re-exporting `@kbach/ui`, but new setups should install `@kbach/ui` directly (see below).
 
@@ -71,10 +71,10 @@ Or the one-liner helper: `const { createKbachConfig } = require('@kbach/ui/nativ
 
 ### Wrap app
 ```jsx
-import { ThemeProvider } from '@kbach/ui/native';
+import { ThemeProvider } from '@kbach/ui';
 <ThemeProvider defaultMode="system"><AppContent /></ThemeProvider>
 ```
-This is a native-aware `ThemeProvider` that wraps the base one — reads `useColorScheme()`/`useWindowDimensions()` automatically, no extra props needed. Don't import the plain `ThemeProvider` from `@kbach/ui` on native; it doesn't have the automatic RN wiring.
+`ThemeProvider` auto-detects React Native at render time and reads `useColorScheme()`/`useWindowDimensions()` automatically — no extra props, no separate `/native` import needed.
 
 After changing babel.config.js: `npx expo start --clear`
 
@@ -88,8 +88,7 @@ In a browser (Expo Web, Metro web), `@kbach/ui` switches to the same CSS-class s
 - Recommended: use the Vite plugin same as the web Static CSS setup above — `import { kbach } from '@kbach/ui/vite'` — and import `kbach.css` in your entry file, for zero runtime cost on the web target too
 - Not using the Vite plugin (the common case for Expo/Metro web, no Vite build step)? Render `<KbachReset />` once near your root — e.g. Expo Router's root `app/_layout.tsx`, inside `<ThemeProvider>`:
   ```jsx
-  import { KbachReset } from '@kbach/ui';
-  import { ThemeProvider } from '@kbach/ui/native';
+  import { KbachReset, ThemeProvider } from '@kbach/ui';
   <ThemeProvider defaultMode="system"><KbachReset /><Slot /></ThemeProvider>
   ```
 

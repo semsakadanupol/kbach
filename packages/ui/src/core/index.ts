@@ -15,6 +15,7 @@ export type {
   DarkMode,
 } from './types';
 
+export { getGlobalSingleton } from './globalSingleton';
 export { isModeAwareColor } from './colorValue';
 export { expandModeAwareColorClasses } from './modeAwareColors';
 export { generateKbachTypesDts } from './generateTypesDts';

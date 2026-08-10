@@ -47,7 +47,7 @@ function getWebWidth(): number {
 /**
  * Subscribe to the current window width.
  * On web: direct window.resize listener → always returns live window.innerWidth.
- * On native: reads from the global store updated by NativeThemeProvider.
+ * On native: reads from the global store updated by ThemeProvider.
  */
 export function useGlobalWidth(): number {
   return useSyncExternalStore(

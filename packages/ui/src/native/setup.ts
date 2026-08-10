@@ -17,16 +17,10 @@ export interface KbachOptions {
 
 // ─── Terminal color helper ──────────────────────────────────────────────────────
 // Plain ANSI escapes — no-ops when stdout isn't a color-capable TTY (CI logs,
-// redirected output) or NO_COLOR is set.
-//
-// This file is bundled together with NativeThemeProvider.tsx into the same
-// dist/native/index.js (both are exported from native/index.ts), so it must
-// stay safe to load inside a real Metro/Hermes runtime even though warn()
-// itself only ever runs in Node build tooling. global.d.ts's ambient
-// `process` (narrowed to `{ env }` for exactly this reason) is cast locally
-// here rather than widened globally or replaced with a `node:process`
-// import — a real import would inject a require('node:process') into the
-// shared runtime bundle, which doesn't exist under Metro/Hermes.
+// redirected output) or NO_COLOR is set. This whole entry (native/index.ts) is
+// Node-only build tooling now — ThemeProvider moved to the main '@kbach/ui'
+// entry — but process is still accessed via global.d.ts's narrowed ambient
+// type (rather than a `node:process` import) to keep this file dependency-free.
 function warn(message: string): void {
   const proc = process as unknown as { stdout?: { isTTY?: boolean }; env: Record<string, string | undefined> };
   const useColor = !!proc.stdout?.isTTY && !proc.env.NO_COLOR;

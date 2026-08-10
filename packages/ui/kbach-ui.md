@@ -84,10 +84,10 @@ module.exports = function (api) {
 One-liner: `const { createKbachConfig } = require('@kbach/ui/native'); module.exports = createKbachConfig();`. Merge into an existing config with `withKbachBabel({ presets: [...] })` (same module). After editing this file: `npx expo start --clear`.
 
 ```jsx
-import { ThemeProvider } from '@kbach/ui/native';
+import { ThemeProvider } from '@kbach/ui';
 <ThemeProvider defaultMode="system"><App /></ThemeProvider>
 ```
-Native-aware — reads `useColorScheme()`/`useWindowDimensions()` automatically. The plain `ThemeProvider` from `@kbach/ui` (no `/native`) has no automatic RN wiring; import the `/native` one on React Native.
+`ThemeProvider` auto-detects React Native at render time and reads `useColorScheme()`/`useWindowDimensions()` automatically — same import as web, no `/native` subpath needed.
 
 `disablePersistence` on `<ThemeProvider>` saves to `AsyncStorage` on native (vs. `localStorage` on web) — same prop, platform-appropriate storage.
 

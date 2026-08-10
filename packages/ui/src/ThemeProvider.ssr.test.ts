@@ -11,8 +11,9 @@ import { getGlobalWidth } from './core';
 // `systemScheme` by branching on raw `isWeb` — true in the browser, false
 // both on a real native device AND during Node.js SSR of a React Native Web
 // app. SSR (isWeb false) read the `colorScheme` PROP (from RN's
-// useColorScheme(), passed by NativeThemeProvider), while the browser's very
-// first hydration render (isWeb true) immediately switched to reading
+// useColorScheme(), now read automatically by ThemeProvider's own native
+// auto-detection), while the browser's very first hydration render (isWeb
+// true) immediately switched to reading
 // `webScheme` (a useSyncExternalStore value whose OWN server snapshot is
 // hardcoded 'light') instead — two different variables, not just two
 // snapshots of the same store. If `colorScheme` ever differed from 'light'
@@ -46,8 +47,8 @@ describe('ThemeProvider SSR — system scheme branch matches the client hydratio
   });
 
   // Regression coverage for a fixed bug in the same family: `windowWidth`
-  // (from NativeThemeProvider, always populated via React Native's
-  // useWindowDimensions() — never undefined) used to win outright via
+  // (auto-detected via React Native's useWindowDimensions() — never
+  // undefined on a real device) used to win outright via
   // `windowWidthProp ?? (isWeb ? webWidth : 0)`, completely bypassing the
   // careful "start at 0, correct once mounted" webWidth dance that exists
   // specifically to keep SSR and client hydration in sync. Under React
@@ -59,9 +60,9 @@ describe('ThemeProvider SSR — system scheme branch matches the client hydratio
       React.createElement(ThemeProvider, {
         config: { darkMode: 'attribute' },
         defaultMode: 'light',
-        // Stands in for NativeThemeProvider's useWindowDimensions() reporting
-        // some real device/SSR-default width, e.g. 999 — before the fix this
-        // would win outright and get synced to the global width store.
+        // Stands in for useWindowDimensions() reporting some real
+        // device/SSR-default width, e.g. 999 — before the fix this would win
+        // outright and get synced to the global width store.
         windowWidth: 999,
         disablePersistence: true,
         children: React.createElement('div'),

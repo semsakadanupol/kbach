@@ -641,10 +641,17 @@ export function extractClassStrings(code: string): string[] {
     pushClassLikeStrings(block, found);
   }
 
-  // 3. clsx / cn / classnames / cx call — paren-depth tracking handles nested calls.
-  // The old [^)] regex stopped at the first ) inside any nested function call.
-  const clsxCallRe = /(?:clsx|cn|classnames|cx)\(/g;
-  while ((m = clsxCallRe.exec(code)) !== null) {
+  // 3. clsx / cn / classnames / cx / kb() call — paren-depth tracking handles
+  // nested calls. The old [^)] regex stopped at the first ) inside any nested
+  // function call. kb() included alongside the clsx family for the same
+  // reason styled() got its own scan below: kb()'s own docblock documents
+  // building a web className string with it (`className={kb('...') as
+  // string}`), commonly assigned to a variable first rather than always
+  // written inline inside className={} — `kb=` the JSX attribute is already
+  // covered by scans #1/#2 above, this is the separate `kb(` function-call
+  // form.
+  const classComposerCallRe = /(?:clsx|cn|classnames|cx|kb)\(/g;
+  while ((m = classComposerCallRe.exec(code)) !== null) {
     let depth = 1;
     let i = m.index + m[0].length;
     let block = '';
@@ -655,7 +662,7 @@ export function extractClassStrings(code: string): string[] {
       block += ch;
       i++;
     }
-    clsxCallRe.lastIndex = i + 1;
+    classComposerCallRe.lastIndex = i + 1;
     pushClassLikeStrings(block, found);
   }
 

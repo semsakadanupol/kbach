@@ -232,3 +232,30 @@ describe('extractClassStrings — styled(Component, \'base classes\') is scanned
     expect(() => extractClassStrings(code)).not.toThrow();
   });
 });
+
+// Regression: same gap as styled() above, but for kb() — a first-class
+// exported function whose own docblock documents building a web className
+// string with it (`className={kb('...') as string}`). Only worked when the
+// call happened to sit textually inside a className={} block; assigned to a
+// variable first (a very ordinary pattern — compute once, reuse, or the
+// StyleSheet.create()-style native usage from kb()'s own first example) it
+// was invisible to every extraction path. Fixed by folding `kb(` into the
+// same clsx/cn/classnames/cx call scan (the `kb=` JSX attribute form was
+// already covered separately by scans #1/#2 — this is the distinct `kb(`
+// function-call form).
+describe('extractClassStrings — kb(\'classes\') is scanned even when not inline in className={}', () => {
+  it('extracts classes from a standalone kb() call assigned to a variable', () => {
+    const code = `
+      const cardClass = kb('bg-white dark:bg-gray-9 p-4');
+      return <div className={cardClass}>Hi</div>;
+    `;
+    const tokens = extractClassStrings(code);
+    expect(tokens).toEqual(expect.arrayContaining(['bg-white', 'dark:bg-gray-9', 'p-4']));
+  });
+
+  it('still extracts kb() used inline inside className={}', () => {
+    const code = `<div className={kb('bg-white p-4') as string} />`;
+    const tokens = extractClassStrings(code);
+    expect(tokens).toEqual(expect.arrayContaining(['bg-white', 'p-4']));
+  });
+});

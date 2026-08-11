@@ -31,8 +31,8 @@ type OmittedKeys = 'style';
  * Create a styled component from any React / React Native component.
  *
  * ```tsx
- * const Card = styled(View, 'bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md');
- * const Button = styled(TouchableOpacity, 'bg-blue-500 pressed:bg-blue-700 dark:bg-blue-600 rounded-lg p-3');
+ * const Card = styled(View, 'bg-white dark:bg-gray-9 rounded-xl p-4 shadow-md');
+ * const Button = styled(TouchableOpacity, 'bg-blue-6 pressed:bg-blue-8 dark:bg-blue-7 rounded-lg p-3');
  *
  * // Use it:
  * <Card kb="mt-4">...</Card>

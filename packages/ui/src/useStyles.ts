@@ -24,14 +24,14 @@ export interface InteractionState {
  *
  * ```tsx
  * // Basic usage
- * const styles = useStyles('bg-white dark:bg-gray-900 p-4');
+ * const styles = useStyles('bg-white dark:bg-gray-9 p-4');
  *
  * // With interaction state
  * const [pressed, setPressed] = useState(false);
- * const styles = useStyles('bg-blue-500 pressed:bg-blue-700', { pressed });
+ * const styles = useStyles('bg-blue-6 pressed:bg-blue-8', { pressed });
  *
  * // Multiple class strings (merged left-to-right)
- * const styles = useStyles(['bg-white p-4', 'dark:bg-gray-900 rounded-xl']);
+ * const styles = useStyles(['bg-white p-4', 'dark:bg-gray-9 rounded-xl']);
  * ```
  */
 export function useStyles(

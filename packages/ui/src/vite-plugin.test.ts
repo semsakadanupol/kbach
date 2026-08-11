@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatKbachCSS } from './vite-plugin';
+import { formatKbachCSS, extractClassStrings } from './vite-plugin';
 import { buildConfig } from './core/config';
 import { generateClassCSS } from './core/resolver';
 
@@ -191,5 +191,44 @@ describe('formatKbachCSS — color-variable substitution does not corrupt arbitr
     // The declaration itself should still get var()-substituted — this
     // isn't "never touch matching text," only the selector must be spared.
     expect(css).toContain('var(--color-indigo-6-rgb)');
+  });
+});
+
+// Regression: extractClassStrings() (the static-CSS scanner) had no path for
+// styled(Component, 'base classes') calls — its base-classes argument is a
+// plain-quoted string, not a template literal, so it matched none of the
+// existing scans (className=/kb= attrs, clsx()-style calls, or the template-
+// literal fallback). Any app using styled() — a first-class, documented API
+// (see styled.tsx's own docblock) — got zero CSS for its base classes in the
+// static file: they still worked via runtime injection, so this only broke
+// once disableRuntimeCSS() fired (the static-CSS setup this file exists
+// for), making it silent and easy to miss until deployed with no runtime
+// fallback. Confirmed live: a real project's <Card> styled() component lost
+// all its base styling under the static setup. Fixed by scanning styled()
+// calls the same way as clsx()/cn()/etc.
+describe('extractClassStrings — styled(Component, \'base classes\') is scanned', () => {
+  it('extracts a plain-quoted base-classes string from styled(View, \'...\')', () => {
+    const code = `
+      import { View } from 'react-native';
+      import { styled } from '@kbach/ui';
+      const Card = styled(View, 'bg-white dark:bg-gray-9 rounded-xl p-4 shadow-md');
+    `;
+    const tokens = extractClassStrings(code);
+    expect(tokens).toEqual(
+      expect.arrayContaining(['bg-white', 'dark:bg-gray-9', 'rounded-xl', 'p-4', 'shadow-md']),
+    );
+  });
+
+  it('also extracts a template-literal base-classes argument', () => {
+    const code = 'const Card = styled(View, `bg-white p-4`);';
+    const tokens = extractClassStrings(code);
+    expect(tokens).toEqual(expect.arrayContaining(['bg-white', 'p-4']));
+  });
+
+  it('does not pick up an unrelated "styled" property access as a call', () => {
+    // e.g. `theme.styled` or similar — must not crash or hang on the
+    // paren-depth scan when there's no actual "styled(" call at all.
+    const code = "const label = 'not a styled call';";
+    expect(() => extractClassStrings(code)).not.toThrow();
   });
 });

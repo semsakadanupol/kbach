@@ -17,7 +17,7 @@ import { resolve, flatten, getConfig, getEffectiveIsWeb, type StyleValue, type R
  * });
  *
  * // Web: use as className
- * <div className={kb('bg-white dark:bg-gray-900 p-4') as string} />
+ * <div className={kb('bg-white dark:bg-gray-9 p-4') as string} />
  * ```
  *
  * @param classString   Space-separated utility classes
@@ -46,8 +46,8 @@ export function kb(classString: string, isDark = false): StyleValue | string {
  * Conditionally join class names. Falsy values are ignored.
  *
  * ```ts
- * cx('bg-white p-4', isActive && 'border-2 border-blue-500', undefined)
- * // → 'bg-white p-4 border-2 border-blue-500'
+ * cx('bg-white p-4', isActive && 'border-2 border-blue-6', undefined)
+ * // → 'bg-white p-4 border-2 border-blue-6'
  * ```
  */
 export function cx(...classes: Array<string | false | null | undefined>): string {

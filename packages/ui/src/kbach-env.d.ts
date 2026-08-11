@@ -20,7 +20,7 @@ export {};
 declare module 'react-native' {
   // ─── Kbach style props ────────────────────────────────────────────────────
   interface KbachProps {
-    /** Kbach utility class string, e.g. "bg-blue-500 dark:bg-blue-700 p-4" */
+    /** Kbach utility class string, e.g. "bg-blue-6 dark:bg-blue-8 p-4" */
     className?: string;
     /** Alias for className */
     kb?: string;

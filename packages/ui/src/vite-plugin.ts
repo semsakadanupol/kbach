@@ -610,7 +610,9 @@ function pushClassLikeStrings(text: string, into: Set<string>): void {
   }
 }
 
-function extractClassStrings(code: string): string[] {
+// Exported for tests only — internal to the plugin otherwise (not part of
+// @kbach/ui's public runtime API, same as formatKbachCSS above).
+export function extractClassStrings(code: string): string[] {
   const found = new Set<string>();
 
   // 1. Simple string attrs: className="..." or kb="...". Same-quote backreference
@@ -657,12 +659,40 @@ function extractClassStrings(code: string): string[] {
     pushClassLikeStrings(block, found);
   }
 
-  // 4. Any other template literal in the file: `bg-red-500 ${cond ? 'p-4' : 'p-2'}`.
-  // A blanket scan, so one already inside a className={}/kb={}/clsx() block
-  // above gets processed twice — harmless, `found` is a Set. This catches
-  // template literals used some other way (e.g. assigned to a variable that's
-  // later spread into className, or a styled()-style tagged usage) that the
-  // more targeted scans above don't look for.
+  // 4. styled(Component, 'base classes') — same paren-depth tracking as clsx
+  // above. Regression: styled()'s own doc example (styled.tsx's docblock)
+  // uses a plain-quoted string, not a template literal — `styled(View,
+  // 'bg-white dark:bg-gray-9 rounded-xl p-4 shadow-md')` — which extraction
+  // #5 below (template literals only) never matched, so any app using
+  // styled() got zero CSS for its base classes in the static file: they
+  // still worked via runtime injection, so this only broke once
+  // disableRuntimeCSS() fired (the static-CSS setup this whole file exists
+  // for), making it a silent, easy-to-miss gap rather than a build error.
+  // The Component argument (an identifier, JSX tag, or expression) is
+  // harmless noise here — pushClassLikeStrings only pulls out quoted-string
+  // content, and a component reference never happens to look like one.
+  const styledCallRe = /\bstyled\(/g;
+  while ((m = styledCallRe.exec(code)) !== null) {
+    let depth = 1;
+    let i = m.index + m[0].length;
+    let block = '';
+    while (i < code.length && depth > 0) {
+      const ch = code[i];
+      if (ch === '(') depth++;
+      else if (ch === ')') { if (--depth === 0) break; }
+      block += ch;
+      i++;
+    }
+    styledCallRe.lastIndex = i + 1;
+    pushClassLikeStrings(block, found);
+  }
+
+  // 5. Any other template literal in the file: `bg-red-6 ${cond ? 'p-4' : 'p-2'}`.
+  // A blanket scan, so one already inside a className={}/kb={}/clsx()/styled()
+  // block above gets processed twice — harmless, `found` is a Set. This
+  // catches template literals used some other way (e.g. assigned to a
+  // variable that's later spread into className) that the more targeted
+  // scans above don't look for.
   const templateRe = /`([^`]{1,2000})`/g;
   while ((m = templateRe.exec(code)) !== null) pushTemplateLiteralBody(m[1], found);
 

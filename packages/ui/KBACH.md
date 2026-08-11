@@ -122,11 +122,18 @@ const Button = styled('button', 'bg-blue-7 hover:bg-blue-8 rounded-xl px-6 py-3'
 On web, `styled()` forwards the full class string as `className` so CSS rules (group-hover:, before:, print:) match the element.
 
 ### useStyles(classes)
-Resolve classes to a style object inside a component.
+Resolve classes to a style object inside a component. This is also the escape hatch for genuinely dynamic class strings (`` `bg-${color}-${shade}` ``) that the static Vite plugin can't discover by scanning source text — it always resolves at render time regardless.
 ```jsx
 import { useStyles } from '@kbach/ui';
 const style = useStyles('bg-blue-6 px-3 py-1 rounded-full');
 return <span style={style}>Badge</span>;
+```
+Want that same dynamic set of classes as real CSS in the static file instead of an inline style? Generate the full list yourself and pass it to the plugin's `safelist` option:
+```ts
+// vite.config.ts
+const families = ['red', 'blue' /* … */];
+const shades = [1, 2, 3 /* … */];
+kbach({ safelist: families.flatMap((f) => shades.map((s) => `bg-${f}-${s}`)) })
 ```
 
 ### kb(classes)

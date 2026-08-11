@@ -120,6 +120,27 @@ kbach({
 })
 ```
 
+`kbach()` also accepts an options wrapper — `{ framework, include, safelist }` — instead of a bare framework config directly:
+
+```ts
+kbach({
+  framework: { darkMode: 'attribute', theme: { colors: { brand: { 6: '#6366f1' } } } },
+  include: ['src'],   // dirs to scan (relative to Vite root) — default: src, app, pages, components, views, layouts
+  safelist: [ /* see below */ ],
+})
+```
+
+**`safelist`** — class names to always include, even if no scan finds them. Static extraction only ever sees complete class strings as they appear in your source — it can't evaluate `` `bg-${family}-${shade}` `` or similar runtime-built strings, since the actual value doesn't exist until the component renders (this is exactly why `useStyles()` exists — see its own docs above — it resolves those to a real inline style instead). If you want a genuinely dynamic set of classes in the static file anyway, generate the full list yourself and pass it in — same purpose as Tailwind's own `safelist` config:
+
+```ts
+const families = ['red', 'blue', 'green' /* … */];
+const shades = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+kbach({
+  safelist: families.flatMap((f) => shades.map((s) => `bg-${f}-${s}`)),
+})
+```
+
 Generated output format:
 ```css
 /* kbach:start */

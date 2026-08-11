@@ -813,18 +813,37 @@ export interface KbachPluginOptions {
   framework?: FrameworkConfig;
   /** Directories to scan for class strings (relative to Vite root). Defaults to common source dirs. */
   include?: string[];
+  /**
+   * Class names to always include in the generated kbach.css, even if no
+   * scan finds them literally in your source. Static extraction only ever
+   * sees complete class strings as they appear in your files — it can't
+   * evaluate `` `bg-${color}-${shade}` `` or similar runtime-built strings,
+   * because the actual value doesn't exist until the component renders (see
+   * useStyles()'s own docblock for the same limitation from the other
+   * direction). Same purpose as Tailwind's `safelist` config: list the
+   * complete class names explicitly, e.g. generated from the same
+   * color/shade arrays your component already loops over —
+   *
+   * ```js
+   * const families = ['red', 'blue', 'green'];
+   * const shades = [1, 2, 3];
+   * safelist: families.flatMap((f) => shades.map((s) => `bg-${f}-${s}`))
+   * ```
+   */
+  safelist?: string[];
 }
 
 const DEFAULT_SCAN_DIRS = ['src', 'app', 'pages', 'components', 'views', 'layouts'];
 
 export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions): Plugin {
-  // Accept both legacy `kbach(frameworkConfig)` and new `kbach({ framework, include })` forms
+  // Accept both legacy `kbach(frameworkConfig)` and new `kbach({ framework, include, safelist })` forms
   const isOptions = userConfigOrOptions != null &&
-    ('framework' in (userConfigOrOptions as object) || 'include' in (userConfigOrOptions as object));
+    ('framework' in (userConfigOrOptions as object) || 'include' in (userConfigOrOptions as object) || 'safelist' in (userConfigOrOptions as object));
   const userConfig = isOptions
     ? (userConfigOrOptions as KbachPluginOptions).framework
     : userConfigOrOptions as FrameworkConfig | undefined;
   const includeDirs = (isOptions ? (userConfigOrOptions as KbachPluginOptions).include : undefined) ?? DEFAULT_SCAN_DIRS;
+  const safelist = (isOptions ? (userConfigOrOptions as KbachPluginOptions).safelist : undefined) ?? [];
 
   const cfg = buildConfig(userConfig ?? {});
   const screens = toNumericScreens(cfg.theme.screens ?? {});
@@ -884,6 +903,27 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
       checkUnknownToken(tok, filePath, code);
     }
     fileTokens.set(key, tokens);
+  }
+
+  // safelist entries go into fileTokens under a key no real file path can
+  // ever normalize to (normPath()'d paths are always absolute — see its own
+  // comment — so a bare, non-path string is safe from collision), which is
+  // what makes buildTokenCSSView()'s "active = union of every fileTokens
+  // entry" pick them up automatically, with zero special-casing anywhere
+  // else — same permanence as a file that's always present, never edited or
+  // deleted, so the add/unlink/hot-update handlers (which only ever touch
+  // keys derived from real file paths) can never prune it.
+  const SAFELIST_KEY = '\0kbach-safelist';
+
+  function processSafelist(): void {
+    if (safelist.length === 0) return;
+    const tokens = new Set(safelist);
+    for (const tok of tokens) {
+      if (!tokenCSS.has(tok)) {
+        tokenCSS.set(tok, generateClassCSS(tok, cfg.theme, cfg.darkMode, screens));
+      }
+    }
+    fileTokens.set(SAFELIST_KEY, tokens);
   }
 
   function scanProjectCssSelectors(): void {
@@ -1022,6 +1062,7 @@ export function kbach(userConfigOrOptions?: FrameworkConfig | KbachPluginOptions
       // partial one that would misreport project-defined classes as unknown.
       scanProjectCssSelectors();
       initialScan();
+      processSafelist();
       if (mainCSSFile) writeKbachToFile(mainCSSFile, generateCSS());
     },
 

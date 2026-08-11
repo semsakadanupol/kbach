@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { formatKbachCSS, extractClassStrings } from './vite-plugin';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { formatKbachCSS, extractClassStrings, kbach } from './vite-plugin';
 import { buildConfig } from './core/config';
 import { generateClassCSS } from './core/resolver';
 
@@ -257,5 +260,98 @@ describe('extractClassStrings — kb(\'classes\') is scanned even when not inlin
     const code = `<div className={kb('bg-white p-4') as string} />`;
     const tokens = extractClassStrings(code);
     expect(tokens).toEqual(expect.arrayContaining(['bg-white', 'p-4']));
+  });
+});
+
+// New feature: `safelist` — force-include specific class names in the
+// generated kbach.css regardless of whether static scanning finds them.
+// Exists for genuinely dynamic class names (`` `bg-${family}-${shade}` ``)
+// that no scanner — regex-based or otherwise — can discover, since the
+// actual string doesn't exist until the component renders. Same purpose as
+// Tailwind's own `safelist` config. Uses real file I/O (kbach() writes to an
+// actual kbach.css on disk) rather than the in-memory formatKbachCSS/
+// extractClassStrings helpers above, since safelist support lives in
+// buildStart()'s own token bookkeeping, not in either of those.
+describe('kbach() plugin — safelist forces classes into kbach.css that scanning can\'t find', () => {
+  let tmpRoot: string | undefined;
+
+  afterEach(() => {
+    if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true });
+    tmpRoot = undefined;
+  });
+
+  // Drives the plugin the same way Vite itself does — configResolved() sets
+  // `root` (process.chdir() isn't an option here: unsupported inside
+  // Vitest's worker threads, a genuine Node limitation, not a workaround-able
+  // test quirk) — before buildStart() ever runs.
+  function makeFixture(): { srcDir: string; cssPath: string } {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'kbach-safelist-test-'));
+    const srcDir = join(tmpRoot, 'src');
+    mkdirSync(srcDir);
+    // A component with no relevant classes — proves the safelisted tokens
+    // below come from the safelist, not from anything scanning would find.
+    writeFileSync(join(srcDir, 'App.tsx'), 'export function App() { return null; }\n');
+    const cssPath = join(srcDir, 'kbach.css');
+    writeFileSync(cssPath, '');
+    return { srcDir, cssPath };
+  }
+
+  function resolveConfig(plugin: ReturnType<typeof kbach>, root: string): void {
+    (plugin.configResolved as (r: unknown) => void)({ root, plugins: [] });
+  }
+
+  it('generates CSS for a safelisted dynamic-color pattern with no matching source text', () => {
+    const { cssPath } = makeFixture();
+    const families = ['red', 'blue'];
+    const shades = [1, 6, 11];
+    const plugin = kbach({
+      include: ['src'],
+      safelist: families.flatMap((f) => shades.map((s) => `bg-${f}-${s}`)),
+    });
+    resolveConfig(plugin, tmpRoot!);
+    (plugin.buildStart as () => void)();
+
+    const css = readFileSync(cssPath, 'utf-8');
+    for (const f of families) {
+      for (const s of shades) {
+        expect(css).toContain(`.bg-${f}-${s} {`);
+      }
+    }
+  });
+
+  it('produces no extra CSS when safelist is omitted (default, unaffected)', () => {
+    const { cssPath } = makeFixture();
+    const plugin = kbach({ include: ['src'] });
+    resolveConfig(plugin, tmpRoot!);
+    (plugin.buildStart as () => void)();
+
+    const css = readFileSync(cssPath, 'utf-8');
+    expect(css).not.toContain('bg-red-1');
+    expect(css).not.toContain('bg-blue-6');
+  });
+
+  it('survives an incremental HMR update to an unrelated file (not pruned like a real file\'s tokens would be)', () => {
+    const { srcDir, cssPath } = makeFixture();
+    const plugin = kbach({ include: ['src'], safelist: ['bg-red-6'] });
+    resolveConfig(plugin, tmpRoot!);
+    (plugin.buildStart as () => void)();
+    expect(readFileSync(cssPath, 'utf-8')).toContain('.bg-red-6 {');
+
+    // Edit App.tsx (still no relevant classes) and run it back through
+    // handleHotUpdate, the same path a real dev-server file save takes.
+    const appPath = join(srcDir, 'App.tsx');
+    writeFileSync(appPath, 'export function App() { return <div>edited</div>; }\n');
+    const events: unknown[][] = [];
+    const fakeServer = { watcher: { emit: (...args: unknown[]) => { events.push(args); } } };
+    (plugin.handleHotUpdate as (ctx: { file: string; server: unknown }) => void)({
+      file: appPath,
+      server: fakeServer,
+    });
+
+    // syncMainCSSFile() rebuilds `active` from every fileTokens entry and
+    // prunes tokenCSS to just that set — the safelist's own entry (keyed
+    // under SAFELIST_KEY, never touched by this handler) must still be in
+    // the union, or this regenerated file would have silently lost it.
+    expect(readFileSync(cssPath, 'utf-8')).toContain('.bg-red-6 {');
   });
 });

@@ -1,7 +1,29 @@
 node_modules/
 dist/
-.turbo/
 coverage/
-*.log
-.DS_Store
-.claude/
+.turbo/
+*.tsbuildinfo
+
+# Rust
+target/
+dist-node/
+
+# cargo's intermediate build dir, redirected here (via CARGO_BUILD_BUILD_DIR)
+# to work around a Windows Application Control policy blocking build-script
+# execution under %TEMP% on this machine.
+.cargo-build-tmp/
+
+# WASM build artifacts committed via packages/core-engine/dist instead
+pkg/
+
+# Gradle build output for packages/android's library module (apps/native-sandbox
+# has its own RN-template .gitignore covering its app module already). "**/"
+# prefix required — a bare "android/build/" in the root .gitignore anchors to
+# the repo root and won't match the deeper packages/android/android/build/ path.
+**/android/build/
+**/android/.cxx/
+**/android/.gradle/
+
+# Old all-TypeScript implementation, kept locally as a read-only reference
+# during the from-scratch polyglot rewrite — not part of this repo's history.
+old-kbach/

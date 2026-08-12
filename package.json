@@ -1,27 +1,20 @@
 {
   "name": "kbach",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "private": true,
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/semsakadanupol/kbach.git"
-  },
-  "homepage": "https://github.com/semsakadanupol/kbach#readme",
-  "bugs": "https://github.com/semsakadanupol/kbach/issues",
   "packageManager": "npm@11.13.0",
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "!apps/native-sandbox"
   ],
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
     "test": "turbo run test",
     "lint": "turbo run lint",
-    "clean": "turbo run clean && node -e \"require('fs').rmSync('node_modules',{recursive:true,force:true})\"",
-    "publish:ui": "turbo run build --filter=@kbach/ui && npm version patch --workspace=@kbach/ui --no-git-tag-version && npm publish --workspace=@kbach/ui",
-    "publish:all": "turbo run build && npm version patch --workspaces --no-git-tag-version && npm publish --workspaces"
+    "clean": "turbo run clean && node -e \"require('fs').rmSync('node_modules',{recursive:true,force:true})\""
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

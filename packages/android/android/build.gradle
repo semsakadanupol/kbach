@@ -1,0 +1,36 @@
+apply plugin: "com.android.library"
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "com.facebook.react"
+
+def getExtOrDefault(name) {
+    return rootProject.ext.has(name) ? rootProject.ext.get(name) : null
+}
+
+android {
+    // NOT "com.kbachnative" — that's the app module's own namespace (Phase 5
+    // deliberately made the app's package match KbachModule's Kotlin package
+    // for simpler JNI symbol names), and AGP requires unique namespaces per
+    // module. This is purely a Gradle build-identity value, separate from
+    // the actual `package com.kbachnative` declared in the .kt files below —
+    // JNI symbol resolution depends on that Kotlin package, not this.
+    namespace "com.kbachnative.nativemodule"
+    compileSdkVersion getExtOrDefault("compileSdkVersion")
+
+    defaultConfig {
+        minSdkVersion getExtOrDefault("minSdkVersion")
+        targetSdkVersion getExtOrDefault("targetSdkVersion")
+    }
+}
+
+repositories {
+    google()
+    maven {
+        // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm.
+        url "$rootDir/../node_modules/react-native/android"
+    }
+    mavenCentral()
+}
+
+dependencies {
+    implementation "com.facebook.react:react-native:+"
+}

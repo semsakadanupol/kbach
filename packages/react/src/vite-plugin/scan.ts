@@ -1,0 +1,138 @@
+// Ported from old-kbach/src/vite-plugin.ts's extractClassStrings and its
+// helpers — proven, already-bug-fixed string extraction (same-quote
+// backreferences so an apostrophe inside a double-quoted attribute doesn't
+// truncate it; brace/paren-depth tracking so a nested object/call doesn't
+// stop the scan at the first `}`/`)`). Narrowed to this project's actual
+// surface: no styled() scanning (this project has no styled() HOC).
+
+import { readdirSync, readFileSync, statSync } from 'fs';
+import { join } from 'path';
+
+function splitClassTokens(str: string): string[] {
+  return str.split(/\s+/).filter(Boolean);
+}
+
+// Never a real class name, regardless of how it was extracted: leftover
+// ${...} interpolation syntax the extraction couldn't fully resolve, the
+// static remainder of a token whose other half was an interpolation
+// ("nested-" from `` `nested-${size}` ``), or ternary/quote punctuation left
+// over from a mismatched/partially-resolved expression. Negative-value
+// utilities (`-mt-4`) legitimately start with "-", so only a TRAILING dash
+// is filtered.
+const NOT_A_CLASS_NAME_RE = /[${}]|-$|^[?:&|!"'=<>]+$/;
+
+function pushTokens(str: string, into: Set<string>): void {
+  for (const tok of splitClassTokens(str)) {
+    if (tok && !NOT_A_CLASS_NAME_RE.test(tok)) into.add(tok);
+  }
+}
+
+function pushTemplateLiteralBody(body: string, into: Set<string>): void {
+  const interpolationRe = /\$\{(?:[^{}]|\{[^{}]*\})*\}/g;
+  let im: RegExpExecArray | null;
+  while ((im = interpolationRe.exec(body)) !== null) {
+    pushClassLikeStrings(im[0], into);
+  }
+  pushTokens(body.replace(/\$\{(?:[^{}]|\{[^{}]*\})*\}/g, () => '$'), into);
+}
+
+function pushClassLikeStrings(text: string, into: Set<string>): void {
+  const quotedStringRe = /(["'`])((?:(?!\1).)*)\1/g;
+  let qm: RegExpExecArray | null;
+  while ((qm = quotedStringRe.exec(text)) !== null) {
+    const [, quote, content] = qm;
+    if (quote === '`') pushTemplateLiteralBody(content!, into);
+    else pushTokens(content!, into);
+  }
+}
+
+/** Exported for tests only — internal to the plugin otherwise. */
+export function extractClassStrings(code: string): string[] {
+  const found = new Set<string>();
+
+  // 1. Simple string attrs: className="..." or kb="...".
+  const simpleRe = /(?:className|kb)=(["'])((?:(?!\1).)*)\1/g;
+  let m: RegExpExecArray | null;
+  while ((m = simpleRe.exec(code)) !== null) pushTokens(m[2]!, found);
+
+  // 2. JSX expression block: className={...} — brace-tracking for nested {}.
+  const jsxExprRe = /(?:className|kb)=\{/g;
+  while ((m = jsxExprRe.exec(code)) !== null) {
+    let depth = 1;
+    let i = m.index + m[0].length;
+    let block = '';
+    while (i < code.length && depth > 0) {
+      const ch = code[i];
+      if (ch === '{') depth++;
+      else if (ch === '}') { if (--depth === 0) break; }
+      block += ch;
+      i++;
+    }
+    jsxExprRe.lastIndex = i + 1;
+    pushClassLikeStrings(block, found);
+  }
+
+  // 3. clsx / cn / classnames / cx / kb() call — paren-depth tracking.
+  const classComposerCallRe = /(?:clsx|cn|classnames|cx|kb)\(/g;
+  while ((m = classComposerCallRe.exec(code)) !== null) {
+    let depth = 1;
+    let i = m.index + m[0].length;
+    let block = '';
+    while (i < code.length && depth > 0) {
+      const ch = code[i];
+      if (ch === '(') depth++;
+      else if (ch === ')') { if (--depth === 0) break; }
+      block += ch;
+      i++;
+    }
+    classComposerCallRe.lastIndex = i + 1;
+    pushClassLikeStrings(block, found);
+  }
+
+  // 4. Any other template literal in the file — catches one assigned to a
+  // variable and spread into className some other way. Harmless to double-
+  // scan one already caught above — `found` is a Set.
+  const templateRe = /`([^`]{1,2000})`/g;
+  while ((m = templateRe.exec(code)) !== null) pushTemplateLiteralBody(m[1]!, found);
+
+  return [...found];
+}
+
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', '.next', '.output', '.git', '.svn', '.cache', 'coverage']);
+const MAX_SCAN_DEPTH = 10;
+
+const DEFAULT_FILE_MATCH = /\.(tsx?|jsx?)$/;
+
+/**
+ * Recursively walks `dir`, calling `onFile` for every entry matching
+ * `fileMatch` (source files by default). Shared by scanning source files
+ * for class strings (the default) and — via a different `fileMatch` —
+ * scanning the project's own stylesheets for literal class selectors (see
+ * unknownClassWarnings.ts) — the walking logic (skip dirs, depth cap,
+ * unreadable-file handling) is identical either way.
+ */
+export function scanDir(
+  dir: string,
+  onFile: (filePath: string, code: string) => void,
+  depth = 0,
+  fileMatch: RegExp = DEFAULT_FILE_MATCH,
+): void {
+  if (depth > MAX_SCAN_DEPTH) return;
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.startsWith('.') || SKIP_DIRS.has(entry)) continue;
+    const full = join(dir, entry);
+    try {
+      const st = statSync(full);
+      if (st.isDirectory()) scanDir(full, onFile, depth + 1, fileMatch);
+      else if (fileMatch.test(entry)) onFile(full, readFileSync(full, 'utf-8'));
+    } catch {
+      // Unreadable file/symlink — skip.
+    }
+  }
+}

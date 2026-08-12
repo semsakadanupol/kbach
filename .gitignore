@@ -13,8 +13,15 @@ dist-node/
 # execution under %TEMP% on this machine.
 .cargo-build-tmp/
 
-# WASM build artifacts committed via packages/core-engine/dist instead
+# WASM build artifacts are committed via packages/core-engine/dist instead of
+# the wasm-pack default output dir name (pkg/) — consumers (packages/react's
+# jsx-runtime, the Vite plugin) import the built .js/.wasm directly, so a
+# fresh clone needs it present without requiring a Rust toolchain + wasm-pack
+# build step first. Negate the generic "dist/" rule above just for this path
+# (both the directory and everything under it, per git's negation rules).
 pkg/
+!packages/core-engine/dist/
+!packages/core-engine/dist/**
 
 # Gradle build output for packages/android's library module (apps/native-sandbox
 # has its own RN-template .gitignore covering its app module already). "**/"

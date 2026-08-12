@@ -1,0 +1,25 @@
+{
+  "name": "@kbach/core-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/kbach_core_engine.js",
+  "types": "./dist/kbach_core_engine.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/kbach_core_engine.d.ts",
+      "default": "./dist/kbach_core_engine.js"
+    },
+    "./node": {
+      "types": "./dist-node/kbach_core_engine.d.ts",
+      "default": "./dist-node/kbach_core_engine.js"
+    }
+  },
+  "files": ["dist", "dist-node"],
+  "scripts": {
+    "build": "wasm-pack build --target web --out-dir dist && wasm-pack build --target nodejs --out-dir dist-node",
+    "test": "cargo test",
+    "lint": "cargo check",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('dist-node',{recursive:true,force:true});require('fs').rmSync('target',{recursive:true,force:true})\""
+  }
+}

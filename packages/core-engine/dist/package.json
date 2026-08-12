@@ -1,0 +1,16 @@
+{
+  "name": "kbach-core-engine",
+  "type": "module",
+  "version": "0.0.0",
+  "license": "MIT",
+  "files": [
+    "kbach_core_engine_bg.wasm",
+    "kbach_core_engine.js",
+    "kbach_core_engine.d.ts"
+  ],
+  "main": "kbach_core_engine.js",
+  "types": "kbach_core_engine.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

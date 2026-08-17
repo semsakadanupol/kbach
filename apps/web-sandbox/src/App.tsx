@@ -1,10 +1,5 @@
 import { useState, type ReactNode } from "react";
-import {
-  useGlobalDarkMode,
-  toggleGlobalDarkMode,
-  ThemeProvider,
-  useTheme,
-} from "@kbach/react";
+import { ThemeProvider, useTheme } from "@kbach/react";
 
 const FONT_STACK =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
@@ -217,12 +212,10 @@ function Section({
   );
 }
 
-// Consumes useTheme() — requires a <ThemeProvider> ancestor, unlike the
-// header's toggle button above (which uses useGlobalDarkMode()/
-// toggleGlobalDarkMode() with no provider at all). Both read/write the
-// exact same global store, so toggling here also flips the header button's
-// label, and vice versa — proving they're two views onto one source of
-// truth, not two separate state machines.
+// useTheme() reads/writes the same global store the header's own toggle
+// button above uses — with or without the <ThemeProvider> this is wrapped
+// in below, so toggling here also flips the header button's label, and
+// vice versa.
 function ThemeProviderDemo() {
   const { mode, isDark, setMode, toggle } = useTheme();
   return (
@@ -355,11 +348,11 @@ function DynamicStylingDemo() {
 }
 
 export default function App() {
-  // No <ThemeProvider> anywhere in this tree — useGlobalDarkMode()/
-  // toggleGlobalDarkMode() work standalone, reading/writing the same
-  // module-level store the (optional) <ThemeProvider> in the "Theme
-  // Provider" section below also reads/writes, so both stay in sync.
-  const dark = useGlobalDarkMode();
+  // No <ThemeProvider> anywhere in this tree — useTheme() works standalone,
+  // reading/writing the same module-level store the (optional)
+  // <ThemeProvider> in the "Theme Provider" section below also reads/
+  // writes, so both stay in sync.
+  const { isDark: dark, toggle } = useTheme();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
@@ -392,7 +385,7 @@ export default function App() {
           <button
             data-testid="toggle-btn"
             className="cursor-pointer bg-gold hover:bg-[#facc15] focus:outline p-2 rounded-lg font-semibold text-sm"
-            onClick={toggleGlobalDarkMode}
+            onClick={toggle}
           >
             {dark ? "Dark" : "Light"} mode
           </button>
@@ -1955,16 +1948,15 @@ export default function App() {
               title="Theme Provider"
               description={
                 <>
-                  The header's own light/dark toggle above uses{" "}
-                  <Code>useGlobalDarkMode()</Code>/
-                  <Code>toggleGlobalDarkMode()</Code> — no{" "}
-                  <Code>&lt;ThemeProvider&gt;</Code> anywhere in the tree. This
-                  section instead wraps a subtree in{" "}
-                  <Code>&lt;ThemeProvider&gt;</Code> and reads it via{" "}
                   <Code>useTheme()</Code> (<Code>mode</Code>/<Code>isDark</Code>/
-                  <Code>setMode</Code>/<Code>toggle</Code>) — both read and write
-                  the exact same global store, so toggling either one updates
-                  the other instantly.
+                  <Code>setMode</Code>/<Code>toggle</Code>) is the one hook for
+                  dark-mode state — it works anywhere, with or without a{" "}
+                  <Code>&lt;ThemeProvider&gt;</Code> ancestor, since it reads a
+                  single global store directly (that's what the header's own
+                  toggle button above uses, with no provider in its tree at
+                  all). <Code>&lt;ThemeProvider defaultMode&gt;</Code> is purely
+                  an optional convenience for seeding an app's initial theme
+                  once, in JSX, like the subtree below does.
                 </>
               }
               code={[
@@ -1975,7 +1967,7 @@ export default function App() {
                 '  return <button onClick={toggle}>{mode}</button>;',
                 '}',
                 '',
-                '<ThemeProvider>',
+                "<ThemeProvider defaultMode=\"dark\">",
                 '  <Demo />',
                 '</ThemeProvider>',
               ].join('\n')}

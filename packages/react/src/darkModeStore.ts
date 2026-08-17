@@ -54,7 +54,7 @@ function resolveIsDark(m: ThemeMode): boolean {
  * this writes would silently never match. `'media'` strategy needs no DOM
  * write at all: `prefers-color-scheme` in the generated `@media` query
  * already tracks the OS preference directly; this store still keeps
- * `isDark` accurate for JS consumers (`useGlobalDarkMode()`, `useTheme()`)
+ * `isDark` accurate for JS consumers (`useTheme()`)
  * even though there's nothing to touch on the element itself.
  */
 function applyToDom(dark: boolean): void {

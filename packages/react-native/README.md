@@ -253,32 +253,34 @@ before your first `useEffect` runs.
 
 ## Dark mode
 
-Works standalone, with zero provider — same architecture as `@kbach/react`:
+`useTheme()` is the one hook — same architecture as `@kbach/react` — it
+works anywhere, with or without a `<ThemeProvider>` mounted:
 
 ```tsx
-import { useGlobalDarkMode, toggleGlobalDarkMode } from '@kbach/react-native';
+import { useTheme } from '@kbach/react-native';
 
 function ThemeToggle() {
-  const isDark = useGlobalDarkMode();
-  return <Pressable onPress={toggleGlobalDarkMode}><Text>{isDark ? 'Dark' : 'Light'}</Text></Pressable>;
-}
-```
-
-Or the optional `<ThemeProvider>` / `useTheme()` pair, reading and writing
-the exact same global store:
-
-```tsx
-import { ThemeProvider, useTheme } from '@kbach/react-native';
-
-function Toggle() {
   const { mode, isDark, setMode, toggle } = useTheme();
   return <Pressable onPress={toggle}><Text>{mode}</Text></Pressable>;
 }
+```
 
-<ThemeProvider defaultMode="system">
-  <Toggle />
+`<ThemeProvider>` is entirely optional — it doesn't do anything `useTheme()`
+needs, it's purely a convenience for seeding an app's initial `defaultMode`
+once, in JSX:
+
+```tsx
+import { ThemeProvider } from '@kbach/react-native';
+
+<ThemeProvider defaultMode="dark">
+  <App />
 </ThemeProvider>;
 ```
+
+For code that isn't a React component and can't call a hook, the underlying
+store functions are exported directly too: `getGlobalDarkMode`,
+`getGlobalThemeMode`, `setGlobalThemeMode`, `toggleGlobalDarkMode`,
+`subscribeGlobalDarkMode`.
 
 By default the mode follows the OS `Appearance` setting live until you
 explicitly override it — and **isn't persisted across app launches**.

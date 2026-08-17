@@ -48,10 +48,9 @@ interface Spec extends TurboModule {
  * whenever the mode is `'system'` (its own default), so nothing regresses
  * for apps that never touch the override API at all. This function itself
  * has no subscription of its own, so nothing re-renders just because the
- * store's value changed — call `useGlobalDarkMode()` (or consume
- * `useTheme()`'s `isDark`) somewhere in the tree for that, NOT React
- * Native's own `useColorScheme()`, which only reflects the raw OS setting
- * and would miss an explicit override entirely.
+ * store's value changed — call `useTheme()` (its `isDark`) somewhere in
+ * the tree for that, NOT React Native's own `useColorScheme()`, which only
+ * reflects the raw OS setting and would miss an explicit override entirely.
  *
  * Phase 11 originally shipped with live in-place theme switching unverified
  * (a `uiMode` toggle triggered a re-render but `Appearance.getColorScheme()`

@@ -81,6 +81,7 @@ input[type='search']::-webkit-search-decoration, input[type='search']::-webkit-s
   --spacing-8: 32px;
   --spacing-6: 24px;
   --spacing-0: 0px;
+  --spacing-20: 80px;
 }
 
 @keyframes kb-spin {
@@ -363,7 +364,7 @@ input[type='search']::-webkit-search-decoration, input[type='search']::-webkit-s
   grid-template-rows: repeat(2, minmax(0, 1fr));
 }
 .h-\[80px\] {
-  height: 80px;
+  height: var(--spacing-20);
 }
 .bg-teal-6 {
   background-color: rgba(var(--color-teal-6-rgb),var(--bg-opacity, 1));

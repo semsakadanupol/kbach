@@ -18,10 +18,10 @@ its own 22-family + metals color palette as the one deliberate difference.
 - **Static by default.** The Vite plugin scans your source and writes a real,
   plain `kbach.css` file — no runtime style injection needed, no
   flash-of-unstyled-content, no client-side CSS-in-JS overhead.
-- **Dark mode that works without a provider.** Toggle/set/subscribe to dark
-  mode from anywhere — a plain function, an event handler, a component that
-  never wants React Context — with an optional `<ThemeProvider>` as a thin
-  wrapper around the exact same store.
+- **Dark mode that works without a provider.** One hook, `useTheme()`, reads
+  and writes a single global store directly — works from any component, no
+  `<ThemeProvider>` required. Non-React code (a plain function, an event
+  handler) can read/write the exact same store too.
 - **Composable by nature.** Utility class strings are just strings — combine
   them with plain arrays, ternaries, or template literals. No bespoke
   composition API required.
@@ -79,32 +79,39 @@ Then just use utility classes:
 
 ## Dark mode
 
-Works standalone, with zero provider:
+`useTheme()` is the one hook — it works anywhere, with or without a
+`<ThemeProvider>` mounted:
 
 ```tsx
-import { useGlobalDarkMode, toggleGlobalDarkMode } from '@kbach/react';
+import { useTheme } from '@kbach/react';
 
 function ThemeToggle() {
-  const isDark = useGlobalDarkMode();
-  return <button onClick={toggleGlobalDarkMode}>{isDark ? 'Dark' : 'Light'}</button>;
-}
-```
-
-Or opt into the optional `<ThemeProvider>` / `useTheme()` pair — both read
-and write the exact same global store, so they always stay in sync with the
-standalone functions above:
-
-```tsx
-import { ThemeProvider, useTheme } from '@kbach/react';
-
-function Toggle() {
   const { mode, isDark, setMode, toggle } = useTheme();
   return <button onClick={toggle}>{mode}</button>;
 }
+```
 
-<ThemeProvider defaultMode="system">
-  <Toggle />
+`<ThemeProvider>` is entirely optional — it doesn't do anything `useTheme()`
+needs, it's purely a convenience for seeding an app's initial `defaultMode`
+once, in JSX, instead of calling `setGlobalThemeMode()` yourself before the
+first render:
+
+```tsx
+import { ThemeProvider } from '@kbach/react';
+
+<ThemeProvider defaultMode="dark">
+  <App />
 </ThemeProvider>;
+```
+
+For code that isn't a React component and can't call a hook (a plain
+function, an event handler), the underlying store functions are exported
+directly too:
+
+```tsx
+import { getGlobalDarkMode, toggleGlobalDarkMode } from '@kbach/react';
+
+button.addEventListener('click', toggleGlobalDarkMode);
 ```
 
 ## Theming

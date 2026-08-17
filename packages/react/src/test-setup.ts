@@ -1,6 +1,6 @@
 // React 18/19's `act()` (used directly from 'react' in ThemeProvider.test.tsx
-// and useGlobalDarkMode.test.tsx — no React Testing Library dependency in
-// this package) needs this flag set, or it prints "not configured to
+// — no React Testing Library dependency in this package) needs this flag
+// set, or it prints "not configured to
 // support act(...)" even though it still runs correctly. React Testing
 // Library sets this internally; since this package doesn't use it, it's
 // set once here instead.

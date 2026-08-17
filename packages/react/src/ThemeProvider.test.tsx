@@ -11,7 +11,7 @@ function mockMatchMedia(prefersDark: boolean): void {
   })) as unknown as typeof window.matchMedia;
 }
 
-describe('ThemeProvider + useTheme', () => {
+describe('useTheme + ThemeProvider', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -29,26 +29,50 @@ describe('ThemeProvider + useTheme', () => {
     container.remove();
   });
 
-  it('useTheme() throws when called outside any <ThemeProvider>', async () => {
-    const { useTheme } = await import('./ThemeContext');
+  it('useTheme() works with no <ThemeProvider> mounted anywhere', async () => {
+    mockMatchMedia(false);
+    const { useTheme } = await import('./useTheme');
 
+    let captured: ReturnType<typeof useTheme> | undefined;
     function Probe() {
-      useTheme();
+      captured = useTheme();
       return null;
     }
 
-    // React logs its own error boundary console.error for a thrown render —
-    // silence it for this one expected-to-throw case only.
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     root = createRoot(container);
-    expect(() => act(() => root.render(<Probe />))).toThrow(/must be called within a <ThemeProvider>/);
-    spy.mockRestore();
+    act(() => root.render(<Probe />));
+
+    expect(captured!.mode).toBe('system');
+    expect(captured!.isDark).toBe(false);
+
+    act(() => captured!.toggle());
+    expect(captured!.isDark).toBe(true);
+    expect(captured!.mode).toBe('dark');
   });
 
-  it('provides mode/isDark/setMode/toggle to descendants', async () => {
+  it('re-renders a standalone useTheme() consumer when the store changes from entirely outside React', async () => {
+    mockMatchMedia(false);
+    const { useTheme } = await import('./useTheme');
+    const { toggleGlobalDarkMode } = await import('./darkModeStore');
+
+    let captured: ReturnType<typeof useTheme> | undefined;
+    function Probe() {
+      captured = useTheme();
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => root.render(<Probe />));
+    expect(captured!.isDark).toBe(false);
+
+    act(() => toggleGlobalDarkMode());
+    expect(captured!.isDark).toBe(true);
+  });
+
+  it('provides mode/isDark/setMode/toggle to descendants, with a <ThemeProvider> mounted too', async () => {
     mockMatchMedia(false);
     const { ThemeProvider } = await import('./ThemeProvider');
-    const { useTheme } = await import('./ThemeContext');
+    const { useTheme } = await import('./useTheme');
 
     let captured: ReturnType<typeof useTheme> | undefined;
     function Probe() {
@@ -76,7 +100,7 @@ describe('ThemeProvider + useTheme', () => {
   it('defaultMode seeds the store on mount when nothing is persisted', async () => {
     mockMatchMedia(false);
     const { ThemeProvider } = await import('./ThemeProvider');
-    const { useTheme } = await import('./ThemeContext');
+    const { useTheme } = await import('./useTheme');
 
     let captured: ReturnType<typeof useTheme> | undefined;
     function Probe() {
@@ -101,7 +125,7 @@ describe('ThemeProvider + useTheme', () => {
     mockMatchMedia(false);
     window.localStorage.setItem('kbach-theme', 'light');
     const { ThemeProvider } = await import('./ThemeProvider');
-    const { useTheme } = await import('./ThemeContext');
+    const { useTheme } = await import('./useTheme');
 
     let captured: ReturnType<typeof useTheme> | undefined;
     function Probe() {
@@ -119,35 +143,6 @@ describe('ThemeProvider + useTheme', () => {
     });
 
     expect(captured!.mode).toBe('light');
-  });
-
-  it('stays in sync with useGlobalDarkMode()/toggleGlobalDarkMode() called with no provider involved', async () => {
-    mockMatchMedia(false);
-    const { ThemeProvider } = await import('./ThemeProvider');
-    const { useTheme } = await import('./ThemeContext');
-    const { toggleGlobalDarkMode } = await import('./darkModeStore');
-
-    let captured: ReturnType<typeof useTheme> | undefined;
-    function Probe() {
-      captured = useTheme();
-      return null;
-    }
-
-    root = createRoot(container);
-    act(() => {
-      root.render(
-        <ThemeProvider>
-          <Probe />
-        </ThemeProvider>,
-      );
-    });
-    expect(captured!.isDark).toBe(false);
-
-    // Toggled via the standalone function, not captured.toggle() — proves
-    // the provider is just a view onto the same global store, not a
-    // separate state machine.
-    act(() => toggleGlobalDarkMode());
-    expect(captured!.isDark).toBe(true);
   });
 
   it('warns when more than one <ThemeProvider> is mounted at once', async () => {

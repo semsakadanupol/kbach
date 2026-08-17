@@ -11,32 +11,54 @@ function mockAppearance(prefersDark: boolean): void {
   }));
 }
 
-describe('ThemeProvider + useTheme (react-native)', () => {
+describe('useTheme + ThemeProvider (react-native)', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.doUnmock('react-native');
   });
 
-  it('useTheme() throws when called outside any <ThemeProvider>', async () => {
+  it('useTheme() works with no <ThemeProvider> mounted anywhere', async () => {
     mockAppearance(false);
-    const { useTheme } = await import('./ThemeContext');
+    const { useTheme } = await import('./useTheme');
 
+    let captured: ReturnType<typeof useTheme> | undefined;
     function Probe() {
-      useTheme();
+      captured = useTheme();
       return null;
     }
 
-    // React logs its own error boundary console.error for a thrown render —
-    // silence it for this one expected-to-throw case only.
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(() => act(() => TestRenderer.create(<Probe />))).toThrow(/must be called within a <ThemeProvider>/);
-    spy.mockRestore();
+    act(() => TestRenderer.create(<Probe />));
+
+    expect(captured!.mode).toBe('system');
+    expect(captured!.isDark).toBe(false);
+
+    act(() => captured!.toggle());
+    expect(captured!.isDark).toBe(true);
+    expect(captured!.mode).toBe('dark');
   });
 
-  it('provides mode/isDark/setMode/toggle to descendants', async () => {
+  it('re-renders a standalone useTheme() consumer when the store changes from entirely outside React', async () => {
+    mockAppearance(false);
+    const { useTheme } = await import('./useTheme');
+    const { toggleGlobalDarkMode } = await import('./darkModeStore');
+
+    let captured: ReturnType<typeof useTheme> | undefined;
+    function Probe() {
+      captured = useTheme();
+      return null;
+    }
+
+    act(() => TestRenderer.create(<Probe />));
+    expect(captured!.isDark).toBe(false);
+
+    act(() => toggleGlobalDarkMode());
+    expect(captured!.isDark).toBe(true);
+  });
+
+  it('provides mode/isDark/setMode/toggle to descendants, with a <ThemeProvider> mounted too', async () => {
     mockAppearance(false);
     const { ThemeProvider } = await import('./ThemeProvider');
-    const { useTheme } = await import('./ThemeContext');
+    const { useTheme } = await import('./useTheme');
 
     let captured: ReturnType<typeof useTheme> | undefined;
     function Probe() {
@@ -63,7 +85,7 @@ describe('ThemeProvider + useTheme (react-native)', () => {
   it('defaultMode seeds the store on mount when nothing has made an explicit choice yet', async () => {
     mockAppearance(false);
     const { ThemeProvider } = await import('./ThemeProvider');
-    const { useTheme } = await import('./ThemeContext');
+    const { useTheme } = await import('./useTheme');
 
     let captured: ReturnType<typeof useTheme> | undefined;
     function Probe() {
@@ -88,7 +110,7 @@ describe('ThemeProvider + useTheme (react-native)', () => {
     const { setGlobalThemeMode } = await import('./darkModeStore');
     setGlobalThemeMode('light');
     const { ThemeProvider } = await import('./ThemeProvider');
-    const { useTheme } = await import('./ThemeContext');
+    const { useTheme } = await import('./useTheme');
 
     let captured: ReturnType<typeof useTheme> | undefined;
     function Probe() {
@@ -105,34 +127,6 @@ describe('ThemeProvider + useTheme (react-native)', () => {
     });
 
     expect(captured!.mode).toBe('light');
-  });
-
-  it('stays in sync with useGlobalDarkMode()/toggleGlobalDarkMode() called with no provider involved', async () => {
-    mockAppearance(false);
-    const { ThemeProvider } = await import('./ThemeProvider');
-    const { useTheme } = await import('./ThemeContext');
-    const { toggleGlobalDarkMode } = await import('./darkModeStore');
-
-    let captured: ReturnType<typeof useTheme> | undefined;
-    function Probe() {
-      captured = useTheme();
-      return null;
-    }
-
-    act(() => {
-      TestRenderer.create(
-        <ThemeProvider>
-          <Probe />
-        </ThemeProvider>,
-      );
-    });
-    expect(captured!.isDark).toBe(false);
-
-    // Toggled via the standalone function, not captured.toggle() — proves
-    // the provider is just a view onto the same global store, not a
-    // separate state machine.
-    act(() => toggleGlobalDarkMode());
-    expect(captured!.isDark).toBe(true);
   });
 
   it('warns when more than one <ThemeProvider> is mounted at once', async () => {

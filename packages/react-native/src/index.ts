@@ -3,7 +3,15 @@ export type { ThemeConfig } from './theme';
 export { resolveStyle } from './nativeBridge';
 export type { StyleObject } from './nativeBridge';
 
-// Dark mode: standalone (no provider needed) — see darkModeStore.ts.
+// Dark mode: `useTheme()` is the one hook — works anywhere, with or
+// without a `<ThemeProvider>` mounted, since it reads darkModeStore.ts's
+// global store directly. The raw store functions below remain exported
+// for non-React usage (event handlers, plain scripts) — anything that
+// isn't a React component and can't call a hook.
+export { useTheme } from './useTheme';
+export type { ThemeState } from './useTheme';
+export { ThemeProvider } from './ThemeProvider';
+export type { ThemeProviderProps } from './ThemeProvider';
 export {
   getGlobalDarkMode,
   getGlobalThemeMode,
@@ -12,10 +20,3 @@ export {
   subscribeGlobalDarkMode,
 } from './darkModeStore';
 export type { ThemeMode } from './darkModeStore';
-export { useGlobalDarkMode } from './useGlobalDarkMode';
-
-// Dark mode: optional React Context wrapper around the same global store.
-export { ThemeProvider } from './ThemeProvider';
-export type { ThemeProviderProps } from './ThemeProvider';
-export { useTheme } from './ThemeContext';
-export type { ThemeContextValue } from './ThemeContext';

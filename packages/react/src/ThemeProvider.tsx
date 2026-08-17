@@ -1,14 +1,5 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react';
-import { ThemeContext, type ThemeContextValue } from './ThemeContext';
-import {
-  getGlobalDarkMode,
-  getGlobalThemeMode,
-  seedDefaultMode,
-  setGlobalThemeMode,
-  subscribeGlobalDarkMode,
-  toggleGlobalDarkMode,
-  type ThemeMode,
-} from './darkModeStore';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { seedDefaultMode, type ThemeMode } from './darkModeStore';
 
 export interface ThemeProviderProps {
   children: ReactNode;
@@ -24,20 +15,18 @@ let mountedProviderCount = 0;
 let warnedMultipleProviders = false;
 
 /**
- * Optional React Context wrapper around `darkModeStore.ts`'s single global
- * store — port of old-kbach's `ThemeProvider` (`packages/ui/src/
- * ThemeProvider.tsx`), same "provider is a thin wrapper around a global
- * store, not the source of truth itself" shape, simplified to this
- * package's web-only scope (no native `useColorScheme()`/`windowWidth`
- * branch, no `disablePersistence` prop — persistence is always on, since
- * `darkModeStore.ts` already guards every `localStorage` access for
- * environments where it's unavailable).
+ * Optional — `useTheme()` reads `darkModeStore.ts`'s global store directly
+ * and works anywhere without this mounted at all. The only thing this
+ * component does is seed that store's initial `defaultMode` once, for apps
+ * that want to declare a startup default in JSX rather than calling
+ * `setGlobalThemeMode()` imperatively before their first render. It
+ * renders `children` as-is — no Context.Provider, since there's no value
+ * left to distribute; `useTheme()` never reads from Context.
  *
- * Because the store is global, MULTIPLE mounted providers share the exact
- * same `mode`/`isDark` state rather than each getting their own scoped
- * value — mounting more than one is very likely a mistake (each fighting
- * over the same state via a different `defaultMode`), so this warns once
- * in dev, matching old-kbach's identical guard.
+ * Because the store is global, MULTIPLE mounted providers would each try
+ * to seed the exact same store rather than getting their own scoped
+ * state — mounting more than one is very likely a mistake, so this warns
+ * once in dev.
  */
 export function ThemeProvider({ children, defaultMode = 'system' }: ThemeProviderProps) {
   useEffect(() => {
@@ -46,7 +35,7 @@ export function ThemeProvider({ children, defaultMode = 'system' }: ThemeProvide
       warnedMultipleProviders = true;
       console.warn(
         '[kbach] Multiple <ThemeProvider> instances are mounted at once. ' +
-          'Dark-mode state is one global store (the same one useGlobalDarkMode()/toggleGlobalDarkMode() read and write), not scoped per-provider, so they will fight over the same state instead of each getting their own.',
+          'Dark-mode state is one global store useTheme() reads everywhere, not scoped per-provider, so their defaultMode seeds will fight over the same state.',
       );
     }
     return () => {
@@ -70,13 +59,5 @@ export function ThemeProvider({ children, defaultMode = 'system' }: ThemeProvide
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const isDark = useSyncExternalStore(subscribeGlobalDarkMode, getGlobalDarkMode, () => false);
-  const mode = useSyncExternalStore(subscribeGlobalDarkMode, getGlobalThemeMode, () => defaultMode);
-
-  const value = useMemo<ThemeContextValue>(
-    () => ({ mode, isDark, setMode: setGlobalThemeMode, toggle: toggleGlobalDarkMode }),
-    [mode, isDark],
-  );
-
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return <>{children}</>;
 }

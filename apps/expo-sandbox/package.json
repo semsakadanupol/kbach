@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
-    "@kbach/react-native": "^1.0.0-beta.7",
+    "@kbach/react-native": "^1.0.0-beta.8",
     "babel-preset-expo": "~54.0.10",
     "expo": "54",
     "expo-status-bar": "~3.0.9",

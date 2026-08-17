@@ -33,11 +33,13 @@ export const defaultTheme: ThemeConfig = {
   colors: PALETTE,
   // Real Tailwind's default spacing scale in full — every step is exactly
   // `n * 4px`, including the fractional `.5` steps (`1.5` -> 6px, `2.5` ->
-  // 10px, `3.5` -> 14px) and the "px" literal (a bare 1px). Previously
-  // this only had {0,1,2,4,6,8} — a handful of spot-checked values, not
-  // the real scale — so anything else (`p-3`, `w-5`, `border-2`,
-  // `gap-10`, ...) silently failed to resolve. Mirrors @kbach/react's
-  // theme.ts exactly.
+  // 10px, `3.5` -> 14px) and the "px" literal (a bare 1px). Only the
+  // "usual stops", though — `jsEngine/shared.ts`'s `spacingPx` (and the
+  // native Rust dispatcher's own `spacing_px`) falls back to Tailwind v4's
+  // live `n * 4px` formula for any bare numeric step not listed here
+  // (`p-0.25`, `w-13`, ...), so this table names the common values and
+  // gives a theme override something to target, not the full resolvable
+  // set. Mirrors @kbach/react's theme.ts exactly.
   spacing: {
     '0': 0, 'px': 1,
     '0.5': 2, '1': 4, '1.5': 6, '2': 8, '2.5': 10, '3': 12, '3.5': 14,

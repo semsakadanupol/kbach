@@ -12,6 +12,21 @@ export function decl(property: string, value: string): Declaration {
 }
 
 /**
+ * Looks up a spacing STEP against `theme.spacing` first — so a theme
+ * customization/extension always wins when present — and falls back to
+ * real Tailwind v4's own spacing FORMULA (`n * 4px`, i.e. `n * 0.25rem`)
+ * for any bare numeric step the table doesn't have an explicit entry for.
+ * Mirrors `resolvers/mod.rs`'s `spacing_px` — see its doc comment for why
+ * this is a formula, not just a bigger fixed table.
+ */
+function spacingPx(theme: ThemeConfig, value: string): number | undefined {
+  const fromTable = theme.spacing[value];
+  if (fromTable !== undefined) return fromTable;
+  const n = Number(value);
+  return Number.isFinite(n) && value.trim() !== '' ? n * 4 : undefined;
+}
+
+/**
  * Resolves a spacing-scale (or arbitrary) length value shared by every
  * utility that draws from the theme's spacing scale. "full"/"auto" are
  * hardcoded keywords rather than theme.spacing entries — both are valid on
@@ -32,7 +47,7 @@ export function resolveLength(theme: ThemeConfig, parsed: ParsedClass): string |
   if (parsed.isArbitrary) return value;
   if (value === 'full') return '100%';
   if (value === 'auto') return 'auto';
-  const px = theme.spacing[value];
+  const px = spacingPx(theme, value);
   return px === undefined ? null : `${px}px`;
 }
 
@@ -51,7 +66,7 @@ export function resolveNegatableLength(theme: ThemeConfig, parsed: ParsedClass):
   if (parsed.isArbitrary) return null;
   const value = parsed.value;
   if (value === null) return null;
-  const px = theme.spacing[value];
+  const px = spacingPx(theme, value);
   if (px === undefined) return null;
   if (px === 0) return '0px';
   return `-${px}px`;

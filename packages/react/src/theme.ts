@@ -28,14 +28,15 @@ export const defaultTheme: ThemeConfig = {
   // Real Tailwind's default spacing scale in full — every step is exactly
   // `n * 4px` (Tailwind's base spacing unit), including the fractional
   // `.5` steps (`1.5` -> 6px, `2.5` -> 10px, `3.5` -> 14px) and the "px"
-  // literal (a bare 1px, for `p-px`-style hairline spacing). Previously
-  // this only had {0,1,2,4,6,8} — a handful of spot-checked values, not
-  // the real scale — so anything else (`p-3`, `w-5`, `border-2`, `gap-10`,
-  // ...) silently failed to resolve (an unknown spacing key returns `None`
-  // the same way an unknown class does, with no error). "0" itself is
-  // still needed explicitly (not derivable as "any number * 4") for the
-  // same reason it always was: `sticky top-0` needs an actual "0" key to
-  // resolve at all, not just fall through as unresolvable.
+  // literal (a bare 1px, for `p-px`-style hairline spacing). This table is
+  // only the "usual stops", though — the Rust/JS engines' shared
+  // `spacing_px`/`spacingPx` helper falls back to Tailwind v4's own live
+  // `n * 4px` formula for any bare numeric step NOT listed here (`p-0.25`,
+  // `gap-1.75`, `w-13`, ...), so this table exists to name the common
+  // values and give a theme customization something to override, not to
+  // enumerate every resolvable step. "px" is the one exception that must
+  // stay listed explicitly — it isn't a number, so the formula can't
+  // derive it.
   spacing: {
     '0': 0, 'px': 1,
     '0.5': 2, '1': 4, '1.5': 6, '2': 8, '2.5': 10, '3': 12, '3.5': 14,

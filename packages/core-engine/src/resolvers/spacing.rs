@@ -169,9 +169,20 @@ mod tests {
     }
 
     #[test]
-    fn returns_none_for_a_spacing_key_missing_from_the_theme() {
+    fn falls_back_to_the_spacing_formula_for_a_step_missing_from_the_theme_table() {
+        // "99" isn't a real Tailwind-named spacing stop and isn't in the
+        // theme's table either, but it's still a bare number — real
+        // Tailwind v4's spacing scale is a live `n * 0.25rem` formula, not
+        // a fixed list, so this resolves via `spacing_px`'s fallback
+        // (`resolvers::mod::spacing_px`) rather than failing outright.
         let t = theme();
-        assert_eq!(resolve(&parse_class("p-99"), &t), None);
+        assert_eq!(resolve(&parse_class("p-99"), &t), Some(vec![decl("padding", "396px")]));
+    }
+
+    #[test]
+    fn returns_none_for_a_spacing_value_that_isnt_numeric_or_in_the_theme() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("p-banana"), &t), None);
     }
 
     #[test]

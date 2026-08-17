@@ -61,6 +61,22 @@ pub(crate) fn decl(property: &str, value: &str) -> Declaration {
 /// web-only/native-only split the way `screen` does (see
 /// `layout::resolve_screen_size`). `auto` is what makes `mx-auto`-style
 /// centering possible.
+/// Looks up a spacing STEP (the bit after `p-`/`gap-`/etc., e.g. `"4"` or
+/// `"1.75"`) against `theme.spacing` first — so a theme customization/
+/// extension always wins when present — and falls back to Tailwind v4's own
+/// spacing FORMULA (`n * 4px`, i.e. `n * 0.25rem`) for any bare numeric step
+/// the table doesn't have an explicit entry for. Real Tailwind v4 only
+/// lists the "usual stops" (0, 0.5, 1, 1.5, 2, 2.5, ...) in its default
+/// theme, but its spacing scale is actually a live `calc(var(--spacing) *
+/// n)` — so `p-0.25`, `gap-1.75`, `w-2.25`, and any other quarter-step (or
+/// arbitrary decimal) resolve too, not just the named stops. This mirrors
+/// that: the table covers the common named entries (and lets a theme
+/// override any one of them individually), the formula fills every gap
+/// between them.
+fn spacing_px(theme: &ThemeConfig, value: &str) -> Option<f64> {
+    theme.spacing.get(value).copied().or_else(|| value.parse::<f64>().ok().map(|n| n * 4.0))
+}
+
 pub(crate) fn resolve_length(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<String> {
     // Real Tailwind doesn't generate a negative form for padding/gap/width/
     // height/etc. at all — "-p-4" isn't a real Tailwind class — so a
@@ -81,7 +97,7 @@ pub(crate) fn resolve_length(theme: &ThemeConfig, parsed: &ParsedClass) -> Optio
         "auto" => return Some("auto".to_string()),
         _ => {}
     }
-    theme.spacing.get(value).map(|px| format!("{px}px"))
+    spacing_px(theme, value).map(|px| format!("{px}px"))
 }
 
 /// `resolve_length`, but honoring `parsed.negative` (real Tailwind's
@@ -102,8 +118,8 @@ pub(crate) fn resolve_negatable_length(theme: &ThemeConfig, parsed: &ParsedClass
         return None;
     }
     let value = parsed.value.as_deref()?;
-    let px = theme.spacing.get(value)?;
-    if *px == 0.0 {
+    let px = spacing_px(theme, value)?;
+    if px == 0.0 {
         return Some("0px".to_string());
     }
     Some(format!("-{px}px"))
@@ -364,6 +380,31 @@ mod native_dispatcher_tests {
         let mut colors = HashMap::new();
         colors.insert("blue-6".to_string(), ColorValue::Plain("#2563eb".to_string()));
         ThemeConfig { colors, ..Default::default() }
+    }
+
+    #[test]
+    fn resolve_length_falls_back_to_the_spacing_formula_for_ungtabled_quarter_steps() {
+        let mut t = theme();
+        // No explicit "0.25"/"0.75"/"1.25"/"1.75" entries in the table —
+        // only "4" is present, to prove the fallback doesn't depend on
+        // there being a nearby named entry.
+        t.spacing.insert("4".to_string(), 16.0);
+        assert_eq!(resolve_length(&t, &parse_class("p-0.25")), Some("1px".to_string()));
+        assert_eq!(resolve_length(&t, &parse_class("p-0.75")), Some("3px".to_string()));
+        assert_eq!(resolve_length(&t, &parse_class("p-1.25")), Some("5px".to_string()));
+        assert_eq!(resolve_length(&t, &parse_class("p-1.75")), Some("7px".to_string()));
+        assert_eq!(resolve_length(&t, &parse_class("p-13")), Some("52px".to_string()));
+        // The table still wins when a step IS present, even if the formula
+        // would've produced a different number — theme overrides always
+        // take priority over the formula fallback.
+        assert_eq!(resolve_length(&t, &parse_class("p-4")), Some("16px".to_string()));
+    }
+
+    #[test]
+    fn resolve_negatable_length_honors_the_spacing_formula_too() {
+        let t = theme();
+        assert_eq!(resolve_negatable_length(&t, &parse_class("-mt-1.25")), Some("-5px".to_string()));
+        assert_eq!(resolve_negatable_length(&t, &parse_class("mt-2.75")), Some("11px".to_string()));
     }
 
     #[test]

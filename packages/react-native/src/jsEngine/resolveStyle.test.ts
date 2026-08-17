@@ -67,6 +67,17 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('active:bg-blue-8', t, 'light', true, W).backgroundColor).toBe('#1e40af');
   });
 
+  it('falls back to the spacing formula (n * 4) for quarter-steps missing from the theme table', () => {
+    // Empty spacing table — proves this resolves purely via the formula,
+    // mirroring resolvers/mod.rs's spacing_px fallback (see its own doc
+    // comment for why real Tailwind v4's scale is a live formula, not a
+    // fixed list).
+    const t = theme();
+    expect(resolveStyleJs('p-0.25', t, 'light', false, W).padding).toBe(1);
+    expect(resolveStyleJs('p-1.75', t, 'light', false, W).padding).toBe(7);
+    expect(resolveStyleJs('m-2.25', t, 'light', false, W).margin).toBe(9);
+  });
+
   it('applies a responsive modifier only once the width reaches its breakpoint', () => {
     const t = theme({ screens: { sm: 640 } });
     expect(resolveStyleJs('bg-blue-6 sm:bg-blue-8', t, 'light', false, 400).backgroundColor).toBe('#2563eb');

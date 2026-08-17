@@ -7,7 +7,8 @@
   "workspaces": [
     "packages/*",
     "apps/*",
-    "!apps/native-sandbox"
+    "!apps/native-sandbox",
+    "!apps/expo-sandbox"
   ],
   "scripts": {
     "build": "turbo run build",
@@ -19,6 +20,7 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/react": "^19.2.0",
+    "playwright": "^1.62.1",
     "turbo": "^2.0.0",
     "typescript": "^6.0.0"
   },

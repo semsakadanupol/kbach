@@ -5,5 +5,5 @@
     "types": ["vite/client"],
     "jsxImportSource": "@kbach/react"
   },
-  "include": ["src"]
+  "include": ["src", ".kbach"]
 }

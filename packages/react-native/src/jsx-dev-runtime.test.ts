@@ -9,6 +9,14 @@ vi.mock('./jsx-runtime', () => ({
   Fragment: Symbol('react.fragment'),
 }));
 
+// jsx-dev-runtime.tsx also imports jsxRuntimeCore.ts (for createJsxDEV),
+// which imports Pressable from 'react-native' — same "don't load the real
+// RN package in a plain Node/vitest environment" reason jsx-runtime.test.ts's
+// identical mock exists for.
+vi.mock('react-native', () => ({
+  Pressable: () => null,
+}));
+
 describe('jsx-dev-runtime (react-native)', () => {
   beforeEach(() => {
     vi.clearAllMocks();

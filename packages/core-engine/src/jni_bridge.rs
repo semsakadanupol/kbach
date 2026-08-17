@@ -26,7 +26,7 @@
 use crate::resolve_class_string;
 use crate::resolve_style::resolve_style_json;
 use jni::objects::{JClass, JString};
-use jni::sys::{jboolean, jstring};
+use jni::sys::{jboolean, jdouble, jstring};
 use jni::JNIEnv;
 
 /// Shared by both JNI exports below — marshals the two JNI string
@@ -60,23 +60,24 @@ pub extern "system" fn Java_com_kbachnative_KbachModule_nativeGenerateCss(
     marshal(&mut env, class_string, theme_json, resolve_class_string)
 }
 
-/// Same marshaling pattern as `marshal`, two more JNI args in (a string and
-/// a raw boolean — no string marshaling needed for the latter) — kept
-/// separate rather than widening `marshal` itself, since `generateCss`
-/// above needs to keep its existing 2-arg signature unchanged.
+/// Same marshaling pattern as `marshal`, three more JNI args in (a string, a
+/// raw boolean, and a raw double — no string marshaling needed for either)
+/// — kept separate rather than widening `marshal` itself, since
+/// `generateCss` above needs to keep its existing 2-arg signature unchanged.
 fn marshal3(
     env: &mut JNIEnv,
     class_string: JString,
     theme_json: JString,
     color_scheme: JString,
     pressed: jboolean,
-    resolve: impl FnOnce(&str, &str, &str, bool) -> String,
+    width: jdouble,
+    resolve: impl FnOnce(&str, &str, &str, bool, f64) -> String,
 ) -> jstring {
     let class_string: String = env.get_string(&class_string).map(|s| s.into()).unwrap_or_default();
     let theme_json: String = env.get_string(&theme_json).map(|s| s.into()).unwrap_or_default();
     let color_scheme: String = env.get_string(&color_scheme).map(|s| s.into()).unwrap_or_default();
 
-    let result = resolve(&class_string, &theme_json, &color_scheme, pressed != 0);
+    let result = resolve(&class_string, &theme_json, &color_scheme, pressed != 0, width);
 
     match env.new_string(result) {
         Ok(s) => s.into_raw(),
@@ -89,8 +90,10 @@ fn marshal3(
 /// rule text, for direct use as a React Native `style` prop. See
 /// resolve_style.rs for the resolution logic behind it, including how
 /// `color_scheme` (the caller's current `Appearance.getColorScheme()`
-/// reading) gates the `dark:` modifier and `pressed` (only ever true when
-/// the caller is RN's `Pressable`) gates `active:`.
+/// reading) gates the `dark:` modifier, `pressed` (only ever true when the
+/// caller is RN's `Pressable`) gates `active:`, and `width` (the caller's
+/// current `Dimensions.get('window').width`) gates `sm:`/`md:`/`lg:`/`xl:`/
+/// `2xl:` against the theme's `screens` scale.
 #[no_mangle]
 pub extern "system" fn Java_com_kbachnative_KbachModule_nativeResolveStyle(
     mut env: JNIEnv,
@@ -99,6 +102,7 @@ pub extern "system" fn Java_com_kbachnative_KbachModule_nativeResolveStyle(
     theme_json: JString,
     color_scheme: JString,
     pressed: jboolean,
+    width: jdouble,
 ) -> jstring {
-    marshal3(&mut env, class_string, theme_json, color_scheme, pressed, resolve_style_json)
+    marshal3(&mut env, class_string, theme_json, color_scheme, pressed, width, resolve_style_json)
 }

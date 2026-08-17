@@ -1,7 +1,40 @@
 {
   "name": "@kbach/react-native",
-  "version": "0.0.0",
-  "private": true,
+  "version": "1.0.0-beta.8",
+  "description": "Kbach's utility-class styling engine for React Native — the same class names as @kbach/react, resolved to a StyleSheet-ready style object via a Kotlin/JNI TurboModule (native), the same WASM engine @kbach/react uses (Expo Web / react-native-web), or a pure-JS fallback engine (Expo Go). Ships its own native Android module — one npm install, no separate native package. Beta. Native is Android-only (no iOS bridge yet); works with the React Native CLI, an Expo dev client, AND Expo Go (a reduced-coverage pure-JS fallback, since Expo Go can't load any custom native module).",
+  "keywords": [
+    "css",
+    "react-native",
+    "expo",
+    "tailwind",
+    "utility-first",
+    "styling",
+    "android",
+    "web",
+    "wasm"
+  ],
+  "license": "MIT",
+  "author": "semsakadanupol",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/semsakadanupol/kbach.git",
+    "directory": "packages/react-native"
+  },
+  "homepage": "https://github.com/semsakadanupol/kbach#readme",
+  "bugs": {
+    "url": "https://github.com/semsakadanupol/kbach/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "src/babel-plugin.js",
+    "android/build.gradle",
+    "android/src",
+    "specs",
+    "react-native.config.js"
+  ],
   "source": "./src/index.ts",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -10,18 +43,42 @@
     ".": {
       "types": "./dist/index.d.ts",
       "source": "./src/index.ts",
+      "browser": {
+        "import": "./dist/index.web.mjs",
+        "require": "./dist/index.web.js"
+      },
+      "node": {
+        "import": "./dist/index.web.mjs",
+        "require": "./dist/index.web.js"
+      },
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
       "source": "./src/jsx-runtime.tsx",
+      "browser": {
+        "import": "./dist/jsx-runtime.web.mjs",
+        "require": "./dist/jsx-runtime.web.js"
+      },
+      "node": {
+        "import": "./dist/jsx-runtime.web.mjs",
+        "require": "./dist/jsx-runtime.web.js"
+      },
       "import": "./dist/jsx-runtime.mjs",
       "require": "./dist/jsx-runtime.js"
     },
     "./jsx-dev-runtime": {
       "types": "./dist/jsx-dev-runtime.d.ts",
       "source": "./src/jsx-dev-runtime.tsx",
+      "browser": {
+        "import": "./dist/jsx-dev-runtime.web.mjs",
+        "require": "./dist/jsx-dev-runtime.web.js"
+      },
+      "node": {
+        "import": "./dist/jsx-dev-runtime.web.mjs",
+        "require": "./dist/jsx-dev-runtime.web.js"
+      },
       "import": "./dist/jsx-dev-runtime.mjs",
       "require": "./dist/jsx-dev-runtime.js"
     },
@@ -31,11 +88,17 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run --passWithNoTests",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "generate:colors": "node ../core-engine/scripts/generate-palette.mjs src/generatedPalette.ts",
+    "generate:wasm-base64": "node ../core-engine/scripts/generate-wasm-base64.mjs src/wasmBinary.generated.ts",
+    "generate:web-glue": "node ../core-engine/scripts/generate-web-glue.mjs src/wasmGlue.generated.ts"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",
+    "@types/react-test-renderer": "^19.1.0",
+    "jsdom": "^30.0.1",
     "react-native": "^0.87.0",
+    "react-test-renderer": "^19.2.0",
     "tsup": "^8.0.0",
     "typescript": "^6.0.0",
     "vitest": "^1.0.0"
@@ -43,5 +106,13 @@
   "peerDependencies": {
     "react": ">=18.0.0",
     "react-native": ">=0.70.0"
+  },
+  "codegenConfig": {
+    "name": "KbachSpec",
+    "type": "modules",
+    "jsSrcsDir": "specs",
+    "android": {
+      "javaPackageName": "com.kbachnative"
+    }
   }
 }

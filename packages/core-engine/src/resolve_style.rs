@@ -2,21 +2,32 @@
 //! object (plain JS object via JSON, camelCase keys) — the native
 //! counterpart to css.rs's CSS-TEXT output. Covers layout, spacing, border,
 //! color, and numeric/arbitrary line-height/letter-spacing utilities (see
-//! resolvers::resolve_utility_native), base declarations plus the bare
-//! `dark:` modifier (applied when `color_scheme == "dark"`, the caller's
-//! current `Appearance.getColorScheme()` reading — see nativeBridge.ts) and
-//! the bare `active:` modifier (applied when `pressed == true` — only ever
-//! true when the caller is RN's `Pressable`, the one component that knows
-//! this state at all; see jsx-runtime.tsx). Every other modifier chain
-//! (`hover:`, `sm:`, `dark:active:`, ...) parses without error but isn't
-//! applied yet. Explicitly deferred, not silently broken.
+//! resolvers::resolve_utility_native), base declarations plus three kinds
+//! of modifier, each gated by a value the caller supplies fresh on every
+//! call (there's no CSS cascade/media-query engine on native, just a
+//! live condition check — see `native_modifier_state` below):
+//!   - `dark:` — applied when `color_scheme == "dark"` (the caller's
+//!     current `Appearance.getColorScheme()` reading; see nativeBridge.ts).
+//!   - `active:` — applied when `pressed == true` (only ever true when the
+//!     caller is RN's `Pressable`, the one component that knows this state
+//!     at all; see jsx-runtime.tsx).
+//!   - `sm:`/`md:`/`lg:`/`xl:`/`2xl:` — applied when `width` (the caller's
+//!     current window width) is at least that breakpoint's `theme.screens`
+//!     min-width, mirroring real Tailwind's mobile-first "min-width and up"
+//!     semantics (same scale css.rs's `is_responsive` handling uses for
+//!     the web `@media` output — see registry.rs).
+//! All three compose: `dark:sm:bg-blue-8` applies only when BOTH hold.
+//! Every other modifier (`hover:`, `group-*`, `has-[...]`, container
+//! queries, ...) parses without error but isn't applied on native — no
+//! selector/pseudo-state/ancestor system exists here to apply them with.
+//! Explicitly deferred, not silently broken.
 //!
 //! Properties are inserted into the output map in token order, last write
 //! wins on a key collision — there's no CSS-cascade/specificity system
 //! here. So `"bg-blue-6 dark:bg-blue-8"` correctly resolves to blue-8 in
 //! dark mode, but the reverse order would not; callers are expected to
-//! write base classes before their `dark:`/`active:` variant, same as
-//! normal Tailwind authoring convention.
+//! write base classes before their `dark:`/`active:`/responsive variant,
+//! same as normal Tailwind authoring convention.
 //!
 //! Named leading/tracking keywords and truncation are excluded at the
 //! resolver level (see resolve_utility_native's docs) — everything that
@@ -24,9 +35,35 @@
 //! value typing below.
 
 use crate::parser::parse_class;
+use crate::registry::{self, DarkScheme};
 use crate::resolvers::resolve_utility_native;
 use crate::theme::ThemeConfig;
 use serde_json::{Map, Number, Value};
+
+/// Whether a single modifier's condition currently holds, for the three
+/// modifier kinds native actually understands — `None` for anything else
+/// (hover/group/peer/aria/container/starting/...), which `resolve_style`
+/// below treats identically to "doesn't hold" (the whole chain is skipped),
+/// same as before this function existed. Reads from the shared
+/// `registry::resolve` table rather than re-deriving "is this dark/active/
+/// responsive" locally, so a new responsive breakpoint or a future change
+/// to what counts as "the active pseudo" never needs updating in two
+/// places — see registry.rs's own module doc for the tier scheme this
+/// reads from.
+fn native_modifier_state(modifier: &str, theme: &ThemeConfig, color_scheme: &str, pressed: bool, width: f64) -> Option<bool> {
+    let def = registry::resolve(modifier)?;
+    if let Some(DarkScheme::Dark) = def.dark_scheme {
+        return Some(color_scheme == "dark");
+    }
+    if def.pseudo.as_deref() == Some(":active") {
+        return Some(pressed);
+    }
+    if def.is_responsive {
+        let min_width = theme.screens.get(modifier)?;
+        return Some(width >= *min_width);
+    }
+    None
+}
 
 /// CSS's kebab-case property names -> RN's camelCase style keys
 /// ("background-color" -> "backgroundColor", "flex-direction" -> "flexDirection").
@@ -47,8 +84,11 @@ fn kebab_to_camel(s: &str) -> String {
 }
 
 /// Kebab-case CSS properties whose values RN expects as unitless JS
-/// numbers (density-independent pixels), not strings — the reason this
-/// module can't just JSON-stringify every resolved value.
+/// numbers, not strings — the reason this module can't just
+/// JSON-stringify every resolved value. Mostly density-independent-pixel
+/// lengths, plus a few bare-number non-length props (`shadow-opacity`,
+/// `elevation`) that need the exact same "parse the plain numeric string"
+/// handling `rn_style_value`'s fallback path already provides.
 const NUMERIC_LENGTH_PROPS: &[&str] = &[
     "padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
     "margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
@@ -57,6 +97,15 @@ const NUMERIC_LENGTH_PROPS: &[&str] = &[
     "top", "right", "bottom", "left", "inset",
     "border-radius", "border-width", "font-size", "z-index",
     "line-height", "letter-spacing",
+    "flex", "flex-grow", "flex-shrink", "order", "flex-basis",
+    "shadow-opacity", "shadow-radius", "elevation",
+    // Per-side border width + per-corner radius — added alongside
+    // border.rs's per-side/per-corner resolvers; RN's style system wants
+    // plain numbers for these exactly like the generic "border-width"/
+    // "border-radius" forms above, not "2px"/"0.5rem" strings.
+    "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+    "border-top-left-radius", "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius",
+    "outline-width", "outline-offset",
 ];
 
 /// Converts a resolved CSS value into its RN-correct JSON shape. Properties
@@ -89,38 +138,48 @@ fn rn_style_value(property: &str, value: &str) -> Value {
 /// paths) since the web target has no use for a style-object shape at all.
 /// An unparseable theme yields an empty object rather than panicking
 /// across the FFI boundary.
-pub fn resolve_style_json(class_string: &str, theme_json: &str, color_scheme: &str, pressed: bool) -> String {
+pub fn resolve_style_json(class_string: &str, theme_json: &str, color_scheme: &str, pressed: bool, width: f64) -> String {
     let theme: ThemeConfig = match serde_json::from_str(theme_json) {
         Ok(t) => t,
         Err(_) => return "{}".to_string(),
     };
-    let style = resolve_style(class_string, &theme, color_scheme, pressed);
+    let style = resolve_style(class_string, &theme, color_scheme, pressed, width);
     serde_json::to_string(&style).unwrap_or_else(|_| "{}".to_string())
 }
 
-pub fn resolve_style(class_string: &str, theme: &ThemeConfig, color_scheme: &str, pressed: bool) -> Map<String, Value> {
+pub fn resolve_style(class_string: &str, theme: &ThemeConfig, color_scheme: &str, pressed: bool, width: f64) -> Map<String, Value> {
     let mut style = Map::new();
 
     for token in class_string.split_whitespace() {
         let parsed = parse_class(token);
-        match parsed.modifiers.as_slice() {
-            [] => {}
-            [m] if m == "dark" => {
-                if color_scheme != "dark" {
-                    continue;
-                }
-            }
-            [m] if m == "active" => {
-                if !pressed {
-                    continue;
-                }
-            }
-            _ => continue,
+        let all_modifiers_hold = parsed
+            .modifiers
+            .iter()
+            .all(|m| native_modifier_state(m, theme, color_scheme, pressed, width) == Some(true));
+        if !all_modifiers_hold {
+            continue;
         }
         let Some(decls) = resolve_utility_native(&parsed, theme) else { continue };
         for d in decls {
             if d.property.starts_with("__") {
                 // divide/space markers — no RN child-combinator equivalent, out of scope.
+                continue;
+            }
+            // RN's `shadowOffset` is the one shadow property that isn't a
+            // flat key — it's `{width, height}`. effects.rs's
+            // native_shadow_declarations emits it as two synthetic flat
+            // properties instead (same shape as every other declaration),
+            // so this is the one place that reassembles them into the
+            // nested object RN actually expects.
+            if d.property == "shadow-offset-x" || d.property == "shadow-offset-y" {
+                let axis = if d.property == "shadow-offset-x" { "width" } else { "height" };
+                let n = d.value.parse::<f64>().ok().and_then(Number::from_f64);
+                if let Some(n) = n {
+                    let entry = style.entry("shadowOffset".to_string()).or_insert_with(|| Value::Object(Map::new()));
+                    if let Value::Object(obj) = entry {
+                        obj.insert(axis.to_string(), Value::Number(n));
+                    }
+                }
                 continue;
             }
             let value = rn_style_value(&d.property, &d.value);
@@ -137,6 +196,11 @@ mod tests {
     use crate::theme::ColorValue;
     use std::collections::HashMap;
 
+    // Arbitrary width used by every test that isn't specifically exercising
+    // responsive gating — no test theme() below sets `screens`, so no
+    // breakpoint modifier can resolve regardless of what this is.
+    const W: f64 = 400.0;
+
     fn theme() -> ThemeConfig {
         let mut colors = HashMap::new();
         colors.insert("blue-6".to_string(), ColorValue::Plain("#2563eb".to_string()));
@@ -145,7 +209,7 @@ mod tests {
 
     #[test]
     fn resolves_layout_and_color_utilities_to_a_flat_camelcase_style_object() {
-        let style = resolve_style("flex items-center bg-blue-6", &theme(), "light", false);
+        let style = resolve_style("flex items-center bg-blue-6", &theme(), "light", false, W);
         assert_eq!(style.get("display").unwrap(), "flex");
         assert_eq!(style.get("alignItems").unwrap(), "center");
         assert_eq!(style.get("backgroundColor").unwrap(), "#2563eb");
@@ -153,22 +217,35 @@ mod tests {
 
     #[test]
     fn converts_multi_word_kebab_properties_to_camelcase() {
-        let style = resolve_style("flex-row", &theme(), "light", false);
+        let style = resolve_style("flex-row", &theme(), "light", false, W);
         assert_eq!(style.get("flexDirection").unwrap(), "row");
     }
 
     #[test]
     fn resolves_font_weight_text_transform_and_decoration_as_strings() {
-        let style = resolve_style("font-bold uppercase underline", &theme(), "light", false);
+        let style = resolve_style("font-bold uppercase underline", &theme(), "light", false, W);
         assert_eq!(style.get("fontWeight").unwrap(), "700");
         assert_eq!(style.get("textTransform").unwrap(), "uppercase");
         assert_eq!(style.get("textDecorationLine").unwrap(), "underline");
     }
 
     #[test]
-    fn skips_non_dark_non_active_modifier_chains_regardless_of_state() {
-        let style = resolve_style("hover:flex sm:flex dark:hover:flex dark:active:flex", &theme(), "dark", true);
+    fn skips_unknown_modifier_chains_regardless_of_state() {
+        // hover: isn't one of the three native understands at all; a chain
+        // that mixes it with a known, currently-true modifier (dark:hover:)
+        // still doesn't apply — EVERY modifier in the chain must resolve
+        // AND hold, not just one of them.
+        let style = resolve_style("hover:flex dark:hover:flex", &theme(), "dark", true, W);
         assert!(style.is_empty());
+    }
+
+    #[test]
+    fn combines_dark_and_active_modifiers_requiring_both_to_hold() {
+        let resolves = |scheme: &str, pressed: bool| resolve_style("dark:active:flex", &theme(), scheme, pressed, W);
+        assert!(resolves("light", false).is_empty());
+        assert!(resolves("dark", false).is_empty());
+        assert!(resolves("light", true).is_empty());
+        assert_eq!(resolves("dark", true).get("display").unwrap(), "flex");
     }
 
     #[test]
@@ -176,10 +253,10 @@ mod tests {
         let mut t = theme();
         t.colors.insert("blue-8".to_string(), ColorValue::Plain("#1e40af".to_string()));
 
-        let light = resolve_style("dark:bg-blue-8", &t, "light", false);
+        let light = resolve_style("dark:bg-blue-8", &t, "light", false, W);
         assert!(light.is_empty());
 
-        let dark = resolve_style("dark:bg-blue-8", &t, "dark", false);
+        let dark = resolve_style("dark:bg-blue-8", &t, "dark", false, W);
         assert_eq!(dark.get("backgroundColor").unwrap(), "#1e40af");
     }
 
@@ -188,11 +265,51 @@ mod tests {
         let mut t = theme();
         t.colors.insert("blue-8".to_string(), ColorValue::Plain("#1e40af".to_string()));
 
-        let resting = resolve_style("active:bg-blue-8", &t, "light", false);
+        let resting = resolve_style("active:bg-blue-8", &t, "light", false, W);
         assert!(resting.is_empty());
 
-        let pressed = resolve_style("active:bg-blue-8", &t, "light", true);
+        let pressed = resolve_style("active:bg-blue-8", &t, "light", true, W);
         assert_eq!(pressed.get("backgroundColor").unwrap(), "#1e40af");
+    }
+
+    #[test]
+    fn applies_a_responsive_modifier_only_once_the_width_reaches_its_breakpoint() {
+        let mut t = theme();
+        t.screens.insert("sm".to_string(), 640.0);
+        t.colors.insert("blue-8".to_string(), ColorValue::Plain("#1e40af".to_string()));
+
+        let narrow = resolve_style("bg-blue-6 sm:bg-blue-8", &t, "light", false, 400.0);
+        assert_eq!(narrow.get("backgroundColor").unwrap(), "#2563eb");
+
+        // Real Tailwind's min-width semantics: AT the breakpoint counts as
+        // reached, not just strictly past it.
+        let at_breakpoint = resolve_style("bg-blue-6 sm:bg-blue-8", &t, "light", false, 640.0);
+        assert_eq!(at_breakpoint.get("backgroundColor").unwrap(), "#1e40af");
+
+        let wide = resolve_style("bg-blue-6 sm:bg-blue-8", &t, "light", false, 800.0);
+        assert_eq!(wide.get("backgroundColor").unwrap(), "#1e40af");
+    }
+
+    #[test]
+    fn a_screen_name_with_no_matching_theme_entry_never_resolves() {
+        // theme() has no `screens` entries at all — "sm" isn't a modifier
+        // native fails to recognize (registry.rs still knows it), it's a
+        // recognized-but-unconfigured breakpoint, and both cases skip the
+        // same way.
+        let style = resolve_style("sm:flex", &theme(), "light", false, 10_000.0);
+        assert!(style.is_empty());
+    }
+
+    #[test]
+    fn combines_dark_and_responsive_modifiers_requiring_both_to_hold() {
+        let mut t = theme();
+        t.screens.insert("md".to_string(), 768.0);
+        t.colors.insert("blue-8".to_string(), ColorValue::Plain("#1e40af".to_string()));
+
+        let resolves = |scheme: &str, width: f64| resolve_style("dark:md:bg-blue-8", &t, scheme, false, width);
+        assert!(resolves("light", 900.0).is_empty());
+        assert!(resolves("dark", 500.0).is_empty());
+        assert_eq!(resolves("dark", 900.0).get("backgroundColor").unwrap(), "#1e40af");
     }
 
     #[test]
@@ -200,10 +317,10 @@ mod tests {
         let mut t = theme();
         t.colors.insert("blue-8".to_string(), ColorValue::Plain("#1e40af".to_string()));
 
-        let dark = resolve_style("bg-blue-6 dark:bg-blue-8", &t, "dark", false);
+        let dark = resolve_style("bg-blue-6 dark:bg-blue-8", &t, "dark", false, W);
         assert_eq!(dark.get("backgroundColor").unwrap(), "#1e40af");
 
-        let light = resolve_style("bg-blue-6 dark:bg-blue-8", &t, "light", false);
+        let light = resolve_style("bg-blue-6 dark:bg-blue-8", &t, "light", false, W);
         assert_eq!(light.get("backgroundColor").unwrap(), "#2563eb");
     }
 
@@ -212,10 +329,10 @@ mod tests {
         let mut t = theme();
         t.colors.insert("blue-8".to_string(), ColorValue::Plain("#1e40af".to_string()));
 
-        let pressed = resolve_style("bg-blue-6 active:bg-blue-8", &t, "light", true);
+        let pressed = resolve_style("bg-blue-6 active:bg-blue-8", &t, "light", true, W);
         assert_eq!(pressed.get("backgroundColor").unwrap(), "#1e40af");
 
-        let resting = resolve_style("bg-blue-6 active:bg-blue-8", &t, "light", false);
+        let resting = resolve_style("bg-blue-6 active:bg-blue-8", &t, "light", false, W);
         assert_eq!(resting.get("backgroundColor").unwrap(), "#2563eb");
     }
 
@@ -223,40 +340,63 @@ mod tests {
     fn resolves_spacing_radius_and_font_size_as_numbers_not_strings() {
         let mut t = theme();
         t.spacing.insert("4".to_string(), 16.0);
-        let style = resolve_style("p-4 rounded-lg text-lg", &t, "light", false);
+        let style = resolve_style("p-4 rounded-lg text-lg", &t, "light", false, W);
         assert_eq!(style.get("padding").unwrap(), &Value::Number(Number::from_f64(16.0).unwrap()));
         assert_eq!(style.get("borderRadius").unwrap(), &Value::Number(Number::from_f64(8.0).unwrap()));
         assert_eq!(style.get("fontSize").unwrap(), &Value::Number(Number::from_f64(18.0).unwrap()));
     }
 
     #[test]
+    fn resolves_per_side_border_width_per_corner_radius_and_flex_basis_as_numbers_not_strings() {
+        let mut t = theme();
+        t.spacing.insert("2".to_string(), 2.0);
+        t.spacing.insert("4".to_string(), 16.0);
+        let style = resolve_style("border-t-2 rounded-tl-lg basis-4", &t, "light", false, W);
+        assert_eq!(style.get("borderTopWidth").unwrap(), &Value::Number(Number::from_f64(2.0).unwrap()));
+        assert_eq!(style.get("borderTopLeftRadius").unwrap(), &Value::Number(Number::from_f64(8.0).unwrap()));
+        assert_eq!(style.get("flexBasis").unwrap(), &Value::Number(Number::from_f64(16.0).unwrap()));
+    }
+
+    #[test]
     fn passes_an_arbitrary_percentage_width_through_as_a_string() {
-        let style = resolve_style("w-[50%]", &theme(), "light", false);
+        let style = resolve_style("w-[50%]", &theme(), "light", false, W);
         assert_eq!(style.get("width").unwrap(), "50%");
     }
 
     #[test]
     fn resolves_z_index_as_a_number() {
-        let style = resolve_style("z-50", &theme(), "light", false);
+        let style = resolve_style("z-50", &theme(), "light", false, W);
         assert_eq!(style.get("zIndex").unwrap(), &Value::Number(Number::from_f64(50.0).unwrap()));
     }
 
     #[test]
+    fn resolves_flex_family_as_numbers_with_platform_correct_flex_shorthand() {
+        let style = resolve_style("flex-1 flex-auto grow shrink-0 order-3", &theme(), "light", false, W);
+        assert_eq!(style.get("flexGrow").unwrap(), &Value::Number(Number::from_f64(1.0).unwrap()));
+        assert_eq!(style.get("flexShrink").unwrap(), &Value::Number(Number::from_f64(0.0).unwrap()));
+        assert_eq!(style.get("order").unwrap(), &Value::Number(Number::from_f64(3.0).unwrap()));
+        // flex-1 then flex-auto both target the same "flex" property — last
+        // write wins (documented resolve_style.rs behavior), and flex-auto
+        // resolves to its native numeric fallback (1), not the CSS keyword.
+        assert_eq!(style.get("flex").unwrap(), &Value::Number(Number::from_f64(1.0).unwrap()));
+    }
+
+    #[test]
     fn does_not_resolve_named_leading_tracking_keywords_or_truncate() {
-        let style = resolve_style("leading-tight tracking-wide truncate", &theme(), "light", false);
+        let style = resolve_style("leading-tight tracking-wide truncate", &theme(), "light", false, W);
         assert!(style.is_empty());
     }
 
     #[test]
     fn resolves_numeric_line_height_and_arbitrary_letter_spacing_as_numbers() {
-        let style = resolve_style("leading-6 tracking-[0.5px]", &theme(), "light", false);
+        let style = resolve_style("leading-6 tracking-[0.5px]", &theme(), "light", false, W);
         assert_eq!(style.get("lineHeight").unwrap(), &Value::Number(Number::from_f64(24.0).unwrap()));
         assert_eq!(style.get("letterSpacing").unwrap(), &Value::Number(Number::from_f64(0.5).unwrap()));
     }
 
     #[test]
     fn resolves_an_arbitrary_color_value() {
-        let style = resolve_style("bg-[#16a34a]", &theme(), "light", false);
+        let style = resolve_style("bg-[#16a34a]", &theme(), "light", false, W);
         assert_eq!(style.get("backgroundColor").unwrap(), "#16a34a");
     }
 
@@ -267,6 +407,7 @@ mod tests {
             r##"{"colors":{"blue-6":"#2563eb"},"spacing":{},"screens":{},"darkMode":"attribute"}"##,
             "light",
             false,
+            W,
         );
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["display"], "flex");
@@ -275,12 +416,35 @@ mod tests {
 
     #[test]
     fn resolve_style_json_returns_an_empty_object_for_unparseable_theme_json() {
-        assert_eq!(resolve_style_json("flex", "not json", "light", false), "{}");
+        assert_eq!(resolve_style_json("flex", "not json", "light", false, W), "{}");
     }
 
     #[test]
     fn merges_multiple_tokens_into_one_flat_object() {
-        let style = resolve_style("flex flex-row items-center justify-center bg-blue-6", &theme(), "light", false);
+        let style = resolve_style("flex flex-row items-center justify-center bg-blue-6", &theme(), "light", false, W);
         assert_eq!(style.len(), 5);
+    }
+
+    #[test]
+    fn resolves_shadow_into_discrete_rn_properties_with_a_nested_shadow_offset() {
+        let style = resolve_style("shadow-lg", &theme(), "light", false, W);
+        assert_eq!(style.get("shadowColor").unwrap(), "#000000");
+        assert_eq!(style.get("shadowOpacity").unwrap(), &Value::Number(Number::from_f64(0.1).unwrap()));
+        assert_eq!(style.get("shadowRadius").unwrap(), &Value::Number(Number::from_f64(15.0).unwrap()));
+        assert_eq!(style.get("elevation").unwrap(), &Value::Number(Number::from_f64(8.0).unwrap()));
+        assert_eq!(
+            style.get("shadowOffset").unwrap(),
+            &serde_json::json!({ "width": 0.0, "height": 10.0 }),
+        );
+        // No flat shadowOffsetX/shadowOffsetY leaked through — only the
+        // merged nested object should exist.
+        assert!(style.get("shadowOffsetX").is_none());
+        assert!(style.get("shadowOffsetY").is_none());
+    }
+
+    #[test]
+    fn shadow_inner_does_not_resolve_on_native() {
+        let style = resolve_style("shadow-inner", &theme(), "light", false, W);
+        assert!(style.is_empty());
     }
 }

@@ -1,7 +1,22 @@
 {
   "name": "@kbach/core-engine",
-  "version": "0.0.0",
-  "private": true,
+  "version": "1.0.0-beta.2",
+  "description": "Rust/WASM utility-class resolution engine powering @kbach/react and @kbach/react-native.",
+  "keywords": ["css", "wasm", "rust", "tailwind", "utility-first", "styling"],
+  "license": "MIT",
+  "author": "semsakadanupol",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/semsakadanupol/kbach.git",
+    "directory": "packages/core-engine"
+  },
+  "homepage": "https://github.com/semsakadanupol/kbach#readme",
+  "bugs": {
+    "url": "https://github.com/semsakadanupol/kbach/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./dist/kbach_core_engine.js",
   "types": "./dist/kbach_core_engine.d.ts",
@@ -17,7 +32,8 @@
   },
   "files": ["dist", "dist-node"],
   "scripts": {
-    "build": "wasm-pack build --target web --out-dir dist && wasm-pack build --target nodejs --out-dir dist-node",
+    "build": "wasm-pack build --target web --out-dir dist && wasm-pack build --target nodejs --out-dir dist-node && node -e \"require('fs').rmSync('dist/.gitignore',{force:true});require('fs').rmSync('dist-node/.gitignore',{force:true})\"",
+    "build:android": "node scripts/build-android.mjs",
     "test": "cargo test",
     "lint": "cargo check",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('dist-node',{recursive:true,force:true});require('fs').rmSync('target',{recursive:true,force:true})\""

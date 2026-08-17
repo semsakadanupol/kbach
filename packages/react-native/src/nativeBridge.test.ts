@@ -1,48 +1,90 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockResolveStyle = vi.fn((_classString: string, _themeJson: string, _colorScheme: string, _pressed: boolean) => '{"display":"flex"}');
+const mockResolveStyle = vi.fn(
+  (_classString: string, _themeJson: string, _colorScheme: string, _pressed: boolean, _width: number) => '{"display":"flex"}',
+);
 const mockGetColorScheme = vi.fn(() => 'light' as 'light' | 'dark' | null);
-const mockGetEnforcing = vi.fn(() => ({ resolveStyle: mockResolveStyle }));
+const mockGet = vi.fn(() => ({ resolveStyle: mockResolveStyle }) as { resolveStyle: typeof mockResolveStyle } | null);
+const mockAddChangeListener = vi.fn(() => ({ remove: vi.fn() }));
+const mockDimensionsGet = vi.fn(() => ({ width: 375, height: 812 }));
 
 vi.mock('react-native', () => ({
-  TurboModuleRegistry: { getEnforcing: mockGetEnforcing },
-  Appearance: { getColorScheme: mockGetColorScheme },
+  TurboModuleRegistry: { get: mockGet },
+  Appearance: { getColorScheme: mockGetColorScheme, addChangeListener: mockAddChangeListener },
+  Dimensions: { get: mockDimensionsGet },
 }));
 
 describe('nativeBridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetColorScheme.mockReturnValue('light');
+    mockGet.mockReturnValue({ resolveStyle: mockResolveStyle });
+    // resolveStyle now reads darkModeStore.ts's getGlobalDarkMode() instead
+    // of Appearance.getColorScheme() directly (see nativeBridge.ts's own
+    // doc comment on why) — that store reads the OS scheme ONCE at module
+    // import time, not on every call, so each test needs a genuinely fresh
+    // module instance to pick up a different mocked scheme.
+    vi.resetModules();
   });
 
   it('gets the KbachModule TurboModule by name', async () => {
     const { resolveStyle } = await import('./nativeBridge');
     resolveStyle('flex');
-    expect(mockGetEnforcing).toHaveBeenCalledWith('KbachModule');
+    expect(mockGet).toHaveBeenCalledWith('KbachModule');
+  });
+
+  it('falls back to the pure-JS engine when the TurboModule is not registered (Expo Go)', async () => {
+    mockGet.mockReturnValue(null);
+    const { resolveStyle } = await import('./nativeBridge');
+    expect(resolveStyle('flex items-center bg-blue-6')).toEqual({
+      display: 'flex',
+      alignItems: 'center',
+      backgroundColor: expect.any(String),
+    });
+    // The native module was never called at all — this went through the JS engine.
+    expect(mockResolveStyle).not.toHaveBeenCalled();
   });
 
   it('passes the current color scheme through as the third arg', async () => {
     mockGetColorScheme.mockReturnValue('dark');
     const { resolveStyle } = await import('./nativeBridge');
     resolveStyle('dark:bg-blue-8');
-    expect(mockResolveStyle).toHaveBeenCalledWith('dark:bg-blue-8', expect.any(String), 'dark', false);
+    expect(mockResolveStyle).toHaveBeenCalledWith('dark:bg-blue-8', expect.any(String), 'dark', false, expect.any(Number));
   });
 
   it('defaults a null color scheme (no system preference) to "light"', async () => {
     mockGetColorScheme.mockReturnValue(null);
     const { resolveStyle } = await import('./nativeBridge');
     resolveStyle('flex');
-    expect(mockResolveStyle).toHaveBeenCalledWith('flex', expect.any(String), 'light', false);
+    expect(mockResolveStyle).toHaveBeenCalledWith('flex', expect.any(String), 'light', false, expect.any(Number));
   });
 
   it('passes the pressed argument through as the fourth arg', async () => {
     const { resolveStyle } = await import('./nativeBridge');
     resolveStyle('active:bg-blue-8', true);
-    expect(mockResolveStyle).toHaveBeenCalledWith('active:bg-blue-8', expect.any(String), 'light', true);
+    expect(mockResolveStyle).toHaveBeenCalledWith('active:bg-blue-8', expect.any(String), 'light', true, expect.any(Number));
+  });
+
+  it('passes Dimensions.get("window").width through as the fifth arg', async () => {
+    mockDimensionsGet.mockReturnValue({ width: 800, height: 1280 });
+    const { resolveStyle } = await import('./nativeBridge');
+    resolveStyle('sm:flex');
+    expect(mockResolveStyle).toHaveBeenCalledWith('sm:flex', expect.any(String), 'light', false, 800);
   });
 
   it('parses the JSON string returned by the native module', async () => {
     mockResolveStyle.mockReturnValue('{"display":"flex","backgroundColor":"#2563eb"}');
     const { resolveStyle } = await import('./nativeBridge');
     expect(resolveStyle('flex bg-blue-6')).toEqual({ display: 'flex', backgroundColor: '#2563eb' });
+  });
+
+  it('reflects an explicit setGlobalThemeMode override, not just the raw OS scheme', async () => {
+    // The OS itself still reports light, but an explicit override should win.
+    mockGetColorScheme.mockReturnValue('light');
+    const { resolveStyle } = await import('./nativeBridge');
+    const { setGlobalThemeMode } = await import('./darkModeStore');
+    setGlobalThemeMode('dark');
+    resolveStyle('dark:bg-blue-8');
+    expect(mockResolveStyle).toHaveBeenCalledWith('dark:bg-blue-8', expect.any(String), 'dark', false, expect.any(Number));
   });
 });

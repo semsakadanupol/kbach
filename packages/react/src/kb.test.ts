@@ -120,6 +120,36 @@ describe('kb()', () => {
     expect(cssTexts[1]).toContain('dark');
   });
 
+  it('injects the base reset as a separate <style id="kbach-reset"> tag on first call', async () => {
+    const { kb } = await import('./kb');
+    kb('bg-blue-6');
+
+    const resetEl = document.getElementById('kbach-reset');
+    expect(resetEl).not.toBeNull();
+    expect(resetEl?.textContent).toContain('box-sizing: border-box');
+  });
+
+  it('does not duplicate the reset tag across repeated calls', async () => {
+    const { kb } = await import('./kb');
+    kb('bg-blue-6');
+    kb('flex items-center');
+
+    expect(document.querySelectorAll('#kbach-reset').length).toBe(1);
+  });
+
+  it('skips injecting the reset if a tag with that id already exists (e.g. from <KbachReset/> SSR)', async () => {
+    const preexisting = document.createElement('style');
+    preexisting.id = 'kbach-reset';
+    preexisting.textContent = '/* server-rendered */';
+    document.head.appendChild(preexisting);
+
+    const { kb } = await import('./kb');
+    kb('bg-blue-6');
+
+    expect(document.querySelectorAll('#kbach-reset').length).toBe(1);
+    expect(document.getElementById('kbach-reset')?.textContent).toBe('/* server-rendered */');
+  });
+
   it('disableRuntimeCSS() skips rule injection but still returns the resolved className', async () => {
     const { kb, disableRuntimeCSS, isRuntimeCSSDisabled } = await import('./kb');
     expect(isRuntimeCSSDisabled()).toBe(false);
@@ -134,5 +164,7 @@ describe('kb()', () => {
     // No <style data-kbach> tag should have been created — the static file
     // is what's expected to serve these rules once disabled.
     expect(document.head.querySelector('[data-kbach]')).toBeNull();
+    // Same for the reset — the static kbach.css already inlines BASE_RESET.
+    expect(document.getElementById('kbach-reset')).toBeNull();
   });
 });

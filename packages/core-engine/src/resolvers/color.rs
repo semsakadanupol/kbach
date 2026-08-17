@@ -55,10 +55,33 @@ fn color_declarations(theme: &ThemeConfig, parsed: &ParsedClass, css_property: &
     Some(vec![decl(css_property, &value)])
 }
 
+/// Known CSS length/size unit suffixes — used only to disambiguate an
+/// ARBITRARY `text-[...]` value between font-size and color (see
+/// `resolve_text`'s doc comment); not a general-purpose CSS value
+/// validator, and deliberately not exhaustive of every possible length
+/// unit (`cm`/`mm`/`in`/`pt`/`pc`/`ch`/`ex`/`vmin`/`vmax` are real CSS units
+/// too, just far rarer in a Tailwind `text-*` value than the ones below).
+const LENGTH_UNITS: &[&str] = &["px", "rem", "em", "%", "vh", "vw"];
+
+/// True if `value` looks like a CSS length (a number, optionally with a
+/// known unit suffix like "20px"/"1.5rem"/"100%") rather than a color. Used
+/// ONLY for arbitrary `text-[...]` disambiguation — a real color never
+/// parses as a bare number or number+length-unit, so this is safe without
+/// needing full CSS-value-type inference.
+fn looks_like_length(value: &str) -> bool {
+    let without_unit = LENGTH_UNITS.iter().find_map(|u| value.strip_suffix(u)).unwrap_or(value);
+    without_unit.parse::<f64>().is_ok()
+}
+
 fn resolve_text(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
-    // "text-" is genuinely three-way ambiguous (font-size / text-align /
-    // color) — size and alignment keywords are checked first since they're
-    // a small closed set; anything else falls through to color resolution.
+    // "text-" is genuinely ambiguous (font-size / text-align / text-wrap /
+    // text-overflow / bare-"shadow" / color) — size, alignment, wrap, and
+    // overflow keywords are checked first since they're small closed sets;
+    // anything else falls through to color resolution. Bare "text-shadow"
+    // (no dash, meaning no explicit tier) parses as utility="text"
+    // value="shadow" via this module's own "text-" catchall prefix —
+    // "text-shadow-" (WITH a dash) is a genuinely different, dedicated
+    // utility name handled by effects::resolve, unreachable from here.
     if !parsed.is_arbitrary {
         if let Some(value) = parsed.value.as_deref() {
             if let Some(size) = super::typography::text_size(value) {
@@ -67,17 +90,80 @@ fn resolve_text(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declara
             if let Some(align) = super::typography::text_align(value) {
                 return Some(vec![decl("text-align", align)]);
             }
+            if let Some(wrap) = super::typography::text_wrap(value) {
+                return Some(vec![decl("text-wrap", wrap)]);
+            }
+            if value == "shadow" {
+                return Some(vec![decl("text-shadow", super::effects::text_shadow_default())]);
+            }
+            if value == "ellipsis" {
+                return Some(vec![decl("text-overflow", "ellipsis")]);
+            }
+            if value == "clip" {
+                return Some(vec![decl("text-overflow", "clip")]);
+            }
+        }
+    } else if let Some(value) = parsed.value.as_deref() {
+        // Regression guard: an arbitrary "text-[20px]" used to always fall
+        // through to color resolution (is_arbitrary skipped every check
+        // above unconditionally), silently treating a font-size as a color
+        // instead. A real color value never parses as a bare number or a
+        // number+known-length-unit, so this check is safe to run ONLY for
+        // the arbitrary branch, ahead of the color fallback below.
+        if looks_like_length(value) {
+            return Some(vec![decl("font-size", value)]);
         }
     }
     color_declarations(theme, parsed, "color", "--text-opacity")
 }
 
+fn stroke_width_value(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "0" => "0",
+        "1" => "1",
+        "2" => "2",
+        _ => return None,
+    })
+}
+
 pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
     match parsed.utility.as_str() {
+        // Regression guard: an arbitrary "bg-[url(...)]" used to always be
+        // treated as background-color (this arm never checked the value's
+        // shape at all) — a background-IMAGE silently became a color
+        // instead. `url(...)` is unambiguous (a real color value never
+        // starts with it), so it's checked first, ahead of the normal
+        // color path; anything else keeps the exact same color resolution
+        // as before.
+        "bg" if parsed.is_arbitrary && parsed.value.as_deref().is_some_and(|v| v.starts_with("url(")) => {
+            Some(vec![decl("background-image", parsed.value.as_deref()?)])
+        }
         "bg" => color_declarations(theme, parsed, "background-color", "--bg-opacity"),
         "text" => resolve_text(parsed, theme),
         "bg-opacity" => resolve_percent(parsed).map(|v| vec![decl("--bg-opacity", &v)]),
         "text-opacity" => resolve_percent(parsed).map(|v| vec![decl("--text-opacity", &v)]),
+        // caret-color/accent-color have no matching Tailwind opacity-modifier
+        // utility in this engine, so a plain (non-opacity-composed) lookup —
+        // same as `border_value`'s own color branch — is the right shape,
+        // not `color_declarations`'s rgba-decomposition.
+        "caret" => color_value(theme, parsed).map(|v| vec![decl("caret-color", &v)]),
+        "accent" => color_value(theme, parsed).map(|v| vec![decl("accent-color", &v)]),
+        // SVG presentation attributes — grouped here with the rest of this
+        // module's color-family utilities rather than a dedicated svg.rs,
+        // since both are genuinely just "fill"/"stroke" is-it-a-color
+        // lookups with a "none" keyword override, the same shape as every
+        // other color arm above.
+        "fill" if parsed.value.as_deref() == Some("none") => Some(vec![decl("fill", "none")]),
+        "fill" => color_value(theme, parsed).map(|v| vec![decl("fill", &v)]),
+        "stroke-width" => {
+            let value = parsed.value.as_deref()?;
+            if parsed.is_arbitrary {
+                return Some(vec![decl("stroke-width", value)]);
+            }
+            stroke_width_value(value).map(|v| vec![decl("stroke-width", v)])
+        }
+        "stroke" if parsed.value.as_deref() == Some("none") => Some(vec![decl("stroke", "none")]),
+        "stroke" => color_value(theme, parsed).map(|v| vec![decl("stroke", &v)]),
         _ => None,
     }
 }
@@ -102,6 +188,17 @@ fn expand_token(token: &str, theme: &ThemeConfig) -> String {
     let modifier_prefix = if segments.is_empty() { String::new() } else { format!("{}:", segments.join(":")) };
 
     match expand_base(base, theme) {
+        // A token that ALREADY carries an explicit `dark:` modifier on a
+        // mode-aware color (e.g. `dark:bg-surface`, usually written out of
+        // habit from before the color was made mode-aware) is NOT split
+        // into a base+dark pair — that would be redundant on top of an
+        // already-explicit choice, and would double up the `dark:` prefix
+        // into a broken `dark:dark:...` selector. Substitute the dark side
+        // in place instead, leaving every modifier (including the `dark:`
+        // itself) exactly as written. Mirrors
+        // old-kbach/packages/ui/src/core/modeAwareColors.ts's identical,
+        // deliberately-documented guard.
+        Some((_, dark)) if segments.contains(&"dark") => format!("{modifier_prefix}{dark}"),
         Some((light, dark)) => format!("{modifier_prefix}{light} {modifier_prefix}dark:{dark}"),
         None => token.to_string(),
     }
@@ -163,9 +260,52 @@ mod tests {
     }
 
     #[test]
+    fn resolves_text_wrap_before_falling_back_to_color() {
+        let theme = theme_with_colors();
+        assert_eq!(resolve(&parse_class("text-balance"), &theme), Some(vec![decl("text-wrap", "balance")]));
+        assert_eq!(resolve(&parse_class("text-nowrap"), &theme), Some(vec![decl("text-wrap", "nowrap")]));
+    }
+
+    #[test]
+    fn resolves_an_arbitrary_font_size_instead_of_misreading_it_as_a_color() {
+        // Regression: arbitrary "text-*" values used to skip the size/
+        // align/wrap checks unconditionally and fall straight into color
+        // resolution — an arbitrary font-size silently became a color.
+        let theme = theme_with_colors();
+        assert_eq!(resolve(&parse_class("text-[20px]"), &theme), Some(vec![decl("font-size", "20px")]));
+        assert_eq!(resolve(&parse_class("text-[1.5rem]"), &theme), Some(vec![decl("font-size", "1.5rem")]));
+        assert_eq!(resolve(&parse_class("text-[100%]"), &theme), Some(vec![decl("font-size", "100%")]));
+        // A real arbitrary color must still resolve as a color, unaffected.
+        assert_eq!(resolve(&parse_class("text-[#ff0000]"), &theme), Some(vec![decl("color", "rgba(255,0,0,var(--text-opacity, 1))")]));
+        assert_eq!(resolve(&parse_class("text-[red]"), &theme), Some(vec![decl("color", "red")]));
+    }
+
+    #[test]
+    fn resolves_text_ellipsis_clip_and_logical_alignment() {
+        let theme = theme_with_colors();
+        assert_eq!(resolve(&parse_class("text-ellipsis"), &theme), Some(vec![decl("text-overflow", "ellipsis")]));
+        assert_eq!(resolve(&parse_class("text-clip"), &theme), Some(vec![decl("text-overflow", "clip")]));
+        assert_eq!(resolve(&parse_class("text-start"), &theme), Some(vec![decl("text-align", "start")]));
+        assert_eq!(resolve(&parse_class("text-end"), &theme), Some(vec![decl("text-align", "end")]));
+    }
+
+    #[test]
     fn non_hex_arbitrary_color_is_used_as_is_without_opacity_composition() {
         let theme = theme_with_colors();
         assert_eq!(resolve(&parse_class("bg-[red]"), &theme), Some(vec![decl("background-color", "red")]));
+    }
+
+    #[test]
+    fn resolves_an_arbitrary_background_image_instead_of_misreading_it_as_a_color() {
+        // Regression: arbitrary "bg-[url(...)]" used to always be treated
+        // as background-color — a background-IMAGE silently became a color.
+        let theme = theme_with_colors();
+        assert_eq!(
+            resolve(&parse_class("bg-[url(/hero.png)]"), &theme),
+            Some(vec![decl("background-image", "url(/hero.png)")]),
+        );
+        // A real arbitrary color must still resolve as a color, unaffected.
+        assert_eq!(resolve(&parse_class("bg-[#112233]"), &theme).unwrap()[0].property, "background-color");
     }
 
     #[test]
@@ -186,5 +326,43 @@ mod tests {
     fn leaves_a_plain_color_class_unexpanded() {
         let theme = theme_with_colors();
         assert_eq!(expand_mode_aware_color_classes("bg-blue-6", &theme), "bg-blue-6");
+    }
+
+    #[test]
+    fn substitutes_the_dark_side_in_place_for_a_token_that_already_has_an_explicit_dark_modifier() {
+        let theme = theme_with_colors();
+        // Regression test — this used to expand to a broken, doubled
+        // "dark:bg-[#f9fafb] dark:dark:bg-[#111827]" (light value under a
+        // dark-mode selector, plus an invalid dark:dark: prefix). An explicit
+        // dark: on an already mode-aware color substitutes the dark side in
+        // place instead, matching old-kbach's identical guard.
+        let expanded = expand_mode_aware_color_classes("dark:bg-surface", &theme);
+        assert_eq!(expanded, "dark:bg-[#111827]");
+    }
+
+    #[test]
+    fn substitutes_the_dark_side_with_other_modifiers_still_stacked() {
+        let theme = theme_with_colors();
+        let expanded = expand_mode_aware_color_classes("hover:dark:bg-surface", &theme);
+        assert_eq!(expanded, "hover:dark:bg-[#111827]");
+    }
+
+    #[test]
+    fn resolves_caret_and_accent_color_without_opacity_composition() {
+        let theme = theme_with_colors();
+        assert_eq!(resolve(&parse_class("caret-blue-6"), &theme), Some(vec![decl("caret-color", "#2563eb")]));
+        assert_eq!(resolve(&parse_class("accent-blue-6"), &theme), Some(vec![decl("accent-color", "#2563eb")]));
+        assert_eq!(resolve(&parse_class("caret-[#f00]"), &theme), Some(vec![decl("caret-color", "#f00")]));
+    }
+
+    #[test]
+    fn resolves_svg_fill_stroke_and_stroke_width() {
+        let theme = theme_with_colors();
+        assert_eq!(resolve(&parse_class("fill-blue-6"), &theme), Some(vec![decl("fill", "#2563eb")]));
+        assert_eq!(resolve(&parse_class("fill-none"), &theme), Some(vec![decl("fill", "none")]));
+        assert_eq!(resolve(&parse_class("stroke-blue-6"), &theme), Some(vec![decl("stroke", "#2563eb")]));
+        assert_eq!(resolve(&parse_class("stroke-none"), &theme), Some(vec![decl("stroke", "none")]));
+        assert_eq!(resolve(&parse_class("stroke-width-2"), &theme), Some(vec![decl("stroke-width", "2")]));
+        assert_eq!(resolve(&parse_class("stroke-width-[1.5]"), &theme), Some(vec![decl("stroke-width", "1.5")]));
     }
 }

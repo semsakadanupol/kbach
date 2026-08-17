@@ -46,6 +46,24 @@ function pushClassLikeStrings(text: string, into: Set<string>): void {
   }
 }
 
+// Matches a JSX opening/self-closing tag's name, e.g. the `a` in `<a href=`
+// or `<a>`, the `img` in `<img />` — lowercase-only, since intrinsic HTML
+// elements in JSX must start lowercase (a capitalized `<Section>` is a
+// component reference, never a real DOM tag, and is naturally excluded by
+// this pattern rather than needing a separate filter). Used to drive
+// reset.ts's buildResetCSS() — only the tags a project actually renders
+// need their reset rules in the static kbach.css.
+const JSX_TAG_RE = /<([a-z][a-zA-Z0-9]*)[\s/>]/g;
+
+/** Exported for tests only — internal to the plugin otherwise. */
+export function scanUsedTags(code: string): Set<string> {
+  const tags = new Set<string>();
+  let m: RegExpExecArray | null;
+  JSX_TAG_RE.lastIndex = 0;
+  while ((m = JSX_TAG_RE.exec(code)) !== null) tags.add(m[1]!);
+  return tags;
+}
+
 /** Exported for tests only — internal to the plugin otherwise. */
 export function extractClassStrings(code: string): string[] {
   const found = new Set<string>();

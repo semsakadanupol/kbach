@@ -39,6 +39,30 @@ describe('buildColorVarMap + applyVarMap', () => {
     expect(text).not.toContain('\\var(');
   });
 
+  it('REGRESSION: leaves a bare-keyword-value selector untouched even when the keyword equals a real theme color value', () => {
+    // A theme color whose value is a bare CSS keyword (not a hex code) needs
+    // no escaping in a selector, so it has no backslash directly before it
+    // either — the hex-value regression fix above doesn't catch this case.
+    // Confirmed by hand: this exact collision (background.rs's Phase 21
+    // bg-clip-text + text-[transparent] demo) silently broke the selector.
+    const themeWithTransparent: ThemeConfig = { ...theme(), colors: { ...theme().colors, transparent: 'transparent' } };
+    const css = '.text-\\[transparent\\] { color: transparent }';
+    const map = buildColorVarMap(themeWithTransparent, css);
+    const { text } = applyVarMap(css, map);
+    expect(text).toContain('.text-\\[transparent\\]');
+    expect(text).toContain('color: var(--color-transparent)');
+    expect(text).not.toContain('.text-\\[var(');
+  });
+
+  it('does not substitute inside an @media prefix or a merged multi-rule media block', () => {
+    const css = '@media (min-width: 640px) { .sm\\:border-x { border-color: #6366f1 } .sm\\:flex { display: flex } }';
+    const map = buildColorVarMap(theme(), css);
+    const { text } = applyVarMap(css, map);
+    expect(text).toBe(
+      '@media (min-width: 640px) { .sm\\:border-x { border-color: var(--color-indigo-6) } .sm\\:flex { display: flex } }',
+    );
+  });
+
   it('does not extract a color that never appears in the CSS text', () => {
     const css = '.flex { display: flex }';
     const map = buildColorVarMap(theme(), css);

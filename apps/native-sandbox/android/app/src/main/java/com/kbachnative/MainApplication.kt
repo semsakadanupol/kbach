@@ -9,9 +9,10 @@ import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 
 class MainApplication : Application(), ReactApplication {
 
-  // KbachPackage (now @kbach/android, Phase 13) is discovered via Android
-  // autolinking, same as react-native-safe-area-context's own package —
-  // no manual add() here, same as that one never needed it either.
+  // KbachPackage (shipped inside @kbach/react-native's own android/ folder,
+  // Phase 13) is discovered via Android autolinking, same as
+  // react-native-safe-area-context's own package — no manual add() here,
+  // same as that one never needed it either.
   override val reactHost: ReactHost by lazy {
     getDefaultReactHost(
       context = applicationContext,

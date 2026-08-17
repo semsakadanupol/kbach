@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractClassStrings } from './scan';
+import { extractClassStrings, scanUsedTags } from './scan';
 
 describe('extractClassStrings', () => {
   it('extracts a simple string className attribute', () => {
@@ -60,5 +60,33 @@ describe('extractClassStrings', () => {
   it('returns no tokens for code with no class-like strings', () => {
     const code = `function add(a, b) { return a + b; }`;
     expect(extractClassStrings(code)).toEqual([]);
+  });
+});
+
+describe('scanUsedTags', () => {
+  it('collects lowercase intrinsic tag names from JSX', () => {
+    const code = `<div><a href="/">link</a><button>go</button></div>`;
+    expect(scanUsedTags(code)).toEqual(new Set(['div', 'a', 'button']));
+  });
+
+  it('detects self-closing tags', () => {
+    const code = `<img src="x.png" /><input type="text" />`;
+    const tags = scanUsedTags(code);
+    expect(tags.has('img')).toBe(true);
+    expect(tags.has('input')).toBe(true);
+  });
+
+  it('ignores capitalized component references', () => {
+    const code = `<Section><ThemeProvider><Demo /></ThemeProvider></Section>`;
+    const tags = scanUsedTags(code);
+    expect(tags.size).toBe(0);
+  });
+
+  it('returns an empty set for code with no JSX tags at all', () => {
+    expect(scanUsedTags(`function add(a, b) { return a + b; }`).size).toBe(0);
+  });
+
+  it('detects a bare tag with no attributes and no children', () => {
+    expect(scanUsedTags(`<p>text</p>`).has('p')).toBe(true);
   });
 });

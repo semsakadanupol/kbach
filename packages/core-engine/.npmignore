@@ -1,0 +1,8 @@
+# wasm-pack drops a `.gitignore` containing just `*` into both `dist/` and
+# `dist-node/` on every build — correct for keeping build output out of git
+# by default, but npm falls back to consulting .gitignore files (including
+# nested ones) when there's no .npmignore, which silently excluded both
+# directories from the published tarball despite them being listed in
+# package.json's "files" field. An .npmignore here (even with nothing repo-
+# specific in it) makes npm ignore .gitignore entirely for this package and
+# rely purely on "files" + npm's own always-included/excluded defaults.

@@ -1,0 +1,14 @@
+<!--
+  Deliberately NO `package="..."` attribute here, even though this
+  module's Kotlin package (com.kbachnative, see KbachModule.kt) differs
+  from its Gradle build.gradle `namespace` (com.kbachnative.nativemodule)
+  — adding one here to help React Native's autolinking guess the right
+  Kotlin package (see react-native.config.js at this package's root, which
+  fixes that instead) breaks the actual Gradle build on AGP 9+: it now
+  hard-errors ("Setting the namespace via the package attribute in the
+  source AndroidManifest.xml is no longer supported") whenever the
+  manifest's package doesn't match the namespace exactly. If you're
+  tempted to add one back to fix an autolinking symbol-resolution error,
+  fix react-native.config.js's packageImportPath/packageInstance instead.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

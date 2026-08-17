@@ -95,15 +95,31 @@ export function buildSpacingVarMap(theme: ThemeConfig, cssText: string): VarMap 
 
 /**
  * Applies one or more var maps to `cssText`. Longest patterns first (cheap
- * insurance against partial-match overlap), and every pattern is matched
- * with a negative lookbehind for "\" — regression fix for a confirmed
- * old-kbach bug: a naive string replace matched a color's hex value
- * ANYWHERE in a rule's text, including inside an escaped selector (e.g.
- * `bg-[#6366f1]` escapes to `.bg-\[\#6366f1\]`, which contains the literal
- * substring "#6366f1" right after its escaping backslash). Declaration
- * values are never backslash-prefixed in this codebase — only
- * `css.rs::escape_selector`'s output is — so the lookbehind reliably tells
- * the two apart.
+ * insurance against partial-match overlap). Substitution is scoped to each
+ * rule's DECLARATION block only — the innermost `{ ... }` span (containing
+ * no further nested braces) — never to a selector or an `@media` prefix.
+ *
+ * A naive whole-text replace corrupts a selector whenever a theme color's
+ * value collides with literal text the selector already contains. The
+ * original (old-kbach) case was a hex value: `bg-[#6366f1]` escapes to
+ * `.bg-\[\#6366f1\]`, which contains the substring "#6366f1" right after
+ * its escaping backslash — that was fixed with a negative lookbehind for
+ * "\". But a theme color whose VALUE is a bare CSS keyword rather than a
+ * hex code (e.g. `--color-transparent: transparent`) needs no escaping in
+ * a selector at all, so it appears with no backslash directly before it
+ * either: `text-[transparent]` escapes to `.text-\[transparent\]`, and the
+ * lookbehind fix doesn't catch it — a flat replace corrupted the selector
+ * into `.text-\[var(--color-transparent)\]`, a class name that no longer
+ * matches the element's actual `className`, silently making the whole rule
+ * inert (confirmed by hand: a `bg-clip-text` + `text-[transparent]`
+ * gradient-text demo rendered with the wrong text color because of this).
+ *
+ * Restricting substitution to declaration blocks subsumes the old
+ * lookbehind fix entirely (selectors are categorically excluded now, hex
+ * or not) and is safe unconditionally: `parser.rs::is_safe_arbitrary_value`
+ * already rejects any arbitrary value containing "{", "}", or ";" before it
+ * can reach a resolver, so a declaration value can never itself contain a
+ * brace that would confuse the innermost-`{...}` match.
  */
 export function applyVarMap(cssText: string, ...maps: VarMap[]): { text: string; declarations: Map<string, string> } {
   const replacements = new Map<string, string>();
@@ -115,14 +131,15 @@ export function applyVarMap(cssText: string, ...maps: VarMap[]): { text: string;
 
   const sorted = [...replacements].sort(([a], [b]) => b.length - a.length);
   const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const patterns = sorted.map(
-    ([pattern, replacement]) => [new RegExp(`(?<!\\\\)${escapeRegex(pattern)}`, 'g'), replacement] as const,
-  );
+  const patterns = sorted.map(([pattern, replacement]) => [new RegExp(escapeRegex(pattern), 'g'), replacement] as const);
 
-  let text = cssText;
-  for (const [re, replacement] of patterns) {
-    text = text.replace(re, () => replacement);
-  }
+  const text = cssText.replace(/\{([^{}]*)\}/g, (_whole, inner: string) => {
+    let replaced = inner;
+    for (const [re, replacement] of patterns) {
+      replaced = replaced.replace(re, () => replacement);
+    }
+    return `{${replaced}}`;
+  });
 
   return { text, declarations };
 }

@@ -1,5 +1,6 @@
 import { generateCss } from './wasmLoader';
 import { getThemeJson } from './theme';
+import { BASE_RESET, RESET_STYLE_ID } from './reset';
 
 interface RuleEntry {
   rule: string;
@@ -83,6 +84,27 @@ function injectRule(rule: string, order: number): void {
   ruleOrderByKey.set(rule, order);
 }
 
+// Checked once, on the first kb() call that actually injects — not a plain
+// <style data-kbach> rule (it has no `order`, isn't a utility class rule,
+// and always needs to sit before every utility rule regardless of any of
+// their orders), so it gets its own element rather than going through
+// injectRule/findInsertionIndex. Skipped if <KbachReset/> (or a static
+// kbach.css, which also inlines BASE_RESET) already rendered the same id —
+// checked via the DOM, not just a local flag, since either of those can
+// exist before this module's own state does (e.g. SSR).
+let resetChecked = false;
+
+function ensureResetInjected(): void {
+  if (resetChecked) return;
+  resetChecked = true;
+  if (document.getElementById(RESET_STYLE_ID)) return;
+
+  const el = document.createElement('style');
+  el.id = RESET_STYLE_ID;
+  el.textContent = BASE_RESET;
+  document.head.insertBefore(el, document.head.firstChild);
+}
+
 /**
  * Resolves a Kbach class string via the Rust/WASM engine, cascade-order-safe
  * injects the resulting CSS rules into a single `<style data-kbach>` tag,
@@ -94,6 +116,7 @@ export function kb(classString: string): string {
   const json = generateCss(classString, getThemeJson());
   const { className, rules } = JSON.parse(json) as GenerateCssResult;
   if (!runtimeCSSDisabled) {
+    ensureResetInjected();
     for (const { rule, order } of rules) {
       injectRule(rule, order);
     }
@@ -101,11 +124,13 @@ export function kb(classString: string): string {
   return className;
 }
 
-/** Exported for tests only — resets injected-rule tracking, the <style> tag, and the disableRuntimeCSS() flag. */
+/** Exported for tests only — resets injected-rule tracking, the <style> tag, the reset tag, and the disableRuntimeCSS() flag. */
 export function _resetForTests(): void {
   sheetKeys.length = 0;
   ruleOrderByKey.clear();
   styleEl?.remove();
   styleEl = null;
   runtimeCSSDisabled = false;
+  resetChecked = false;
+  document.getElementById(RESET_STYLE_ID)?.remove();
 }

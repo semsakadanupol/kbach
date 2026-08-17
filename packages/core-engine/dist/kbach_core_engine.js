@@ -1,6 +1,29 @@
 /* @ts-self-types="./kbach_core_engine.d.ts" */
 
 /**
+ * Serializes `theme::DEFAULT_COLORS` (Phase 16) to a flat JSON object —
+ * consumed at build time (not runtime; see that const's own doc comment)
+ * by `scripts/generate-palette.mjs` via the Node-target build of this
+ * same `#[wasm_bindgen]` export, which is what makes this usable without
+ * an async init step. `BTreeMap` (alphabetical key order) rather than
+ * `DEFAULT_COLORS`'s own family-grouped order — fine for a generated
+ * file nobody hand-edits, and deterministic across regenerations either way.
+ * @returns {string}
+ */
+export function default_colors_json() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.default_colors_json();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * @param {string} class_string
  * @param {string} theme_json
  * @returns {string}
@@ -19,6 +42,66 @@ export function generate_css(class_string, theme_json) {
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * @param {string} class_string
+ * @param {string} theme_json
+ * @returns {string}
+ */
+export function generate_css_attr(class_string, theme_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(class_string, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(theme_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.generate_css_attr(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * WASM counterpart to the Android JNI bridge's `resolveStyle` — resolves
+ * `class_string` to a flat, RN-`StyleSheet`-shaped JSON style object
+ * instead of CSS rule text, for @kbach/react-native's Expo Web /
+ * react-native-web fallback path (see packages/react-native/src/webBridge.ts).
+ * react-native-web's `View`/`Text` accept an RN-style `style` OBJECT (which
+ * react-native-web itself converts to real DOM CSS internally) — the same
+ * shape the JNI bridge already produces for real native, NOT the CSS-text
+ * shape `generate_css` above produces for plain DOM `@kbach/react`.
+ * Delegates to the exact same `resolve_style::resolve_style_json` the JNI
+ * bridge calls — zero duplicated resolution logic between the two
+ * style-object FFI entry points, only the argument marshaling differs.
+ * @param {string} class_string
+ * @param {string} theme_json
+ * @param {string} color_scheme
+ * @param {boolean} pressed
+ * @param {number} width
+ * @returns {string}
+ */
+export function resolve_style_json(class_string, theme_json, color_scheme, pressed, width) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(class_string, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(theme_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(color_scheme, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.resolve_style_json(ptr0, len0, ptr1, len1, ptr2, len2, pressed, width);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
     }
 }
 function __wbg_get_imports() {

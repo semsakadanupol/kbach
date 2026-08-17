@@ -1,6 +1,88 @@
-use super::{decl, resolve_length, Declaration};
+use super::{decl, resolve_length, resolve_negatable_length, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
+
+/// Named container-scale sizes (Tailwind's `max-w-*` scale, ported to `w`/
+/// `h`/`min-w`/`max-w`/`min-h`/`max-h` alike per this project's own usage —
+/// stock Tailwind only applies it to `max-w`) — checked before falling back
+/// to `resolve_length`'s numeric spacing scale in each arm below, same
+/// precedence pattern as `border.rs`'s `radius_size` before its own
+/// `resolve_length` fallback. `sm`-`7xl` match Tailwind's real rem values
+/// exactly; `8xl`/`9xl` aren't in Tailwind's default scale at all, extended
+/// here following its own established +8rem-per-step pattern (4xl->5xl->
+/// 6xl->7xl are each +8rem) since Tailwind stops at 7xl but doesn't define
+/// a reason to.
+///
+/// No collision with the identically-named `sm`/`md`/`lg`/`xl`/`2xl`
+/// responsive modifiers (registry.rs) — those live in `parsed.modifiers`
+/// (before a `:`), this is `parsed.value` (after a `-`), entirely separate
+/// fields the parser already keeps apart.
+fn named_size(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "sm" => "24rem",
+        "md" => "28rem",
+        "lg" => "32rem",
+        "xl" => "36rem",
+        "2xl" => "42rem",
+        "3xl" => "48rem",
+        "4xl" => "56rem",
+        "5xl" => "64rem",
+        "6xl" => "72rem",
+        "7xl" => "80rem",
+        "8xl" => "88rem",
+        "9xl" => "96rem",
+        _ => return None,
+    })
+}
+
+/// `w-1/2`/`h-2/3`-style fractions -> a percentage, real Tailwind's own
+/// `width`/`height` feature (never applied to padding/margin/gap, so this
+/// lives here rather than in the shared `resolve_length`). No parser
+/// changes needed: "/" isn't a bracket character, so `w-1/2` already parses
+/// as a plain (non-arbitrary) value — `is_safe_arbitrary_value` is never
+/// consulted, and `css.rs::escape_selector` already backslash-escapes "/"
+/// like any other special character.
+fn fraction_percent(value: &str) -> Option<String> {
+    let (num_str, den_str) = value.split_once('/')?;
+    let num: f64 = num_str.parse().ok()?;
+    let den: f64 = den_str.parse().ok()?;
+    if den == 0.0 {
+        return None;
+    }
+    let pct = num / den * 100.0;
+    let formatted = format!("{pct:.6}");
+    let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+    Some(format!("{trimmed}%"))
+}
+
+/// CSS's own sizing keywords — distinct from the theme's spacing-scale
+/// numbers/named container sizes, so checked here rather than added to
+/// either of those tables.
+fn css_size_keyword(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "min" => "min-content",
+        "max" => "max-content",
+        "fit" => "fit-content",
+        _ => return None,
+    })
+}
+
+fn resolve_size(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<String> {
+    if !parsed.is_arbitrary {
+        if let Some(value) = parsed.value.as_deref() {
+            if let Some(size) = named_size(value) {
+                return Some(size.to_string());
+            }
+            if let Some(kw) = css_size_keyword(value) {
+                return Some(kw.to_string());
+            }
+            if let Some(pct) = fraction_percent(value) {
+                return Some(pct);
+            }
+        }
+    }
+    resolve_length(theme, parsed)
+}
 
 pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
     match parsed.utility.as_str() {
@@ -11,22 +93,32 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "pr" => resolve_length(theme, parsed).map(|v| vec![decl("padding-right", &v)]),
         "pb" => resolve_length(theme, parsed).map(|v| vec![decl("padding-bottom", &v)]),
         "pl" => resolve_length(theme, parsed).map(|v| vec![decl("padding-left", &v)]),
-        "m" => resolve_length(theme, parsed).map(|v| vec![decl("margin", &v)]),
-        "mx" => resolve_length(theme, parsed).map(|v| vec![decl("margin-left", &v), decl("margin-right", &v)]),
-        "my" => resolve_length(theme, parsed).map(|v| vec![decl("margin-top", &v), decl("margin-bottom", &v)]),
-        "mt" => resolve_length(theme, parsed).map(|v| vec![decl("margin-top", &v)]),
-        "mr" => resolve_length(theme, parsed).map(|v| vec![decl("margin-right", &v)]),
-        "mb" => resolve_length(theme, parsed).map(|v| vec![decl("margin-bottom", &v)]),
-        "ml" => resolve_length(theme, parsed).map(|v| vec![decl("margin-left", &v)]),
+        // Margin (unlike padding above) supports real Tailwind's negative-
+        // value convention ("-mt-4") — see resolve_negatable_length's own
+        // doc comment for why it's a separate helper from resolve_length.
+        "m" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("margin", &v)]),
+        "mx" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("margin-left", &v), decl("margin-right", &v)]),
+        "my" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("margin-top", &v), decl("margin-bottom", &v)]),
+        "mt" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("margin-top", &v)]),
+        "mr" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("margin-right", &v)]),
+        "mb" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("margin-bottom", &v)]),
+        "ml" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("margin-left", &v)]),
         "gap" => resolve_length(theme, parsed).map(|v| vec![decl("gap", &v)]),
         "gap-x" => resolve_length(theme, parsed).map(|v| vec![decl("column-gap", &v)]),
         "gap-y" => resolve_length(theme, parsed).map(|v| vec![decl("row-gap", &v)]),
-        "w" => resolve_length(theme, parsed).map(|v| vec![decl("width", &v)]),
-        "h" => resolve_length(theme, parsed).map(|v| vec![decl("height", &v)]),
-        "min-w" => resolve_length(theme, parsed).map(|v| vec![decl("min-width", &v)]),
-        "max-w" => resolve_length(theme, parsed).map(|v| vec![decl("max-width", &v)]),
-        "min-h" => resolve_length(theme, parsed).map(|v| vec![decl("min-height", &v)]),
-        "max-h" => resolve_length(theme, parsed).map(|v| vec![decl("max-height", &v)]),
+        "w" => resolve_size(theme, parsed).map(|v| vec![decl("width", &v)]),
+        "h" => resolve_size(theme, parsed).map(|v| vec![decl("height", &v)]),
+        "min-w" => resolve_size(theme, parsed).map(|v| vec![decl("min-width", &v)]),
+        "max-w" => resolve_size(theme, parsed).map(|v| vec![decl("max-width", &v)]),
+        "min-h" => resolve_size(theme, parsed).map(|v| vec![decl("min-height", &v)]),
+        "max-h" => resolve_size(theme, parsed).map(|v| vec![decl("max-height", &v)]),
+        // Combined width+height shorthand — reuses the exact same named/
+        // fraction/spacing-scale/arbitrary resolution as bare "w"/"h".
+        "size" => resolve_size(theme, parsed).map(|v| vec![decl("width", &v), decl("height", &v)]),
+        // flex-basis shares the same named/fraction/spacing-scale/arbitrary
+        // resolution as width — real Tailwind's own basis-* scale is
+        // literally the width scale.
+        "basis" => resolve_size(theme, parsed).map(|v| vec![decl("flex-basis", &v)]),
         _ => None,
     }
 }
@@ -80,5 +172,114 @@ mod tests {
     fn returns_none_for_a_spacing_key_missing_from_the_theme() {
         let t = theme();
         assert_eq!(resolve(&parse_class("p-99"), &t), None);
+    }
+
+    #[test]
+    fn resolves_full_to_100_percent_for_width_and_height() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("w-full"), &t), Some(vec![decl("width", "100%")]));
+        assert_eq!(resolve(&parse_class("h-full"), &t), Some(vec![decl("height", "100%")]));
+        assert_eq!(resolve(&parse_class("min-h-full"), &t), Some(vec![decl("min-height", "100%")]));
+    }
+
+    #[test]
+    fn resolves_auto_for_margin_and_width_height() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("mx-auto"), &t), Some(vec![decl("margin-left", "auto"), decl("margin-right", "auto")]));
+        assert_eq!(resolve(&parse_class("w-auto"), &t), Some(vec![decl("width", "auto")]));
+        assert_eq!(resolve(&parse_class("h-auto"), &t), Some(vec![decl("height", "auto")]));
+    }
+
+    #[test]
+    fn resolves_named_container_sizes_for_width_and_height() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("w-sm"), &t), Some(vec![decl("width", "24rem")]));
+        assert_eq!(resolve(&parse_class("max-w-lg"), &t), Some(vec![decl("max-width", "32rem")]));
+        assert_eq!(resolve(&parse_class("h-2xl"), &t), Some(vec![decl("height", "42rem")]));
+        assert_eq!(resolve(&parse_class("min-h-7xl"), &t), Some(vec![decl("min-height", "80rem")]));
+        assert_eq!(resolve(&parse_class("max-h-9xl"), &t), Some(vec![decl("max-height", "96rem")]));
+    }
+
+    #[test]
+    fn named_size_does_not_shadow_arbitrary_or_numeric_values() {
+        let t = theme();
+        // "sm" is also a named size key, but an arbitrary value must always
+        // win over the named-size lookup — is_arbitrary is checked first.
+        assert_eq!(resolve(&parse_class("w-[3rem]"), &t), Some(vec![decl("width", "3rem")]));
+        assert_eq!(resolve(&parse_class("w-4"), &t), Some(vec![decl("width", "16px")]));
+    }
+
+    #[test]
+    fn resolves_fraction_based_width_and_height_to_a_percentage() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("w-1/2"), &t), Some(vec![decl("width", "50%")]));
+        assert_eq!(resolve(&parse_class("w-1/3"), &t), Some(vec![decl("width", "33.333333%")]));
+        assert_eq!(resolve(&parse_class("h-2/3"), &t), Some(vec![decl("height", "66.666667%")]));
+        assert_eq!(resolve(&parse_class("w-3/4"), &t), Some(vec![decl("width", "75%")]));
+        assert_eq!(resolve(&parse_class("w-11/12"), &t), Some(vec![decl("width", "91.666667%")]));
+    }
+
+    #[test]
+    fn resolves_negative_margin_via_the_leading_dash_convention() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("-mt-4"), &t), Some(vec![decl("margin-top", "-16px")]));
+        assert_eq!(
+            resolve(&parse_class("-mx-8"), &t),
+            Some(vec![decl("margin-left", "-32px"), decl("margin-right", "-32px")]),
+        );
+        assert_eq!(resolve(&parse_class("-m-4"), &t), Some(vec![decl("margin", "-16px")]));
+    }
+
+    #[test]
+    fn negative_margin_of_zero_is_plain_zero_not_negative_zero() {
+        let mut t = theme();
+        t.spacing.insert("0".to_string(), 0.0);
+        assert_eq!(resolve(&parse_class("-mt-0"), &t), Some(vec![decl("margin-top", "0px")]));
+    }
+
+    #[test]
+    fn negative_margin_has_no_form_for_full_auto_or_arbitrary_values() {
+        // Real Tailwind doesn't generate "-m-full"/"-m-auto" at all, and an
+        // arbitrary negative is written directly ("mt-[-10px]"), not via
+        // this "-" convention — both are unresolvable here, not a bug.
+        let t = theme();
+        assert_eq!(resolve(&parse_class("-mt-full"), &t), None);
+        assert_eq!(resolve(&parse_class("-mt-auto"), &t), None);
+        assert_eq!(resolve(&parse_class("-mt-[10px]"), &t), None);
+    }
+
+    #[test]
+    fn padding_has_no_negative_form_the_leading_dash_is_simply_unresolvable() {
+        // Real Tailwind never supports negative padding at all — "-p-4"
+        // isn't a real Tailwind class, so this engine doesn't resolve it
+        // either (falls through, same as any other unknown class).
+        let t = theme();
+        assert_eq!(resolve(&parse_class("-p-4"), &t), None);
+    }
+
+    #[test]
+    fn resolves_css_size_keywords_for_width_and_flex_basis() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("w-min"), &t), Some(vec![decl("width", "min-content")]));
+        assert_eq!(resolve(&parse_class("max-w-max"), &t), Some(vec![decl("max-width", "max-content")]));
+        assert_eq!(resolve(&parse_class("h-fit"), &t), Some(vec![decl("height", "fit-content")]));
+    }
+
+    #[test]
+    fn resolves_flex_basis_via_the_shared_width_scale() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("basis-4"), &t), Some(vec![decl("flex-basis", "16px")]));
+        assert_eq!(resolve(&parse_class("basis-1/2"), &t), Some(vec![decl("flex-basis", "50%")]));
+        assert_eq!(resolve(&parse_class("basis-full"), &t), Some(vec![decl("flex-basis", "100%")]));
+        assert_eq!(resolve(&parse_class("basis-auto"), &t), Some(vec![decl("flex-basis", "auto")]));
+    }
+
+    #[test]
+    fn resolves_size_shorthand_to_matching_width_and_height() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("size-4"), &t), Some(vec![decl("width", "16px"), decl("height", "16px")]));
+        assert_eq!(resolve(&parse_class("size-full"), &t), Some(vec![decl("width", "100%"), decl("height", "100%")]));
+        assert_eq!(resolve(&parse_class("size-1/2"), &t), Some(vec![decl("width", "50%"), decl("height", "50%")]));
+        assert_eq!(resolve(&parse_class("size-[3rem]"), &t), Some(vec![decl("width", "3rem"), decl("height", "3rem")]));
     }
 }

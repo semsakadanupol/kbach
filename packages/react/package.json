@@ -1,7 +1,23 @@
 {
   "name": "@kbach/react",
-  "version": "0.0.0",
-  "private": true,
+  "version": "1.0.0-beta.1",
+  "description": "A utility-first styling engine for React, powered by a real Rust/WASM core — Tailwind CSS v4 feature parity with Kbach's own color palette.",
+  "keywords": ["css", "react", "tailwind", "utility-first", "wasm", "styling"],
+  "license": "MIT",
+  "author": "semsakadanupol",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/semsakadanupol/kbach.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/semsakadanupol/kbach#readme",
+  "bugs": {
+    "url": "https://github.com/semsakadanupol/kbach/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": ["dist"],
   "source": "./src/index.ts",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -36,10 +52,11 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run --passWithNoTests",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "generate:colors": "node ../core-engine/scripts/generate-palette.mjs src/generatedPalette.ts"
   },
   "dependencies": {
-    "@kbach/core-engine": "*"
+    "@kbach/core-engine": "1.0.0-beta.2"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",

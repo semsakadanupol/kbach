@@ -23,14 +23,28 @@ pkg/
 !packages/core-engine/dist/
 !packages/core-engine/dist/**
 
-# Gradle build output for packages/android's library module (apps/native-sandbox
-# has its own RN-template .gitignore covering its app module already). "**/"
-# prefix required — a bare "android/build/" in the root .gitignore anchors to
-# the repo root and won't match the deeper packages/android/android/build/ path.
+# Gradle build output for packages/react-native's bundled native module
+# (apps/native-sandbox has its own RN-template .gitignore covering its app
+# module already). "**/" prefix required — a bare "android/build/" in the
+# root .gitignore anchors to the repo root and won't match the deeper
+# packages/react-native/android/build/ path.
 **/android/build/
 **/android/.cxx/
 **/android/.gradle/
 
+# Eclipse/Buildship project metadata Gradle syncs auto-generate for any
+# Android library module opened via Android Studio/Buildship tooling — not
+# meant to be committed, same reasoning as the Gradle build output above.
+**/android/.classpath
+**/android/.project
+**/android/.settings/
+**/android/bin/
+
 # Old all-TypeScript implementation, kept locally as a read-only reference
 # during the from-scratch polyglot rewrite — not part of this repo's history.
 old-kbach/
+
+# packages/react's Vite plugin writes a generated, do-not-edit className
+# type-hints file here (see vite-plugin/classNameHints.ts) — regenerated on
+# every dev-server/build start, not meant to be committed or edited by hand.
+.kbach/

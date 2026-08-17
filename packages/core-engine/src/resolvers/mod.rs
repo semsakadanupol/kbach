@@ -4,18 +4,38 @@
 //! function; `resolve_utility` below dispatches to the first one that
 //! recognizes the utility.
 
+mod background;
 mod border;
 mod color;
 mod divide;
 mod effects;
+mod filters;
+mod grid;
+mod interactivity;
 mod layout;
+mod scroll;
 mod spacing;
+mod transform;
 mod typography;
 
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
 
 pub use color::expand_mode_aware_color_classes;
+
+/// Looks up the `@keyframes` name + body for an `animate-*` utility's value
+/// (e.g. `"spin"` -> `("kb-spin", "from { ... } to { ... }")`) — consulted
+/// by `lib.rs::resolve_class_string` to emit the keyframes block as a
+/// separate top-level rule alongside the normal `animation: ...` rule
+/// `effects::resolve` produces for the same token. `None` for `"none"` (and
+/// anything else unrecognized) — there's no keyframes body for "no
+/// animation".
+pub fn animation_keyframes(parsed: &ParsedClass) -> Option<(&'static str, &'static str)> {
+    if parsed.utility != "animate" {
+        return None;
+    }
+    effects::keyframes_for(parsed.value.as_deref()?)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Declaration {
@@ -30,18 +50,74 @@ pub(crate) fn decl(property: &str, value: &str) -> Declaration {
 /// Resolves a spacing-scale (or arbitrary) length value shared by every
 /// utility that draws from the theme's spacing scale — padding/margin/gap
 /// sides, width/height bounds, inset/position offsets, space-between.
+///
+/// `full`/`auto` are hardcoded keywords rather than theme.spacing entries
+/// (mirrors `old-kbach/packages/ui/src/core/theme.ts`'s `full: '100%'` and
+/// `auto: 'auto'`) — both are valid values on both platforms (RN's Yoga
+/// layout accepts `'auto'` for margin/width/height same as CSS, and
+/// percentage strings are already confirmed safe by `resolve_style.rs`'s
+/// `passes_an_arbitrary_percentage_width_through_as_a_string` test), so it's
+/// safe to resolve here in the shared helper rather than needing a
+/// web-only/native-only split the way `screen` does (see
+/// `layout::resolve_screen_size`). `auto` is what makes `mx-auto`-style
+/// centering possible.
 pub(crate) fn resolve_length(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<String> {
+    // Real Tailwind doesn't generate a negative form for padding/gap/width/
+    // height/etc. at all — "-p-4" isn't a real Tailwind class — so a
+    // leading "-" on a utility that goes through the plain (non-negatable)
+    // helper is simply unresolvable, same as any other unknown class,
+    // rather than silently being treated as if the "-" weren't there.
+    // `resolve_negatable_length` (used by margin/inset/translate) handles
+    // `negative` itself instead of ever reaching this check.
+    if parsed.negative {
+        return None;
+    }
     let value = parsed.value.as_deref()?;
     if parsed.is_arbitrary {
         return Some(value.to_string());
     }
+    match value {
+        "full" => return Some("100%".to_string()),
+        "auto" => return Some("auto".to_string()),
+        _ => {}
+    }
     theme.spacing.get(value).map(|px| format!("{px}px"))
+}
+
+/// `resolve_length`, but honoring `parsed.negative` (real Tailwind's
+/// leading-"-" convention, e.g. "-mt-4") — used by the specific utilities
+/// real Tailwind actually allows negative values on: margin, inset/top/
+/// right/bottom/left, and (web-only) translate-x/y. Deliberately narrower
+/// than `resolve_length`: negation only applies to the NUMERIC spacing
+/// scale, matching real Tailwind exactly — "full"/"auto" and arbitrary
+/// values have no negative form there either (an arbitrary negative is
+/// written directly, "mt-[-10px]", not "-mt-[10px]"), so this returns
+/// `None` for those when `parsed.negative` is set rather than emitting
+/// nonsensical CSS like "-auto" or "-100%".
+pub(crate) fn resolve_negatable_length(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<String> {
+    if !parsed.negative {
+        return resolve_length(theme, parsed);
+    }
+    if parsed.is_arbitrary {
+        return None;
+    }
+    let value = parsed.value.as_deref()?;
+    let px = theme.spacing.get(value)?;
+    if *px == 0.0 {
+        return Some("0px".to_string());
+    }
+    Some(format!("-{px}px"))
 }
 
 /// Resolves a 0-100 percentage utility value (opacity, bg-opacity,
 /// text-opacity) to a 0-1 decimal string. Arbitrary values are passed
 /// through as-is (already whatever decimal/unit the user wrote).
 pub(crate) fn resolve_percent(parsed: &ParsedClass) -> Option<String> {
+    // Real Tailwind has no negative opacity — same reasoning as
+    // `resolve_length`'s identical check.
+    if parsed.negative {
+        return None;
+    }
     let value = parsed.value.as_deref()?;
     if parsed.is_arbitrary {
         return Some(value.to_string());
@@ -50,14 +126,38 @@ pub(crate) fn resolve_percent(parsed: &ParsedClass) -> Option<String> {
     Some(format!("{}", pct / 100.0))
 }
 
+/// Phase 25's arbitrary properties (`[mask-type:luminance]`) — a raw
+/// `property: value` pair, entirely bypassing every domain resolver's own
+/// utility-name dispatch. Checked FIRST in `resolve_utility` (not folded
+/// into the `.or_else` chain below) since `parsed.value` here is the
+/// COMBINED `"property:value"` text `parser.rs` packed together, not a
+/// value alone the way every other resolver expects — splitting it back
+/// apart is this function's only job.
+fn resolve_arbitrary_property(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
+    if parsed.utility != crate::parser::ARBITRARY_PROPERTY_SENTINEL {
+        return None;
+    }
+    let (property, value) = parsed.value.as_deref()?.split_once(':')?;
+    Some(vec![decl(property, value)])
+}
+
 pub fn resolve_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
-    layout::resolve(parsed, theme)
+    resolve_arbitrary_property(parsed)
+        .or_else(|| layout::resolve_screen_size(parsed))
+        .or_else(|| layout::resolve_flex(parsed, true))
+        .or_else(|| layout::resolve(parsed, theme))
         .or_else(|| spacing::resolve(parsed, theme))
         .or_else(|| color::resolve(parsed, theme))
         .or_else(|| border::resolve(parsed, theme))
         .or_else(|| typography::resolve(parsed, theme))
         .or_else(|| effects::resolve(parsed, theme))
         .or_else(|| divide::resolve(parsed, theme))
+        .or_else(|| grid::resolve(parsed))
+        .or_else(|| transform::resolve(parsed, theme))
+        .or_else(|| filters::resolve(parsed))
+        .or_else(|| background::resolve(parsed, theme))
+        .or_else(|| interactivity::resolve(parsed, theme))
+        .or_else(|| scroll::resolve(parsed, theme))
 }
 
 /// Native (React Native) dispatcher — layout, spacing, and border resolve
@@ -91,19 +191,101 @@ pub fn resolve_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<
 /// `<Text>`, a different API). `ring`/`outline` (from `border::resolve`)
 /// resolve to CSS-only properties (`box-shadow`, `outline-style`) RN
 /// doesn't have — harmless (RN just logs an unknown-style-property
-/// warning), not worth special-casing out.
+/// warning), not worth special-casing out. `w-screen`/`h-screen`/etc. are
+/// also excluded — see `layout::resolve_screen_size`'s doc comment for why
+/// `dvw`/`dvh` have no RN equivalent; those tokens simply resolve to
+/// nothing on native rather than emitting an invalid style value, same as
+/// before this dispatch even existed. `layout::resolve_flex` IS included
+/// (unlike `resolve_screen_size`) — called with `web: false` so
+/// `flex-auto`/`flex-initial`/`flex-none` get their numeric RN fallback
+/// instead of an invalid CSS keyword string. `grid::resolve` is excluded
+/// entirely — React Native's Yoga layout engine is flexbox-only with no
+/// CSS Grid equivalent at all, so unlike every other web-only exclusion
+/// above there's no numeric/string fallback to even consider; grid
+/// utilities simply don't exist on native. `transform::resolve` is also
+/// excluded — see that module's doc comment for why its CSS-custom-
+/// property composition technique has no RN equivalent (RN's array-based
+/// `transform` style has no cascade to compose against). `filters::resolve`
+/// is excluded too — RN has no `filter`/`backdrop-filter` concept at all,
+/// not even a partial one. `background::resolve` is excluded for the same
+/// reason again — RN's `<View>` has plain `backgroundColor` only, no
+/// `background-position`/`-size`/`-repeat`/`-attachment`/`-clip`/`-origin`,
+/// and no gradient support without a third-party native module.
+///
+/// `effects::resolve` (the WEB dispatch for this module) was never wired
+/// into this dispatcher at all — every other effects.rs addition from
+/// Phase 22 (`text-shadow`/`mix-blend`/`bg-blend`/`animate`) stays
+/// excluded, each for its own reason: RN's `textShadow*` is a set of
+/// discrete style keys (color/offset/radius), not a single CSS shorthand,
+/// so `text-shadow` doesn't translate directly; `mix-blend-mode`/
+/// `background-blend-mode` have no RN equivalent at all; `animate-*`'s
+/// `animation` shorthand + `@keyframes` are a pure CSS mechanism RN has no
+/// concept of (RN animation is imperative, via the `Animated` API).
+/// `shadow`/`shadow-*` is the one exception — `effects::
+/// native_shadow_declarations` is a separate, NATIVE-only entry point
+/// (also living in effects.rs, just never called from `effects::resolve`)
+/// that maps the same named tiers to RN's discrete
+/// `shadowColor`/`shadowOffset`/`shadowOpacity`/`shadowRadius` (iOS) +
+/// `elevation` (Android) keys instead of a CSS string — see that
+/// function's own doc comment. `ring-offset-*`'s extension of
+/// `border::resolve`'s existing `ring` handling inherits that arm's
+/// already-established "resolves to a CSS-only property, harmless"
+/// precedent unchanged — same for Phase 23's `border-collapse`/
+/// `border-separate` addition to that same arm (RN has no table layout at
+/// all, but it's a harmless unknown style warning, not a crash).
+///
+/// `interactivity::resolve` and `scroll::resolve` (Phase 23) are never
+/// wired in either, each for its own reason: `resize`/`touch-action`/
+/// `will-change` are pure CSS/DOM mechanisms with no RN concept; `sr-only`
+/// relies on `clip`/`position` tricks RN doesn't support (RN's actual
+/// equivalent is the `accessibilityElementsHidden`/`importantForAccessibility`
+/// props — a different API shape, not a value translation); `scroll-*`/
+/// `snap-*` are CSS scroll-container mechanics RN replaces entirely with
+/// `ScrollView` props. `color.rs`'s own Phase 23 additions (`caret`/
+/// `accent`/`fill`/`stroke`/`stroke-width`) are unreachable on native too —
+/// `resolve_color_native` below is a hand-picked "bg"/"text" dispatch, not a
+/// forward to `color::resolve`, so anything added to that module needs an
+/// explicit new arm here to ever reach native at all (RN has no
+/// `caretColor`/`accentColor` style prop, and `fill`/`stroke` are
+/// react-native-svg-specific props this generic dispatcher was never wired
+/// to know about).
+///
+/// Phase 25's `[property:value]` arbitrary properties are excluded
+/// entirely and deliberately — `resolve_arbitrary_property` is only ever
+/// called from `resolve_utility` (the web dispatcher), never forwarded
+/// here, since RN's style system takes a fixed JS-object shape with known
+/// keys, not arbitrary CSS property names. `@container` (`layout.rs`) is
+/// NOT specially excluded, though — `layout::resolve` is already included
+/// below wholesale, so `@container` resolves to a `container-type` decl on
+/// native same as everywhere else, inheriting the same "CSS-only property,
+/// harmless unknown-style warning" precedent `ring`/`outline`/
+/// `border-collapse` already established, not worth special-casing out for
+/// one more property. Container-query VARIANTS (`@sm:`/`@min-[...]:`) are a
+/// separate, `css.rs`-only concern (selector/at-rule construction) with no
+/// native equivalent at all — moot here regardless, since native rendering
+/// has no per-token selector construction to apply them to in the first
+/// place.
 pub fn resolve_utility_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
-    layout::resolve(parsed, theme)
+    layout::resolve_flex(parsed, false)
+        .or_else(|| layout::resolve(parsed, theme))
         .or_else(|| spacing::resolve(parsed, theme))
         .or_else(|| border::resolve(parsed, theme))
         .or_else(|| resolve_color_native(parsed, theme))
         .or_else(|| resolve_leading_tracking_native(parsed))
         .or_else(|| resolve_typography_native(parsed))
+        .or_else(|| effects::native_shadow_declarations(parsed))
 }
 
-/// `font-weight`/`text-transform`/`text-decoration-line` — all three match
-/// RN's style key types directly as plain strings, so this is pure
-/// dispatch wiring, no value conversion.
+/// `font-weight`/`text-transform`/`text-decoration-line`/`font-style` all
+/// match RN's style key types directly as plain strings, so this is pure
+/// dispatch wiring, no value conversion. `italic`/`not-italic` are the one
+/// Phase 20 (typography completeness) addition that genuinely works on
+/// native — RN's `Text` fully supports `fontStyle: 'italic' | 'normal'`;
+/// everything else that phase added (decoration thickness, underline
+/// offset, text-wrap, white-space, word-break, vertical-align, list-style,
+/// hyphens, text-indent) is a DOM/CSS-only concept with no RN equivalent at
+/// all, so those stay in `typography::resolve` (this dispatcher's web-only
+/// counterpart, never called from here).
 fn resolve_typography_native(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
     match parsed.utility.as_str() {
         "font" => {
@@ -116,6 +298,8 @@ fn resolve_typography_native(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
         "underline" => Some(vec![decl("text-decoration-line", "underline")]),
         "line-through" => Some(vec![decl("text-decoration-line", "line-through")]),
         "no-underline" => Some(vec![decl("text-decoration-line", "none")]),
+        "italic" => Some(vec![decl("font-style", "italic")]),
+        "not-italic" => Some(vec![decl("font-style", "normal")]),
         _ => None,
     }
 }
@@ -207,6 +391,18 @@ mod native_dispatcher_tests {
     }
 
     #[test]
+    fn resolves_negative_margin_and_inset_on_native_too() {
+        // spacing.rs/layout.rs are shared between the web and native
+        // dispatchers, so the negative-value convention added there
+        // reaches native for free — confirmed here so a future change to
+        // either dispatcher's own wiring can't silently drop it for native.
+        let mut t = theme();
+        t.spacing.insert("4".to_string(), 16.0);
+        assert_eq!(resolve_utility_native(&parse_class("-mt-4"), &t), Some(vec![decl("margin-top", "-16px")]));
+        assert_eq!(resolve_utility_native(&parse_class("-inset-4"), &t), Some(vec![decl("inset", "-16px")]));
+    }
+
+    #[test]
     fn resolves_spacing_and_border_radius_utilities() {
         let mut t = theme();
         t.spacing.insert("4".to_string(), 16.0);
@@ -245,6 +441,51 @@ mod native_dispatcher_tests {
     }
 
     #[test]
+    fn resolves_full_but_not_screen_sizing_on_native() {
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("w-full"), &t), Some(vec![decl("width", "100%")]));
+        assert_eq!(resolve_utility_native(&parse_class("h-full"), &t), Some(vec![decl("height", "100%")]));
+        assert_eq!(resolve_utility_native(&parse_class("w-screen"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("h-screen"), &t), None);
+    }
+
+    #[test]
+    fn does_not_resolve_grid_utilities_on_native() {
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("grid-cols-3"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("col-span-2"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("place-items-center"), &t), None);
+    }
+
+    #[test]
+    fn does_not_resolve_transform_utilities_on_native() {
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("scale-150"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("rotate-45"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("translate-x-4"), &t), None);
+    }
+
+    #[test]
+    fn does_not_resolve_filter_utilities_on_native() {
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("blur"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("grayscale"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("backdrop-blur-sm"), &t), None);
+    }
+
+    #[test]
+    fn resolves_flex_family_on_native_with_numeric_keyword_fallback() {
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("flex-1"), &t), Some(vec![decl("flex", "1")]));
+        assert_eq!(resolve_utility_native(&parse_class("flex-auto"), &t), Some(vec![decl("flex", "1")]));
+        assert_eq!(resolve_utility_native(&parse_class("flex-none"), &t), Some(vec![decl("flex", "0")]));
+        assert_eq!(resolve_utility_native(&parse_class("flex-row"), &t), Some(vec![decl("flex-direction", "row")]));
+        assert_eq!(resolve_utility_native(&parse_class("grow"), &t), Some(vec![decl("flex-grow", "1")]));
+        assert_eq!(resolve_utility_native(&parse_class("shrink-0"), &t), Some(vec![decl("flex-shrink", "0")]));
+        assert_eq!(resolve_utility_native(&parse_class("order-2"), &t), Some(vec![decl("order", "2")]));
+    }
+
+    #[test]
     fn resolves_font_weight_text_transform_and_text_decoration() {
         let t = theme();
         assert_eq!(resolve_utility_native(&parse_class("font-bold"), &t), Some(vec![decl("font-weight", "700")]));
@@ -254,5 +495,105 @@ mod native_dispatcher_tests {
         assert_eq!(resolve_utility_native(&parse_class("underline"), &t), Some(vec![decl("text-decoration-line", "underline")]));
         assert_eq!(resolve_utility_native(&parse_class("line-through"), &t), Some(vec![decl("text-decoration-line", "line-through")]));
         assert_eq!(resolve_utility_native(&parse_class("no-underline"), &t), Some(vec![decl("text-decoration-line", "none")]));
+    }
+
+    #[test]
+    fn resolves_italic_but_not_dom_only_typography_completeness_utilities_on_native() {
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("italic"), &t), Some(vec![decl("font-style", "italic")]));
+        assert_eq!(resolve_utility_native(&parse_class("not-italic"), &t), Some(vec![decl("font-style", "normal")]));
+        assert_eq!(resolve_utility_native(&parse_class("decoration-2"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("underline-offset-4"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("whitespace-nowrap"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("indent-4"), &t), None);
+    }
+
+    #[test]
+    fn does_not_resolve_background_and_gradient_utilities_on_native() {
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("bg-top"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("bg-cover"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("bg-linear-to-r"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("from-blue-6"), &t), None);
+        // "bg-blue-6" is a real theme color, so it MUST still resolve on
+        // native via color::resolve — confirms background.rs's exclusion
+        // doesn't accidentally shadow the ordinary bg-color path.
+        assert_eq!(
+            resolve_utility_native(&parse_class("bg-blue-6"), &t),
+            Some(vec![decl("background-color", "#2563eb")]),
+        );
+    }
+
+    #[test]
+    fn does_not_resolve_effects_completeness_utilities_on_native() {
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("text-shadow-sm"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("mix-blend-multiply"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("bg-blend-multiply"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("animate-spin"), &t), None);
+        // "ring-offset-4" DOES still resolve on native, inheriting the
+        // pre-existing "ring resolves to a harmless CSS-only property"
+        // precedent — confirms the new ring-offset arm didn't accidentally
+        // narrow border::resolve's native reach.
+        let ring_offset_result = resolve_utility_native(&parse_class("ring-offset-4"), &t);
+        assert!(ring_offset_result.is_some());
+        assert_eq!(ring_offset_result.unwrap()[0], decl("--kb-ring-offset-width", "4px"));
+    }
+
+    #[test]
+    fn resolves_shadow_to_discrete_native_shadow_properties_but_not_shadow_inner() {
+        let t = theme();
+        // Full dispatcher, not just effects::native_shadow_declarations
+        // directly — confirms the wiring in resolve_utility_native itself,
+        // not just the function's own standalone behavior (see
+        // effects.rs's own tests for the exact per-tier values).
+        let lg = resolve_utility_native(&parse_class("shadow-lg"), &t);
+        assert!(lg.is_some());
+        assert!(lg.unwrap().iter().any(|d| d.property == "elevation" && d.value == "8"));
+        assert_eq!(resolve_utility_native(&parse_class("shadow-inner"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("shadow-[0_4px_6px_red]"), &t), None);
+    }
+
+    #[test]
+    fn does_not_resolve_interactivity_and_sizing_rest_utilities_on_native() {
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("resize-none"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("touch-pan-x"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("will-change-transform"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("sr-only"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("scroll-smooth"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("snap-x"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("caret-blue-6"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("accent-blue-6"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("fill-blue-6"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("stroke-blue-6"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("stroke-width-2"), &t), None);
+        // "border-collapse" DOES still resolve on native, inheriting the
+        // same pre-existing "harmless CSS-only property" precedent as ring.
+        assert_eq!(
+            resolve_utility_native(&parse_class("border-collapse"), &t),
+            Some(vec![decl("border-collapse", "collapse")]),
+        );
+        // "size-4" (spacing.rs) DOES still resolve on native — it's a plain
+        // width+height pair, no different from bare "w-4"/"h-4".
+        let mut t_with_spacing = theme();
+        t_with_spacing.spacing.insert("4".to_string(), 16.0);
+        assert_eq!(
+            resolve_utility_native(&parse_class("size-4"), &t_with_spacing),
+            Some(vec![decl("width", "16px"), decl("height", "16px")]),
+        );
+    }
+
+    #[test]
+    fn does_not_resolve_arbitrary_properties_on_native_but_does_resolve_container_type() {
+        let t = theme();
+        // Arbitrary properties are web-only — RN has no arbitrary-CSS-property concept.
+        assert_eq!(resolve_utility_native(&parse_class("[mask-type:luminance]"), &t), None);
+        // "@container" itself DOES still resolve on native, inheriting the
+        // same "harmless CSS-only property" precedent as ring/border-collapse.
+        assert_eq!(
+            resolve_utility_native(&parse_class("@container"), &t),
+            Some(vec![decl("container-type", "inline-size")]),
+        );
     }
 }

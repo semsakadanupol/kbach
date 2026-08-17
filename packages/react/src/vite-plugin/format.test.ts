@@ -45,6 +45,51 @@ describe('formatKbachCSS', () => {
     const css = formatKbachCSS(map, theme());
     expect(css).not.toContain(':root {');
   });
+
+  it('sorts rules by cascade order, not by token-discovery (Map insertion) order', () => {
+    // Regression test — background.rs's from-*/via-*/to-* gradient stops all
+    // write to a shared --kb-gradient-to custom property, so whichever rule
+    // sorts LAST in the actual output wins. This test deliberately inserts
+    // the tokens into the Map in "to" -> "via" -> "from" order (the reverse
+    // of what a real page's source-scan order might discover them in) to
+    // prove the output is sorted by `order`, not by discovery/insertion
+    // sequence.
+    const map = new Map([
+      ['to-blue-6', [{ rule: '.to-blue-6 { --kb-gradient-to: #2563eb }', order: 0.2 }]],
+      ['via-blue-6', [{ rule: '.via-blue-6 { --kb-gradient-to: transparent }', order: 0.1 }]],
+      ['from-blue-6', [{ rule: '.from-blue-6 { --kb-gradient-from: #2563eb }', order: 0 }]],
+    ]);
+    const css = formatKbachCSS(map, theme());
+    const fromIdx = css.indexOf('.from-blue-6');
+    const viaIdx = css.indexOf('.via-blue-6');
+    const toIdx = css.indexOf('.to-blue-6');
+    expect(fromIdx).toBeLessThan(viaIdx);
+    expect(viaIdx).toBeLessThan(toIdx);
+  });
+
+  it('starts with the base reset, before any generated rules', () => {
+    const map = new Map([['flex', [{ rule: '.flex { display: flex }', order: 0 }]]]);
+    const css = formatKbachCSS(map, theme());
+    expect(css).toContain('box-sizing: border-box');
+    expect(css.indexOf('box-sizing: border-box')).toBeLessThan(css.indexOf('.flex'));
+  });
+
+  it('includes the full, unpruned reset when usedTags is omitted', () => {
+    const map = new Map([['flex', [{ rule: '.flex { display: flex }', order: 0 }]]]);
+    const css = formatKbachCSS(map, theme());
+    expect(css).toContain('button { appearance: none');
+    expect(css).toContain('table { border-collapse');
+  });
+
+  it('prunes the reset to only the tags in usedTags when provided', () => {
+    const map = new Map([['flex', [{ rule: '.flex { display: flex }', order: 0 }]]]);
+    const css = formatKbachCSS(map, theme(), new Set(['a']));
+    expect(css).toContain('a { color: inherit; text-decoration: none; }');
+    expect(css).not.toContain('button { appearance: none');
+    expect(css).not.toContain('table { border-collapse');
+    // Universal rules survive regardless.
+    expect(css).toContain('box-sizing: border-box');
+  });
 });
 
 describe('writeKbachToFile', () => {

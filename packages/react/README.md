@@ -1,41 +1,17 @@
 # @kbach/react
 
-A utility-first styling engine for React, powered by a real Rust/WASM core.
-Kbach aims for full [Tailwind CSS v4](https://tailwindcss.com) feature
-parity — grid, transforms, filters, gradients, animations, container
-queries, arbitrary values, and a parameterized variant system (`has-*`,
-`data-*`, `aria-*`, `not-*`, generalized `group-*`/`peer-*`, and more) — with
-its own 22-family + metals color palette as the one deliberate difference.
+A utility-first styling engine for React, powered by a Rust/WASM core.
+Tailwind CSS v4 feature parity, plus Kbach's own color palette.
 
-> **Beta.** The API is close to stable but may still change before `1.0.0`.
-> Feedback and issues are very welcome.
+> Beta — API may still change before 1.0.0.
 
-## Why Kbach
-
-- **A real engine, not a lookup table.** Every class is resolved by the same
-  Rust/WASM core at build time (via the Vite plugin) and at runtime (via
-  `kb()`), so build-time and runtime output can never drift apart.
-- **Static by default.** The Vite plugin scans your source and writes a real,
-  plain `kbach.css` file — no runtime style injection needed, no
-  flash-of-unstyled-content, no client-side CSS-in-JS overhead.
-- **Dark mode that works without a provider.** One hook, `useTheme()`, reads
-  and writes a single global store directly — works from any component, no
-  `<ThemeProvider>` required. Non-React code (a plain function, an event
-  handler) can read/write the exact same store too.
-- **Composable by nature.** Utility class strings are just strings — combine
-  them with plain arrays, ternaries, or template literals. No bespoke
-  composition API required.
-
-## Installation
+## Install
 
 ```sh
 npm install @kbach/react
 ```
 
 ## Quick start
-
-Add the Vite plugin so your utility classes are resolved to real CSS at
-build time:
 
 ```ts
 // vite.config.ts
@@ -47,9 +23,6 @@ export default defineConfig({
   plugins: [kbach(), react()],
 });
 ```
-
-Create `src/kbach.css` with the markers the plugin writes between, and
-import it once:
 
 ```css
 /* src/kbach.css */
@@ -69,8 +42,6 @@ initKbach().then(() => {
 });
 ```
 
-Then just use utility classes:
-
 ```tsx
 <div className="flex items-center gap-4 bg-blue-6 text-white p-4 rounded-lg">
   Hello Kbach
@@ -78,9 +49,6 @@ Then just use utility classes:
 ```
 
 ## Dark mode
-
-`useTheme()` is the one hook — it works anywhere, with or without a
-`<ThemeProvider>` mounted:
 
 ```tsx
 import { useTheme } from '@kbach/react';
@@ -91,35 +59,11 @@ function ThemeToggle() {
 }
 ```
 
-`<ThemeProvider>` is entirely optional — it doesn't do anything `useTheme()`
-needs, it's purely a convenience for seeding an app's initial `defaultMode`
-once, in JSX, instead of calling `setGlobalThemeMode()` yourself before the
-first render:
-
-```tsx
-import { ThemeProvider } from '@kbach/react';
-
-<ThemeProvider defaultMode="dark">
-  <App />
-</ThemeProvider>;
-```
-
-For code that isn't a React component and can't call a hook (a plain
-function, an event handler), the underlying store functions are exported
-directly too:
-
-```tsx
-import { getGlobalDarkMode, toggleGlobalDarkMode } from '@kbach/react';
-
-button.addEventListener('click', toggleGlobalDarkMode);
-```
+Works anywhere, no provider needed. `<ThemeProvider defaultMode="dark">` is
+optional, for seeding a startup default. Outside React (plain functions,
+event handlers), use `getGlobalDarkMode()`/`toggleGlobalDarkMode()` instead.
 
 ## Theming
-
-Customize the color palette, spacing scale, breakpoints, and dark-mode
-strategy via `setTheme()` (call once, before your first render) — the same
-theme object is used by both the runtime and the Vite plugin, so the two
-never fall out of sync:
 
 ```ts
 import { setTheme, defaultTheme } from '@kbach/react';
@@ -130,12 +74,10 @@ setTheme({
 });
 ```
 
-## Runtime & dynamic classes
+## Dynamic classes
 
-Every class name that appears literally in your source is resolved at build
-time. For a class name assembled from truly dynamic data (e.g. user input)
-with no static occurrence anywhere in your source, call `kb()` — it resolves
-and injects the CSS at runtime and returns the class name unchanged:
+Classes that appear literally in your source are resolved at build time.
+For classes assembled from truly dynamic data, use `kb()`:
 
 ```ts
 import { kb } from '@kbach/react';
@@ -143,9 +85,8 @@ import { kb } from '@kbach/react';
 const className = kb(`bg-${userColor}-6`);
 ```
 
-If you're using the static build (the default with the Vite plugin), prefer
-a `safelist` entry in the plugin config for known-but-dynamic values instead
-— it keeps everything static with zero runtime cost.
+Prefer a `safelist` entry in the plugin config when the possible values are
+known ahead of time — keeps everything static.
 
 ## License
 

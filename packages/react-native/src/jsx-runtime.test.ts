@@ -10,10 +10,17 @@ vi.mock('./nativeBridge', () => ({
 // compare `type === Pressable`) — mocked here as a distinct marker so tests
 // can pass the same reference as `type`, same as nativeBridge.test.ts mocks
 // Appearance/NativeModules for the same "don't load the real RN package in
-// a plain Node/vitest environment" reason.
+// a plain Node/vitest environment" reason. Appearance is ALSO needed now —
+// jsxRuntimeCore.ts imports darkModeStore.ts (for the dark: key-suffix fix,
+// see its own doc comment), whose module-level code calls
+// Appearance.addChangeListener at import time.
 const MockPressable = () => null;
 vi.mock('react-native', () => ({
   Pressable: MockPressable,
+  Appearance: {
+    getColorScheme: () => 'light',
+    addChangeListener: () => ({ remove: vi.fn() }),
+  },
 }));
 
 describe('jsx-runtime (react-native)', () => {
@@ -103,5 +110,48 @@ describe('jsx-runtime (react-native)', () => {
 
     expect(styleFn({ pressed: true })).toEqual([{ resolved: 'bg-blue-6', pressed: true }, { opacity: 0.5 }]);
     expect(userStyleFn).toHaveBeenCalledWith({ pressed: true });
+  });
+
+  // React Native's reconciler doesn't repaint an already-mounted host
+  // component just because its `style` prop's VALUES changed (confirmed
+  // by hand against a real Expo Go app) — a `dark:`-bearing element's key
+  // is suffixed with the current dark state specifically so a toggle
+  // forces a remount instead. See jsxRuntimeCore.ts's darkModeKeySuffix
+  // doc comment for the full story.
+  describe('dark: key suffix (forces a remount on dark-mode change)', () => {
+    it('leaves the key untouched for an element with no "dark:" class at all', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex bg-blue-6' }, 'my-key');
+      expect((el as any).key).toBe('my-key');
+    });
+
+    it('leaves an undefined key as undefined when there is no "dark:" class', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex bg-blue-6' }, undefined);
+      expect((el as any).key).toBeNull(); // React normalizes a missing key to null on the element
+    });
+
+    it('appends a dark-state suffix to the key for an element with a "dark:" class', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'bg-blue-6 dark:bg-blue-8' }, 'my-key');
+      expect((el as any).key).toBe('my-key:kb-dark-false');
+    });
+
+    it('suffixes even a previously-undefined key, so the element remounts on toggle', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'dark:bg-blue-8' }, undefined);
+      expect((el as any).key).toBe(':kb-dark-false');
+    });
+
+    it('the suffix reflects the CURRENT dark state, not always false', async () => {
+      vi.resetModules();
+      vi.doMock('react-native', () => ({
+        Pressable: MockPressable,
+        Appearance: { getColorScheme: () => 'dark', addChangeListener: () => ({ remove: vi.fn() }) },
+      }));
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'dark:bg-blue-8' }, undefined);
+      expect((el as any).key).toBe(':kb-dark-true');
+    });
   });
 });

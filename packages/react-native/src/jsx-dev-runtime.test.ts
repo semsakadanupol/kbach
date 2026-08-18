@@ -12,9 +12,14 @@ vi.mock('./jsx-runtime', () => ({
 // jsx-dev-runtime.tsx also imports jsxRuntimeCore.ts (for createJsxDEV),
 // which imports Pressable from 'react-native' — same "don't load the real
 // RN package in a plain Node/vitest environment" reason jsx-runtime.test.ts's
-// identical mock exists for.
+// identical mock exists for. Appearance is also needed — jsxRuntimeCore.ts
+// imports darkModeStore.ts (see jsx-runtime.test.ts's own comment on this).
 vi.mock('react-native', () => ({
   Pressable: () => null,
+  Appearance: {
+    getColorScheme: () => 'light',
+    addChangeListener: () => ({ remove: vi.fn() }),
+  },
 }));
 
 describe('jsx-dev-runtime (react-native)', () => {

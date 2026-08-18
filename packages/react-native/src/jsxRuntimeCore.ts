@@ -16,6 +16,7 @@ import { Pressable } from 'react-native';
 import type { ReactElement } from 'react';
 import type { PressableStateCallbackType } from 'react-native';
 import type { StyleObject } from './nativeBridge';
+import { getGlobalDarkMode } from './darkModeStore';
 
 export { Fragment };
 export type { JSX } from 'react';
@@ -41,6 +42,31 @@ function resolvedStyleFor(resolveStyle: ResolveStyleFn, classStrRaw: string, use
     return [resolved, (userStyle as (state: PressableStateCallbackType) => unknown)({ pressed })];
   }
   return [resolved, userStyle];
+}
+
+const DARK_MODIFIER_RE = /(^|\s)dark:/;
+
+/**
+ * A `dark:`-bearing element needs a key suffix that changes whenever the
+ * global dark-mode state does — confirmed by hand against a real Expo Go
+ * app: toggling dark mode re-renders the component that calls `useTheme()`
+ * (so a value it reads directly, like `mode`, updates on screen correctly)
+ * and `resolveStyle` genuinely returns the new colors on that re-render —
+ * but React Native's own reconciler doesn't repaint an ALREADY-MOUNTED host
+ * component (View/Text/Pressable) just because its `style` prop holds new
+ * VALUES; forcing a remount via a changed `key` is what actually made the
+ * new colors show. Scoped to elements whose className literally contains
+ * "dark:" (a cheap regex test) rather than applied unconditionally, so an
+ * element with no mode-dependent styling never remounts for no reason.
+ * `sm:`/`md:`/etc. likely have the identical underlying issue (same "a live
+ * JS parameter, no React state, no built-in re-render-triggers-repaint
+ * guarantee" shape as dark: — see nativeBridge.ts's own width parameter
+ * doc comment) but haven't been confirmed broken the same way, so this
+ * deliberately stays scoped to dark: for now rather than guessing at a fix
+ * for an unconfirmed problem.
+ */
+function darkModeKeySuffix(classStrRaw: string): string {
+  return DARK_MODIFIER_RE.test(classStrRaw) ? `:kb-dark-${getGlobalDarkMode()}` : '';
 }
 
 function processElement(
@@ -70,7 +96,10 @@ function processElement(
       ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed)
       : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false);
 
-  return makeElement(isStaticChildren, type, { ...rest, style: finalStyle }, key);
+  const suffix = darkModeKeySuffix(classStrRaw);
+  const finalKey = suffix ? `${key ?? ''}${suffix}` : key;
+
+  return makeElement(isStaticChildren, type, { ...rest, style: finalStyle }, finalKey);
 }
 
 /**

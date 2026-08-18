@@ -61,10 +61,14 @@ function resolveLeadingTrackingNative(parsed: ParsedClass): Declaration[] | null
   return null;
 }
 
+/**
+ * Delegates entirely to `color.colorValue` — same arbitrary-passthrough
+ * and inline `/N` opacity-suffix handling (`bg-orange-5/50` bakes to an
+ * `rgba(...)` string here too) as the web dispatcher's `color_value` gets,
+ * so it isn't silently unresolvable on Expo Go the way it used to be.
+ */
 function nativeHexColor(parsed: ParsedClass, theme: ThemeConfig): string | null {
-  const value = parsed.value;
-  if (value === null) return null;
-  return parsed.isArbitrary ? value : color.lookupHex(theme, value);
+  return color.colorValue(theme, parsed);
 }
 
 /** Mirrors `color::resolve_text`'s three-way "text-" disambiguation (size / align / color). */

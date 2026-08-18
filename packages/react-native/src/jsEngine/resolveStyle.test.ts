@@ -144,6 +144,26 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('bg-[#16a34a]', theme(), 'light', false, W).backgroundColor).toBe('#16a34a');
   });
 
+  // Previously unresolvable entirely (an empty style object) — "blue-6/50"
+  // isn't a real theme.colors key, and nativeHexColor had no opacity-suffix
+  // handling of its own at all. Now delegates to colorValue, the same
+  // helper the Rust web dispatcher's color_value provides, so this bakes
+  // to a literal rgba() string — the only representation RN's style system
+  // can use, since it can't parse a CSS var().
+  it('resolves an inline "/N" slash-opacity suffix to a baked rgba', () => {
+    expect(resolveStyleJs('bg-blue-6/50', theme(), 'light', false, W).backgroundColor).toBe('rgba(37,99,235,0.5)');
+    expect(resolveStyleJs('text-blue-6/25', theme(), 'light', false, W).color).toBe('rgba(37,99,235,0.25)');
+  });
+
+  it('slash-opacity at 0 and 100 produces valid rgba bounds', () => {
+    expect(resolveStyleJs('bg-blue-6/0', theme(), 'light', false, W).backgroundColor).toBe('rgba(37,99,235,0)');
+    expect(resolveStyleJs('bg-blue-6/100', theme(), 'light', false, W).backgroundColor).toBe('rgba(37,99,235,1)');
+  });
+
+  it('an opacity suffix over 100 is not treated as opacity, and stays unresolvable', () => {
+    expect(resolveStyleJs('bg-blue-6/150', theme(), 'light', false, W)).toEqual({});
+  });
+
   it('merges multiple tokens into one flat object', () => {
     const style = resolveStyleJs('flex flex-row items-center justify-center bg-blue-6', theme(), 'light', false, W);
     expect(Object.keys(style)).toHaveLength(5);

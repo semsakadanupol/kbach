@@ -367,13 +367,14 @@ fn resolve_leading_tracking_native(parsed: &ParsedClass) -> Option<Vec<Declarati
     }
 }
 
+/// Delegates entirely to `color::color_value` — same arbitrary-passthrough
+/// and inline `/N` opacity-suffix handling (`bg-orange-5/50` bakes to an
+/// `rgba(...)` string here too, the only representation native's style
+/// system can use at all, since it can't parse a CSS `var()`) as the web
+/// dispatcher gets, so `bg-orange-5/50` isn't silently unresolvable on
+/// native/Expo Go the way it used to be.
 fn native_hex_color(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<String> {
-    let value = parsed.value.as_deref()?;
-    if parsed.is_arbitrary {
-        Some(value.to_string())
-    } else {
-        color::lookup_hex(theme, value).map(String::from)
-    }
+    color::color_value(theme, parsed)
 }
 
 /// Mirrors `color::resolve_text`'s three-way "text-" disambiguation
@@ -460,6 +461,26 @@ mod native_dispatcher_tests {
         assert_eq!(
             resolve_utility_native(&parse_class("bg-[#16a34a]"), &t),
             Some(vec![decl("background-color", "#16a34a")]),
+        );
+    }
+
+    #[test]
+    fn resolves_inline_slash_opacity_on_native_to_a_baked_rgba() {
+        // Previously unresolvable entirely on native/Expo Go — "blue-6/50"
+        // isn't a real theme.colors key, and native_hex_color had no
+        // opacity-suffix handling of its own at all. Now delegates to
+        // color::color_value, the exact same helper the web dispatcher
+        // uses, so this composes to a literal rgba() string — the only
+        // representation native's style system can use, since it can't
+        // parse a CSS var().
+        let t = theme();
+        assert_eq!(
+            resolve_utility_native(&parse_class("bg-blue-6/50"), &t),
+            Some(vec![decl("background-color", "rgba(37,99,235,0.5)")]),
+        );
+        assert_eq!(
+            resolve_utility_native(&parse_class("text-blue-6/25"), &t),
+            Some(vec![decl("color", "rgba(37,99,235,0.25)")]),
         );
     }
 

@@ -15,12 +15,49 @@ pub(super) fn lookup_hex<'a>(theme: &'a ThemeConfig, key: &str) -> Option<&'a st
     }
 }
 
-fn color_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<String> {
+/// Splits a trailing `/N` opacity suffix off a color value — Tailwind's
+/// inline opacity modifier (`bg-orange-5/50`), a completely different
+/// mechanism from the `bg-opacity-*` companion-class utility below (which
+/// composes via a CSS variable — see `color_value`'s own doc comment for
+/// how the two interact). Only ever splits when the tail after the LAST
+/// "/" parses as a plain 0-100 integer — this engine's spacing/sizing
+/// utilities also use "/" for FRACTIONS (`w-1/2`), a completely different
+/// meaning, but no real color name is ever literally digits, so there's no
+/// actual ambiguity between the two uses in practice.
+fn split_opacity(value: &str) -> (&str, Option<u8>) {
+    if let Some((name, opacity_text)) = value.rsplit_once('/') {
+        if let Ok(n) = opacity_text.parse::<u8>() {
+            if n <= 100 {
+                return (name, Some(n));
+            }
+        }
+    }
+    (value, None)
+}
+
+/// Looks up a named color, baking in an inline `/N` opacity suffix (if
+/// present) as an `rgba(...)` string — arbitrary values are used as-is
+/// (real Tailwind's own arbitrary-plus-opacity form, `bg-[#fff]/50`, isn't
+/// modeled here; write the rgba() directly instead). `color_declarations`
+/// (bg-*/text-*, below) reuses this rather than re-splitting on its own: an
+/// already-baked `rgba(...)` string simply skips that function's own
+/// hex-decomposition path (it doesn't start with "#"), so the two
+/// mechanisms compose correctly without conflicting — the only cost is
+/// that a slash-opacity color can't ALSO be overridden by a separate
+/// `bg-opacity-*` class on the same element, an unlikely combination to
+/// write in the first place. `native_hex_color` (resolvers/mod.rs) reuses
+/// this too, for the identical native/Expo Go behavior.
+pub(super) fn color_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<String> {
     let value = parsed.value.as_deref()?;
     if parsed.is_arbitrary {
         return Some(value.to_string());
     }
-    lookup_hex(theme, value).map(String::from)
+    let (name, opacity) = split_opacity(value);
+    let hex = lookup_hex(theme, name)?;
+    Some(match (opacity, hex.strip_prefix('#').and_then(hex_to_rgb)) {
+        (Some(pct), Some((r, g, b))) => format!("rgba({r},{g},{b},{})", pct as f64 / 100.0),
+        _ => hex.to_string(),
+    })
 }
 
 fn hex_to_rgb(hex: &str) -> Option<(u8, u8, u8)> {
@@ -246,6 +283,59 @@ mod tests {
         let theme = theme_with_colors();
         let decls = resolve(&parse_class("bg-opacity-50"), &theme).unwrap();
         assert_eq!(decls, vec![decl("--bg-opacity", "0.5")]);
+    }
+
+    #[test]
+    fn resolves_inline_slash_opacity_on_bg_to_a_baked_rgba() {
+        let theme = theme_with_colors();
+        let decls = resolve(&parse_class("bg-blue-6/50"), &theme).unwrap();
+        // No var(--bg-opacity, ...) wrapper — a slash-opacity value is
+        // already a complete rgba() string by the time color_declarations
+        // sees it, so its own hex-decomposition path never triggers.
+        assert_eq!(decls, vec![decl("background-color", "rgba(37,99,235,0.5)")]);
+    }
+
+    #[test]
+    fn resolves_inline_slash_opacity_on_text_the_same_way() {
+        let theme = theme_with_colors();
+        let decls = resolve(&parse_class("text-blue-6/25"), &theme).unwrap();
+        assert_eq!(decls, vec![decl("color", "rgba(37,99,235,0.25)")]);
+    }
+
+    #[test]
+    fn resolves_inline_slash_opacity_on_fill_stroke_caret_accent() {
+        let theme = theme_with_colors();
+        assert_eq!(resolve(&parse_class("fill-blue-6/50"), &theme), Some(vec![decl("fill", "rgba(37,99,235,0.5)")]));
+        assert_eq!(resolve(&parse_class("stroke-blue-6/50"), &theme), Some(vec![decl("stroke", "rgba(37,99,235,0.5)")]));
+        assert_eq!(resolve(&parse_class("caret-blue-6/50"), &theme), Some(vec![decl("caret-color", "rgba(37,99,235,0.5)")]));
+        assert_eq!(resolve(&parse_class("accent-blue-6/50"), &theme), Some(vec![decl("accent-color", "rgba(37,99,235,0.5)")]));
+    }
+
+    #[test]
+    fn slash_opacity_at_0_and_100_produces_valid_rgba_bounds() {
+        let theme = theme_with_colors();
+        assert_eq!(resolve(&parse_class("bg-blue-6/0"), &theme), Some(vec![decl("background-color", "rgba(37,99,235,0)")]));
+        assert_eq!(resolve(&parse_class("bg-blue-6/100"), &theme), Some(vec![decl("background-color", "rgba(37,99,235,1)")]));
+    }
+
+    #[test]
+    fn an_opacity_suffix_over_100_or_non_numeric_is_not_treated_as_opacity() {
+        let theme = theme_with_colors();
+        // "6/150" isn't a valid theme color name either way, so this stays
+        // unresolvable — proves the >100 guard actually rejects the split
+        // rather than silently clamping.
+        assert_eq!(resolve(&parse_class("bg-blue-6/150"), &theme), None);
+    }
+
+    #[test]
+    fn slash_opacity_falls_back_to_a_plain_value_for_a_non_hex_theme_color() {
+        let mut colors = HashMap::new();
+        colors.insert("brand".to_string(), ColorValue::Plain("red".to_string()));
+        let theme = ThemeConfig { colors, ..Default::default() };
+        // "red" can't be decomposed into rgb channels — color_value falls
+        // back to the plain value, silently dropping the opacity rather
+        // than producing broken CSS.
+        assert_eq!(color_value(&theme, &parse_class("bg-brand/50")), Some("red".to_string()));
     }
 
     #[test]

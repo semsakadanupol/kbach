@@ -1,4 +1,5 @@
 import { Appearance } from 'react-native';
+import { getTheme } from './theme';
 
 /**
  * Native port of @kbach/react's darkModeStore.ts — same architecture (a
@@ -16,15 +17,24 @@ import { Appearance } from 'react-native';
  *    the result — same "seed once, no built-in write-back" shape as
  *    seedDefaultMode() below, just driven by your own storage instead of
  *    one this package picks for you.
- * 2. No DOM to "apply" the resolved mode to. On web, applyToDom() flips a
- *    class/attribute the generated CSS's `dark:` selectors match against.
- *    On native there's no CSS at all — nativeBridge.ts's resolveStyle()
- *    reads getGlobalDarkMode() directly on every call instead of querying
- *    Appearance.getColorScheme() itself, which is what actually makes an
- *    explicit override affect rendering (previously that function always
- *    read the raw OS setting, so it had no way to reflect a user choice —
- *    see nativeBridge.ts's own comment on this for why that's the one
- *    genuinely fixed bug this change introduces, not just a new feature).
+ * 2. `applyToDom` below IS needed here, unlike what an earlier version of
+ *    this file's own comment claimed ("no DOM to apply the resolved mode
+ *    to") — that reasoning only holds for real native (Android/iOS), where
+ *    nativeBridge.ts's resolveStyle() reads getGlobalDarkMode() directly on
+ *    every call, no DOM involved at all. This file is ALSO used by Expo
+ *    Web, though (no `.web.ts` sibling — Metro has nothing to swap in), and
+ *    Expo Web resolves `dark:` classes to REAL CSS with `[data-theme=
+ *    "dark"]`-style selectors (see nativeBridge.web.ts) that only ever
+ *    match if something writes that attribute to the DOM — nothing did,
+ *    which is exactly why toggling the mode changed `useTheme()`'s own
+ *    state (a consumer reading `mode`/`isDark` directly, e.g. for a label,
+ *    updated correctly) while every `dark:`-prefixed style silently never
+ *    applied. `typeof document === 'undefined'` is what makes one function
+ *    safe on both platforms: real native's Hermes has no `document` global
+ *    at all (not even `undefined` as a defined-but-empty value — genuinely
+ *    unset, which `typeof` can check without throwing), so this always
+ *    no-ops there, while Expo Web's react-native-web renders into a real
+ *    browser DOM where it's needed.
  */
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -38,8 +48,33 @@ function resolveIsDark(m: ThemeMode): boolean {
   return m === 'system' ? systemPrefersDark() : m === 'dark';
 }
 
+/**
+ * Writes the resolved dark/light state to the DOM, in whichever shape
+ * `getTheme().darkMode` says the generated `dark:`-prefixed CSS expects —
+ * this MUST stay in sync with `css.rs::wrap_dark_scheme`'s three
+ * strategies, or the selector the engine generates and the attribute/class
+ * this writes would silently never match. No-ops entirely on real native
+ * (no `document`) and under `'media'` strategy (the generated `@media
+ * (prefers-color-scheme: dark)` query already tracks the OS preference
+ * directly, no DOM write needed) — `isDark` stays accurate for JS
+ * consumers (`useTheme()`) either way. Mirrors @kbach/react's own
+ * `applyToDom` exactly.
+ */
+function applyToDom(dark: boolean): void {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const strategy = getTheme().darkMode;
+  if (strategy === 'class') {
+    root.classList.toggle('dark', dark);
+    root.classList.toggle('light', !dark);
+  } else if (strategy === 'attribute') {
+    root.setAttribute('data-theme', dark ? 'dark' : 'light');
+  }
+}
+
 let mode: ThemeMode = 'system';
 let isDark = resolveIsDark(mode);
+applyToDom(isDark);
 // Tracks whether setGlobalThemeMode has ever actually been called (by a
 // user, or by seedDefaultMode below) — distinct from `mode !== 'system'`,
 // since an explicit `setMode('system')` call is still a real choice that
@@ -56,6 +91,7 @@ let hasExplicitChoice = false;
 const subscription = Appearance.addChangeListener(({ colorScheme }) => {
   if (mode !== 'system') return;
   isDark = colorScheme === 'dark';
+  applyToDom(isDark);
   notify();
 });
 
@@ -76,6 +112,7 @@ export function setGlobalThemeMode(nextMode: ThemeMode): void {
   mode = nextMode;
   isDark = resolveIsDark(nextMode);
   hasExplicitChoice = true;
+  applyToDom(isDark);
   notify();
 }
 
@@ -101,6 +138,7 @@ export function seedDefaultMode(fallback: ThemeMode): void {
   if (hasExplicitChoice || mode === fallback) return;
   mode = fallback;
   isDark = resolveIsDark(fallback);
+  applyToDom(isDark);
   notify();
 }
 

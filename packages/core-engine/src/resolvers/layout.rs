@@ -231,14 +231,31 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "invisible" => Some(vec![decl("visibility", "hidden")]),
         "collapse" => Some(vec![decl("visibility", "collapse")]),
         "object" => resolve_object(parsed.value.as_deref()?),
-        // Only the base `width: 100%` declaration — the per-breakpoint
-        // `max-width` ladder real Tailwind's `.container` also expands to
-        // is a SEPARATE set of top-level rules (`css::
-        // container_breakpoint_rules`), injected by `lib.rs`'s token loop
-        // alongside this one, the same way `animate-*`'s `@keyframes`
-        // block is: this engine's one-token-to-one-rule resolver model has
-        // no way to return more than one rule from here.
-        "container" => Some(vec![decl("width", "100%")]),
+        // The base rule — `width: 100%` plus `theme.container`'s optional
+        // `center`/`padding` (real Tailwind's own `theme.container` config;
+        // see `ContainerConfig`'s own doc comment for why `padding` is one
+        // uniform value here, not real Tailwind's optional per-breakpoint
+        // object form). The per-breakpoint `max-width` ladder real
+        // Tailwind's `.container` also expands to is a SEPARATE set of
+        // top-level rules (`css::container_breakpoint_rules`), injected by
+        // `lib.rs`'s token loop alongside this one, the same way
+        // `animate-*`'s `@keyframes` block is: this engine's
+        // one-token-to-one-rule resolver model has no way to return more
+        // than one rule from here. `padding`/`center` are the SAME at every
+        // breakpoint under that simplification, so they belong on this
+        // base rule only, not repeated into the ladder.
+        "container" => {
+            let mut decls = vec![decl("width", "100%")];
+            if theme.container.center {
+                decls.push(decl("margin-left", "auto"));
+                decls.push(decl("margin-right", "auto"));
+            }
+            if let Some(padding) = &theme.container.padding {
+                decls.push(decl("padding-left", padding));
+                decls.push(decl("padding-right", padding));
+            }
+            Some(decls)
+        }
         "columns" => {
             let value = parsed.value.as_deref()?;
             if parsed.is_arbitrary {
@@ -479,6 +496,38 @@ mod tests {
         // tables aren't accidentally shared.
         assert_eq!(resolve(&parse_class("break-inside-page"), &t), None);
         assert_eq!(resolve(&parse_class("box-decoration-clone"), &t), Some(vec![decl("box-decoration-break", "clone")]));
+    }
+
+    #[test]
+    fn container_honors_theme_container_center_and_padding() {
+        use crate::theme::ContainerConfig;
+
+        let mut centered = theme();
+        centered.container = ContainerConfig { center: true, padding: None };
+        assert_eq!(
+            resolve(&parse_class("container"), &centered),
+            Some(vec![decl("width", "100%"), decl("margin-left", "auto"), decl("margin-right", "auto")]),
+        );
+
+        let mut padded = theme();
+        padded.container = ContainerConfig { center: false, padding: Some("2rem".to_string()) };
+        assert_eq!(
+            resolve(&parse_class("container"), &padded),
+            Some(vec![decl("width", "100%"), decl("padding-left", "2rem"), decl("padding-right", "2rem")]),
+        );
+
+        let mut both = theme();
+        both.container = ContainerConfig { center: true, padding: Some("2rem".to_string()) };
+        assert_eq!(
+            resolve(&parse_class("container"), &both),
+            Some(vec![
+                decl("width", "100%"),
+                decl("margin-left", "auto"),
+                decl("margin-right", "auto"),
+                decl("padding-left", "2rem"),
+                decl("padding-right", "2rem"),
+            ]),
+        );
     }
 
     #[test]

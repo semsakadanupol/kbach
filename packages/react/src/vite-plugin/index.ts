@@ -1,5 +1,6 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
+import { createRequire } from 'module';
 import type { Plugin } from 'vite';
 import { generateCssForToken, type RuleEntry } from './wasmNode';
 import { extractClassStrings, scanUsedTags, scanDir } from './scan';
@@ -8,10 +9,26 @@ import { scanProjectCssSelectors, warnIfUnknownClass } from './unknownClassWarni
 import { buildClassTokens, buildClassNameHintsDts } from './classNameHints';
 import { defaultTheme } from '../theme';
 import type { ThemeConfig } from '../theme';
+import { resolveKbachConfig } from '../config';
+import type { KbachConfig } from '../config';
 
 export interface KbachPluginOptions {
   /** Defaults to the same defaultTheme the runtime uses — pass your own to keep both in sync. */
   theme?: ThemeConfig;
+  /**
+   * A `kbach.config.js`-style config object, resolved the same way
+   * `applyKbachConfig()` resolves it for the runtime — import the SAME
+   * config file here and in your app's own `applyKbachConfig()` call, and
+   * build-time CSS generation and runtime resolution always agree, with no
+   * synchronization step needed (`resolveKbachConfig` is a pure function:
+   * same input, same output, in Node.js here and in the browser there).
+   * Ignored if `theme` is also supplied. Only needed for an explicit
+   * override, though — if BOTH this and `theme` are omitted, `kbach()`
+   * auto-discovers a `kbach.config.js` at the project root on its own (see
+   * `loadConfigFile`'s own doc comment), the same zero-config convenience
+   * `tailwind.config.js` gets from Tailwind's own PostCSS plugin.
+   */
+  config?: KbachConfig;
   /** Directories to scan for class strings (relative to Vite root). */
   include?: string[];
   /**
@@ -67,6 +84,31 @@ function writeFileEnsuringDir(path: string, content: string): void {
 }
 
 /**
+ * Auto-discovers `kbach.config.js` at the project root — `undefined` if it
+ * doesn't exist (the common case: most projects have no customization at
+ * all, so this is a silent, expected no-op, not a warning).
+ *
+ * Uses `require()` (a real project's `kbach.config.js` is plain CommonJS,
+ * `module.exports = {...}`, matching every example in this package's own
+ * README), built via `createRequire(root)` rather than
+ * `createRequire(import.meta.url)` — this file is written as ESM source,
+ * but tsup's CJS build output has no real `import.meta.url` (esbuild
+ * leaves it `undefined` there), which would make `createRequire` throw for
+ * anyone consuming this package's `require('@kbach/react/vite')` entry.
+ * `root` works as `createRequire`'s base in either build: it's always an
+ * absolute, already-`existsSync`-validated-by-caller directory, and
+ * `require()` given `path` (itself already absolute) doesn't consult the
+ * base for resolution anyway — the base only matters for a RELATIVE
+ * specifier, which this never passes it.
+ */
+function loadConfigFile(root: string): KbachConfig | undefined {
+  const path = join(root, 'kbach.config.js');
+  if (!existsSync(path)) return undefined;
+  const mod = createRequire(root)(path) as { default?: KbachConfig };
+  return (mod.default ?? mod) as KbachConfig;
+}
+
+/**
  * Build-time static CSS generation for Vite — scans source files for
  * Kbach class strings, resolves them through the same Rust engine the
  * runtime uses (via the Node-target WASM build, see wasmNode.ts), and
@@ -76,8 +118,12 @@ function writeFileEnsuringDir(path: string, content: string): void {
  * the whole project for a file named kbach.css.
  */
 export function kbach(options: KbachPluginOptions = {}): Plugin {
-  const theme = options.theme ?? defaultTheme;
-  const themeJson = JSON.stringify(theme);
+  // Placeholder, good enough for anything that (incorrectly) ran before
+  // configResolved — real resolution (including auto-discovery) happens
+  // there instead, once Vite's actual project root is known; `process.cwd()`
+  // is only a rough guess until then, same as `root` below always was.
+  let theme = options.theme ?? (options.config ? resolveKbachConfig(options.config) : defaultTheme);
+  let themeJson = JSON.stringify(theme);
   const includeDirs = options.include ?? DEFAULT_SCAN_DIRS;
   const safelist = options.safelist ?? [];
 
@@ -194,6 +240,17 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
 
     configResolved(resolved) {
       root = resolved.root;
+      // Only when the caller specified NEITHER `theme` NOR `config` —
+      // either one is an explicit choice that always wins over
+      // auto-discovery, same as `config`'s own doc comment already
+      // promises relative to `theme`.
+      if (!options.theme && !options.config) {
+        const discovered = loadConfigFile(root);
+        if (discovered) {
+          theme = resolveKbachConfig(discovered);
+          themeJson = JSON.stringify(theme);
+        }
+      }
     },
 
     buildStart() {

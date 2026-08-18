@@ -26,6 +26,21 @@ pub enum DarkModeStrategy {
     Media,
 }
 
+/// Real Tailwind's `theme.container` config — the piece `resolvers::layout`'s
+/// bare `"container"` arm and `css::container_breakpoint_rules`'s
+/// per-breakpoint ladder both read from, alongside `screens`. `padding` is a
+/// single uniform value (applied at every breakpoint, including below the
+/// smallest one) rather than real Tailwind's optional per-breakpoint object
+/// form — the common case in practice, and simpler to reason about; a
+/// per-breakpoint padding map is a natural follow-up if ever needed.
+#[derive(Debug, Deserialize, Default, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContainerConfig {
+    #[serde(default)]
+    pub center: bool,
+    pub padding: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemeConfig {
@@ -38,8 +53,19 @@ pub struct ThemeConfig {
     /// e.g. "sm" -> 640.0 (min-width px)
     #[serde(default)]
     pub screens: HashMap<String, f64>,
+    /// e.g. "sans" -> "ui-sans-serif, system-ui, ...". Empty is valid (and
+    /// the JS side's own `defaultTheme` never sends an empty map — see
+    /// `resolvers::typography::font_family_value`'s own doc comment for why
+    /// Rust still carries a hardcoded fallback for the three usual names
+    /// regardless): a caller-supplied theme JSON that omits this field
+    /// entirely (an old cached theme, a minimal test fixture) still
+    /// resolves `font-sans`/`font-serif`/`font-mono` correctly.
+    #[serde(default)]
+    pub font_family: HashMap<String, String>,
     #[serde(default)]
     pub dark_mode: DarkModeStrategy,
+    #[serde(default)]
+    pub container: ContainerConfig,
 }
 
 /// Kbach's default color palette (Phase 16) — NOT part of `ThemeConfig`

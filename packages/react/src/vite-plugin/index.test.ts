@@ -51,6 +51,69 @@ describe('kbach() plugin — file path normalization', () => {
   });
 });
 
+describe('kbach() plugin — kbach.config.js auto-discovery', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('auto-discovers kbach.config.js at the project root when neither theme nor config is passed', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="bg-brand" />', 'utf-8');
+    writeFileSync(
+      join(dir, 'kbach.config.js'),
+      "module.exports = { extend: { colors: { brand: '#ff6b35' } } };",
+      'utf-8',
+    );
+
+    const plugin = kbach();
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    // The static CSS build extracts every theme color into a `:root`
+    // variable (cssVars.ts) — the RGB triplet, not the literal hex, is
+    // what actually shows up in the `.bg-brand` rule itself.
+    expect(css).toContain('--color-brand-rgb: 255,107,53');
+    expect(css).toContain('.bg-brand');
+    expect(css).toContain('rgba(var(--color-brand-rgb)');
+  });
+
+  it('an explicit config option always wins over auto-discovery', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="bg-brand" />', 'utf-8');
+    writeFileSync(
+      join(dir, 'kbach.config.js'),
+      "module.exports = { extend: { colors: { brand: '#ff6b35' } } };",
+      'utf-8',
+    );
+
+    const plugin = kbach({ config: { extend: { colors: { brand: '#000000' } } } });
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).toContain('--color-brand-rgb: 0,0,0');
+    expect(css).not.toContain('255,107,53'); // the config file's own brand never took effect
+  });
+
+  it('is a silent no-op when no kbach.config.js exists', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="flex" />', 'utf-8');
+
+    const plugin = kbach();
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).toContain('display: flex');
+  });
+});
+
 describe('kbach() plugin — tag-pruned base reset', () => {
   let dir: string;
 

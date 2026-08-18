@@ -1,11 +1,36 @@
 import { PALETTE } from './generatedPalette';
 
-// Deliberately simpler than @kbach/react's theme.ts — no mode-aware color
-// objects (dark: is applied on native via a live color-scheme parameter at
-// resolve time, not via {light,dark} theme VALUES — see resolve_style.rs);
-// base styles only. Kept as its own independent module rather than
-// importing @kbach/react's ThemeConfig type — a bare RN project shouldn't
-// need to install a web-oriented package just for a type.
+/**
+ * A plain hex value (static — same in both modes), or a `{ light, dark }`
+ * pair a caller sets manually in their own theme. Fully opt-in per color:
+ * nothing here picks a "dark variant" automatically. Only `useColors()`
+ * (a JS-value read, not a `className`) understands this shape — utility
+ * CLASS resolution (`bg-blue-6`) on native/Expo Go stays plain-string-only,
+ * same as it always was (dark mode for a CLASS is the separate `dark:`
+ * modifier, gated live at resolve time — see `resolve_style.rs`); a
+ * mode-aware entry referenced directly by a class name just doesn't
+ * resolve there, mirroring `resolvers/color.rs`'s own `lookup_hex`
+ * (`ColorValue::Plain` only, `ModeAware` -> `None`) exactly, same as it
+ * would on the web engine too.
+ */
+export type ColorEntry = string | { light: string; dark: string };
+
+/**
+ * Real Tailwind's `theme.container` config, mirroring
+ * `packages/core-engine/src/theme.rs`'s `ContainerConfig` exactly. `center`/
+ * `padding` DO reach native now (unlike the max-width breakpoint ladder,
+ * which is a `css.rs`-only concept with nothing to generate on native at
+ * all) — `resolvers::layout::resolve`'s `"container"` arm is shared by both
+ * dispatchers, and `margin`/`padding` are ordinary RN style properties.
+ */
+export interface ContainerConfig {
+  center?: boolean;
+  padding?: string;
+}
+
+// Kept as its own independent module rather than importing @kbach/react's
+// ThemeConfig type — a bare RN project shouldn't need to install a
+// web-oriented package just for a type.
 //
 // `screens` IS applied here (unlike the note this comment used to carry) —
 // sm:/md:/lg:/xl:/2xl: are gated against it via a live window-width
@@ -15,19 +40,31 @@ import { PALETTE } from './generatedPalette';
 // five numbers) — kept in sync by hand since there's no generated-file
 // mechanism for this the way generatedPalette.ts has for colors.
 export interface ThemeConfig {
-  /** Plain hex only, this pass — e.g. "blue-6" -> "#2563eb" */
-  colors: Record<string, string>;
+  colors: Record<string, ColorEntry>;
   spacing: Record<string, number>;
   screens: Record<string, number>;
+  /**
+   * e.g. "sans" -> "Inter, sans-serif". Optional, matching the Rust
+   * engine's own `#[serde(default)]`. Write it as a real web-shaped
+   * fallback stack even on this native-first package — native's own
+   * resolver strips it down to a single bare name at resolve time (RN's
+   * `fontFamily` prop can't take a fallback list — see
+   * `resolvers/mod.rs`'s `first_font_name`), so the SAME config still
+   * works unmodified on Expo Web, which needs the full stack.
+   */
+  fontFamily?: Record<string, string>;
   darkMode: 'attribute' | 'class' | 'media';
+  /** Optional, matching `ContainerConfig`'s own `#[serde(default)]` on the Rust side. */
+  container?: ContainerConfig;
 }
 
 // PALETTE is generated from Rust (single source of truth:
 // packages/core-engine/src/theme.rs's DEFAULT_COLORS), not hand-
 // maintained here — same generated file @kbach/react's theme.ts uses.
 // Regenerate via 'npm run generate:colors' after changing the Rust side —
-// see packages/core-engine/scripts/generate-palette.mjs. No mode-aware
-// 'surface'-style entry (this package's ColorEntry is plain string only).
+// see packages/core-engine/scripts/generate-palette.mjs. Every entry here
+// is a plain string (PALETTE's own type) — assignable to the wider
+// ColorEntry-keyed colors field below without a cast.
 
 export const defaultTheme: ThemeConfig = {
   colors: PALETTE,
@@ -55,7 +92,20 @@ export const defaultTheme: ThemeConfig = {
     xl: 1280,
     '2xl': 1536,
   },
+  // Byte-for-byte the same three stacks
+  // packages/core-engine/src/resolvers/typography.rs's `font_family_value`
+  // falls back to. On native these three still effectively no-op (see
+  // `first_font_name`'s own doc comment for why a generic CSS keyword
+  // isn't a real loadable font) — only a caller-configured custom name
+  // changes native rendering; Expo Web uses the full stack as-is.
+  fontFamily: {
+    sans: 'ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
+    serif: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+    mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  },
   darkMode: 'attribute',
+  // Empty by default, matching real Tailwind's own defaults.
+  container: {},
 };
 
 let activeTheme: ThemeConfig = defaultTheme;

@@ -93,6 +93,35 @@ Follows the OS setting live until overridden, and isn't persisted across
 app launches (no built-in storage dependency). To persist, read your own
 storage at startup and call `setGlobalThemeMode()` before your first render.
 
+## Reading colors as values
+
+For anywhere you need a real color, not a `className` — a chart prop, a
+native shadow color:
+
+```tsx
+import { useColors } from '@kbach/react-native';
+
+const colors = useColors();
+colors.blue[6];       // '#2563eb' — static, same value in both modes
+colors.blue['6/50'];  // same, at 50% opacity
+```
+
+Any color can be defined in the theme as a plain string (static) or a
+`{ light, dark }` pair — fully manual, resolved per the current dark-mode
+state:
+
+```ts
+setTheme({
+  ...defaultTheme,
+  colors: { ...defaultTheme.colors, brand: { light: '#2563eb', dark: '#93c5fd' } },
+});
+```
+
+A shade-family lookup (`colors.blue[n]`) auto-mirrors to shade `13 - n` in
+dark mode — this palette's own convention is 1 = lightest, 12 = darkest, so
+that's the same visual weight relative to its own background, no manual
+`colors.blue[isDark ? 7 : 6]` needed.
+
 ## License
 
 MIT

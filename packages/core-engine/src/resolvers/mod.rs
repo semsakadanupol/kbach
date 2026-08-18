@@ -288,7 +288,7 @@ pub fn resolve_utility_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Opti
         .or_else(|| border::resolve(parsed, theme))
         .or_else(|| resolve_color_native(parsed, theme))
         .or_else(|| resolve_leading_tracking_native(parsed))
-        .or_else(|| resolve_typography_native(parsed))
+        .or_else(|| resolve_typography_native(parsed, theme))
         .or_else(|| effects::native_shadow_declarations(parsed))
 }
 
@@ -302,11 +302,35 @@ pub fn resolve_utility_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Opti
 /// hyphens, text-indent) is a DOM/CSS-only concept with no RN equivalent at
 /// all, so those stay in `typography::resolve` (this dispatcher's web-only
 /// counterpart, never called from here).
-fn resolve_typography_native(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
+///
+/// `font-<name>` (not a weight keyword) DOES resolve here too, unlike
+/// web's `font-family` value — RN's `fontFamily` style prop takes exactly
+/// ONE registered font name, not a CSS fallback list, so this takes just
+/// the first comma-separated segment of whatever `font_family_value`
+/// returns (theme-configured or the hardcoded default) and strips any
+/// surrounding quotes. This only produces something USABLE when the theme
+/// (or an arbitrary `font-[...]` value) supplies a real, single,
+/// app-bundled font name as that first segment — Kbach's own hardcoded
+/// default stacks start with a generic CSS-only keyword
+/// (`ui-sans-serif`/`ui-serif`/`ui-monospace`) that isn't a real font
+/// native can load, so those three still effectively no-op here (RN falls
+/// back to its own system default), exactly as they always implicitly did
+/// before this existed — this only changes behavior for a THEME-configured
+/// custom name (`extend.fontFamily: { sans: 'Inter, sans-serif' }`,
+/// `font-[Inter]`).
+fn resolve_typography_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
     match parsed.utility.as_str() {
+        "font" if parsed.is_arbitrary => {
+            let value = parsed.value.as_deref()?;
+            Some(vec![decl("font-family", &first_font_name(value))])
+        }
         "font" => {
             let value = parsed.value.as_deref()?;
-            typography::font_weight(value).map(|v| vec![decl("font-weight", v)])
+            if let Some(w) = typography::font_weight(value) {
+                return Some(vec![decl("font-weight", w)]);
+            }
+            let family = typography::font_family_value(theme, value)?;
+            Some(vec![decl("font-family", &first_font_name(&family))])
         }
         "uppercase" => Some(vec![decl("text-transform", "uppercase")]),
         "lowercase" => Some(vec![decl("text-transform", "lowercase")]),
@@ -318,6 +342,14 @@ fn resolve_typography_native(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
         "not-italic" => Some(vec![decl("font-style", "normal")]),
         _ => None,
     }
+}
+
+/// The first comma-separated segment of a CSS-shaped font stack, with any
+/// surrounding quotes stripped — `resolve_typography_native`'s own doc
+/// comment explains why RN's `fontFamily` prop needs exactly this, not the
+/// full fallback list.
+fn first_font_name(stack: &str) -> String {
+    stack.split(',').next().unwrap_or(stack).trim().trim_matches('"').trim_matches('\'').to_string()
 }
 
 /// Numeric (`leading-6`) and arbitrary (`leading-[24px]`,
@@ -536,6 +568,19 @@ mod native_dispatcher_tests {
         assert_eq!(resolve_utility_native(&parse_class("underline"), &t), Some(vec![decl("text-decoration-line", "underline")]));
         assert_eq!(resolve_utility_native(&parse_class("line-through"), &t), Some(vec![decl("text-decoration-line", "line-through")]));
         assert_eq!(resolve_utility_native(&parse_class("no-underline"), &t), Some(vec![decl("text-decoration-line", "none")]));
+    }
+
+    #[test]
+    fn resolves_font_family_to_a_single_stripped_name_on_native() {
+        let mut t = theme();
+        t.font_family.insert("sans".to_string(), "Inter, sans-serif".to_string());
+        t.font_family.insert("display".to_string(), "\"Cal Sans\", sans-serif".to_string());
+        assert_eq!(resolve_utility_native(&parse_class("font-sans"), &t), Some(vec![decl("font-family", "Inter")]));
+        assert_eq!(resolve_utility_native(&parse_class("font-display"), &t), Some(vec![decl("font-family", "Cal Sans")]));
+        assert_eq!(resolve_utility_native(&parse_class("font-[Georgia]"), &t), Some(vec![decl("font-family", "Georgia")]));
+        // font-weight still takes priority over any theme-configured family
+        // name — same ambiguity order as the web dispatcher.
+        assert_eq!(resolve_utility_native(&parse_class("font-bold"), &t), Some(vec![decl("font-weight", "700")]));
     }
 
     #[test]

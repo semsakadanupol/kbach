@@ -15,8 +15,11 @@
  * comment for why.
  */
 export { setTheme, getTheme, defaultTheme } from './theme';
-export type { ThemeConfig } from './theme';
+export type { ThemeConfig, ColorEntry, ContainerConfig } from './theme';
 export { resolveClassName } from './nativeBridge.web';
+
+export { resolveKbachConfig, applyKbachConfig } from './config';
+export type { KbachConfig } from './config';
 
 // Dark mode: `useTheme()` is the one hook — works anywhere, with or
 // without a `<ThemeProvider>` mounted, since it reads darkModeStore.ts's
@@ -35,3 +38,6 @@ export {
   subscribeGlobalDarkMode,
 } from './darkModeStore';
 export type { ThemeMode } from './darkModeStore';
+
+export { useColors } from './useColors';
+export type { ColorsAPI, ColorScale } from './useColors';

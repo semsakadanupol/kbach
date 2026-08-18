@@ -88,6 +88,35 @@ const className = kb(`bg-${userColor}-6`);
 Prefer a `safelist` entry in the plugin config when the possible values are
 known ahead of time — keeps everything static.
 
+## Reading colors as values
+
+For anywhere you need a real color, not a `className` (an SVG `fill`, a
+chart library prop):
+
+```tsx
+import { useColors } from '@kbach/react';
+
+const colors = useColors();
+colors.blue[6];       // '#2563eb' — static, same value in both modes
+colors.blue['6/50'];  // same, at 50% opacity
+colors.surface;       // 'rgb(var(--kb-color-surface))' if defined as light/dark
+```
+
+Any color — a shade-family entry like `blue-6` or a standalone name like
+`surface` — can be defined in the theme as a plain string (static) or a
+`{ light, dark }` pair, fully manual:
+
+```ts
+setTheme({
+  ...defaultTheme,
+  colors: { ...defaultTheme.colors, surface: { light: '#f9fafb', dark: '#111827' } },
+});
+```
+
+A plain color always resolves to its literal value. A `{ light, dark }`
+color resolves to a live CSS variable instead of a fixed hex — it stays
+correct across theme changes with zero re-render.
+
 ## License
 
 MIT

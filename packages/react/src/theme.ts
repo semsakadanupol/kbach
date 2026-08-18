@@ -5,6 +5,20 @@ export type ColorEntry = string | { light: string; dark: string };
 
 export type DarkModeStrategy = 'attribute' | 'class' | 'media';
 
+/**
+ * Real Tailwind's `theme.container` config, mirroring
+ * `packages/core-engine/src/theme.rs`'s `ContainerConfig` exactly (same
+ * field names, `camelCase` on both sides via serde). `padding` is one
+ * uniform value applied at every breakpoint (including below the smallest
+ * one) rather than real Tailwind's optional per-breakpoint object form —
+ * the common case in practice, and simpler to reason about; a
+ * per-breakpoint padding map is a natural follow-up if ever needed.
+ */
+export interface ContainerConfig {
+  center?: boolean;
+  padding?: string;
+}
+
 export interface ThemeConfig {
   /** e.g. "blue-6" -> "#2563eb", or "surface" -> { light, dark } */
   colors: Record<string, ColorEntry>;
@@ -12,7 +26,21 @@ export interface ThemeConfig {
   spacing: Record<string, number>;
   /** e.g. "sm" -> 640 (min-width px) */
   screens: Record<string, number>;
+  /**
+   * e.g. "sans" -> "ui-sans-serif, system-ui, ...". Optional — the Rust
+   * engine's own `font_family_value` already carries a hardcoded fallback
+   * for "sans"/"serif"/"mono" (see its own doc comment) for when a theme
+   * omits this field (or a name within it) entirely, matching this field's
+   * `#[serde(default)]` on the Rust side. `defaultTheme` below still
+   * populates all three explicitly, matching the Rust fallback strings
+   * byte-for-byte, so a caller reading `defaultTheme.fontFamily.sans`
+   * (e.g. to extend rather than replace it) gets the real value rather
+   * than needing to already know the Rust-side fallback text.
+   */
+  fontFamily?: Record<string, string>;
   darkMode: DarkModeStrategy;
+  /** Optional, matching `ContainerConfig`'s own `#[serde(default)]` on the Rust side — an omitted theme.container behaves exactly like `{}`. */
+  container?: ContainerConfig;
 }
 
 // PALETTE (imported above) is Kbach's default color palette — generated
@@ -52,7 +80,21 @@ export const defaultTheme: ThemeConfig = {
     xl: 1280,
     '2xl': 1536,
   },
+  // Byte-for-byte the same three stacks
+  // packages/core-engine/src/resolvers/typography.rs's `font_family_value`
+  // falls back to — kept here too (rather than leaving this empty and
+  // relying purely on the Rust-side fallback) so `defaultTheme.fontFamily.sans`
+  // is a real, readable value for anything that wants to extend rather
+  // than replace it (see `KbachConfig.extend.fontFamily` in config.ts).
+  fontFamily: {
+    sans: 'ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
+    serif: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+    mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  },
   darkMode: 'attribute',
+  // Empty by default, matching real Tailwind's own defaults (no forced
+  // centering/padding) — see `ContainerConfig`'s own doc comment.
+  container: {},
 };
 
 let activeTheme: ThemeConfig = defaultTheme;

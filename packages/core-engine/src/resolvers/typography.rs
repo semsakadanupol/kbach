@@ -169,15 +169,26 @@ pub(super) fn font_weight(key: &str) -> Option<&'static str> {
     })
 }
 
-/// Real Tailwind's default `font-family` stacks — the same three fonts
-/// every fresh Tailwind project ships, byte-for-byte (not abbreviated).
-fn font_family_value(key: &str) -> Option<&'static str> {
+/// `theme.font_family` (a caller-configurable map — see `theme.rs`'s own
+/// doc comment) always wins when it has an entry for `key`, so a
+/// `kbach.config.js`-style `extend.fontFamily` can both ADD a new name
+/// (`display`) and OVERRIDE one of the three usual ones (`sans`) the exact
+/// same way. Falls back to real Tailwind's own default stacks — the same
+/// three fonts every fresh Tailwind project ships, byte-for-byte (not
+/// abbreviated) — only when the theme doesn't define that name at all,
+/// which is also what keeps a minimal/old cached theme JSON that omits
+/// `fontFamily` entirely still resolving `font-sans`/`font-serif`/
+/// `font-mono` correctly (see `theme.rs`'s own doc comment on this field).
+pub(super) fn font_family_value(theme: &ThemeConfig, key: &str) -> Option<String> {
+    if let Some(v) = theme.font_family.get(key) {
+        return Some(v.clone());
+    }
     Some(match key {
         "sans" => "ui-sans-serif, system-ui, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", \"Noto Color Emoji\"",
         "serif" => "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif",
         "mono" => "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
         _ => return None,
-    })
+    }.to_string())
 }
 
 /// CSS function calls a `content-[...]` value might legitimately be,
@@ -241,7 +252,7 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
             let value = parsed.value.as_deref()?;
             font_weight(value)
                 .map(|v| vec![decl("font-weight", v)])
-                .or_else(|| font_family_value(value).map(|v| vec![decl("font-family", v)]))
+                .or_else(|| font_family_value(theme, value).map(|v| vec![decl("font-family", &v)]))
         }
         "antialiased" => Some(vec![decl("-webkit-font-smoothing", "antialiased"), decl("-moz-osx-font-smoothing", "grayscale")]),
         "subpixel-antialiased" => {
@@ -500,6 +511,26 @@ mod tests {
         assert_eq!(sans[0].property, "font-family");
         assert!(sans[0].value.contains("ui-sans-serif"));
         assert_eq!(resolve(&parse_class("font-[Inter]"), &t), Some(vec![decl("font-family", "Inter")]));
+    }
+
+    #[test]
+    fn theme_font_family_adds_a_new_named_stack() {
+        let mut t = theme();
+        t.font_family.insert("display".to_string(), "\"Cal Sans\", sans-serif".to_string());
+        assert_eq!(
+            resolve(&parse_class("font-display"), &t),
+            Some(vec![decl("font-family", "\"Cal Sans\", sans-serif")]),
+        );
+    }
+
+    #[test]
+    fn theme_font_family_overrides_one_of_the_three_default_names() {
+        let mut t = theme();
+        t.font_family.insert("sans".to_string(), "Inter, sans-serif".to_string());
+        assert_eq!(resolve(&parse_class("font-sans"), &t), Some(vec![decl("font-family", "Inter, sans-serif")]));
+        // "mono" wasn't overridden — still falls back to the hardcoded default.
+        let mono = resolve(&parse_class("font-mono"), &t).unwrap();
+        assert!(mono[0].value.contains("ui-monospace"));
     }
 
     #[test]

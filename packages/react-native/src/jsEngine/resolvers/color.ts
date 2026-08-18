@@ -2,11 +2,12 @@
  * Port of `resolvers/color.rs`'s `lookup_hex`/`color_value`/`split_opacity`
  * — native's own color dispatch (resolveUtilityNative.ts's
  * `resolveColorNative`) doesn't reuse `color::resolve`'s CSS-custom-property
- * opacity composition at all (RN can't parse `var()`), but `border.rs`'s
- * `resolve` (used wholesale on native) needs this same plain-hex lookup for
- * `border-<color>`/`ring-<color>`/`ring-offset-<color>`/`decoration-<color>`
- * — those still call `lookupHex` directly, unaffected by the opacity
- * addition below.
+ * opacity composition at all (RN can't parse `var()`), but `border.ts`'s
+ * `resolve` (used wholesale on native) uses `colorValue` below for
+ * `border-<color>`/`ring-<color>`/`ring-offset-<color>`/`outline-<color>`,
+ * getting the same inline `/N` opacity-suffix support as `bg`/`text`.
+ * `decoration-<color>` isn't part of native's dispatch surface at all (see
+ * `resolveUtilityNative.ts`'s own doc comment), so it has no jsEngine port.
  *
  * Mirrors `lookup_hex`'s exact `ColorValue::Plain`-only behavior now that
  * `theme.colors` can also hold `{ light, dark }` entries (for

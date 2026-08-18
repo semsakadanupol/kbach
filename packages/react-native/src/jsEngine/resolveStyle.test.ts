@@ -246,6 +246,16 @@ describe('resolveStyleJs', () => {
     expect(axis.borderRightWidth).toBe(2);
   });
 
+  it('resolves an inline "/N" slash-opacity suffix on border/ring/outline colors', () => {
+    const t = theme();
+    expect(resolveStyleJs('border-blue-6/50', t, 'light', false, W).borderColor).toBe('rgba(37,99,235,0.5)');
+    expect(resolveStyleJs('border-l-blue-6/50', t, 'light', false, W).borderLeftColor).toBe('rgba(37,99,235,0.5)');
+    const axis = resolveStyleJs('border-x-blue-6/50', t, 'light', false, W);
+    expect(axis.borderLeftColor).toBe('rgba(37,99,235,0.5)');
+    expect(axis.borderRightColor).toBe('rgba(37,99,235,0.5)');
+    expect(resolveStyleJs('outline-blue-6/50', t, 'light', false, W).outlineColor).toBe('rgba(37,99,235,0.5)');
+  });
+
   it('resolves text size and align before falling back to color', () => {
     expect(resolveStyleJs('text-lg', theme(), 'light', false, W).fontSize).toBe(18);
     expect(resolveStyleJs('text-center', theme(), 'light', false, W).textAlign).toBe('center');

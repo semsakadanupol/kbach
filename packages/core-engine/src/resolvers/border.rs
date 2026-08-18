@@ -1,4 +1,4 @@
-use super::color::lookup_hex;
+use super::color::color_value;
 use super::{decl, resolve_length, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
@@ -51,7 +51,10 @@ fn border_side_value(theme: &ThemeConfig, parsed: &ParsedClass, side_property: &
     if matches!(value, "solid" | "dashed" | "dotted" | "double" | "hidden" | "none") {
         return Some(vec![decl(&format!("{side_property}-style"), value)]);
     }
-    lookup_hex(theme, value).map(|hex| vec![decl(&format!("{side_property}-color"), hex)])
+    // `is_arbitrary` is guaranteed false here (the arbitrary case already
+    // returned above as a width) — color_value's own opacity-suffix
+    // handling (`border-t-blue-6/50`) is what this reuses it for.
+    color_value(theme, parsed).map(|v| vec![decl(&format!("{side_property}-color"), &v)])
 }
 
 /// Same shape as `border_side_value`, but for the two-sides-at-once
@@ -68,8 +71,8 @@ fn border_axis_value(theme: &ThemeConfig, parsed: &ParsedClass, side_a: &str, si
     if matches!(value, "solid" | "dashed" | "dotted" | "double" | "hidden" | "none") {
         return Some(vec![decl(&format!("{side_a}-style"), value), decl(&format!("{side_b}-style"), value)]);
     }
-    let hex = lookup_hex(theme, value)?;
-    Some(vec![decl(&format!("{side_a}-color"), hex), decl(&format!("{side_b}-color"), hex)])
+    let color = color_value(theme, parsed)?;
+    Some(vec![decl(&format!("{side_a}-color"), &color), decl(&format!("{side_b}-color"), &color)])
 }
 
 /// "border-*" is three-way ambiguous, same shape as "text-*" in color.rs:
@@ -106,7 +109,7 @@ fn border_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declara
         return Some(vec![decl("border-style", value)]);
     }
 
-    lookup_hex(theme, value).map(|hex| vec![decl("border-color", hex)])
+    color_value(theme, parsed).map(|v| vec![decl("border-color", &v)])
 }
 
 /// Per-corner/side border-radius property names — "tl"/"tr"/"br"/"bl" are
@@ -203,7 +206,7 @@ fn outline_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declar
     if OUTLINE_STYLES.contains(&value) {
         return Some(vec![decl("outline-style", value)]);
     }
-    lookup_hex(theme, value).map(|hex| vec![decl("outline-color", hex)])
+    color_value(theme, parsed).map(|v| vec![decl("outline-color", &v)])
 }
 
 fn outline_offset_value(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
@@ -250,7 +253,7 @@ fn ring_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declarati
             return Some(vec![decl("--kb-ring-width", w), decl("box-shadow", RING_BOX_SHADOW)]);
         }
     }
-    let color = if parsed.is_arbitrary { value.to_string() } else { lookup_hex(theme, value)?.to_string() };
+    let color = color_value(theme, parsed)?;
     Some(vec![decl("--kb-ring-color", &color), decl("box-shadow", RING_BOX_SHADOW)])
 }
 
@@ -261,7 +264,7 @@ fn ring_offset_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<De
             return Some(vec![decl("--kb-ring-offset-width", w), decl("box-shadow", RING_BOX_SHADOW)]);
         }
     }
-    let color = if parsed.is_arbitrary { value.to_string() } else { lookup_hex(theme, value)?.to_string() };
+    let color = color_value(theme, parsed)?;
     Some(vec![decl("--kb-ring-offset-color", &color), decl("box-shadow", RING_BOX_SHADOW)])
 }
 
@@ -543,5 +546,34 @@ mod tests {
         let t = theme();
         assert_eq!(resolve(&parse_class("ring-not-a-color"), &t), None);
         assert_eq!(resolve(&parse_class("ring-offset-not-a-color"), &t), None);
+    }
+
+    #[test]
+    fn resolves_inline_slash_opacity_on_every_border_family_color() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("border-blue-6/50"), &t), Some(vec![decl("border-color", "rgba(37,99,235,0.5)")]));
+        assert_eq!(
+            resolve(&parse_class("border-t-blue-6/50"), &t),
+            Some(vec![decl("border-top-color", "rgba(37,99,235,0.5)")]),
+        );
+        assert_eq!(
+            resolve(&parse_class("border-x-blue-6/50"), &t),
+            Some(vec![
+                decl("border-left-color", "rgba(37,99,235,0.5)"),
+                decl("border-right-color", "rgba(37,99,235,0.5)"),
+            ]),
+        );
+        assert_eq!(
+            resolve(&parse_class("outline-blue-6/50"), &t),
+            Some(vec![decl("outline-color", "rgba(37,99,235,0.5)")]),
+        );
+        assert_eq!(
+            resolve(&parse_class("ring-blue-6/50"), &t),
+            Some(vec![decl("--kb-ring-color", "rgba(37,99,235,0.5)"), decl("box-shadow", RING_BOX_SHADOW)]),
+        );
+        assert_eq!(
+            resolve(&parse_class("ring-offset-blue-6/50"), &t),
+            Some(vec![decl("--kb-ring-offset-color", "rgba(37,99,235,0.5)"), decl("box-shadow", RING_BOX_SHADOW)]),
+        );
     }
 }

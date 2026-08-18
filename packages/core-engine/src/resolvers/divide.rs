@@ -15,7 +15,7 @@
 //! comment for the full reasoning. `space-x`/`space-y` get the identical
 //! `-reverse` treatment via the same mechanism.
 
-use super::color::lookup_hex;
+use super::color::color_value;
 use super::{decl, resolve_length, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
@@ -37,13 +37,10 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
     match parsed.utility.as_str() {
         "divide-x" => divide_width(theme, parsed, "__divide-x-width", "__divide-x-reverse"),
         "divide-y" => divide_width(theme, parsed, "__divide-y-width", "__divide-y-reverse"),
-        "divide-color" => {
-            let value = parsed.value.as_deref()?;
-            if parsed.is_arbitrary {
-                return Some(vec![decl("__divide-color", value)]);
-            }
-            lookup_hex(theme, value).map(|hex| vec![decl("__divide-color", hex)])
-        }
+        // color_value's own arbitrary-passthrough and inline `/N`
+        // opacity-suffix handling (`divide-blue-6/50`) covers what this
+        // arm used to do manually.
+        "divide-color" => color_value(theme, parsed).map(|v| vec![decl("__divide-color", &v)]),
         "space-x" if parsed.value.as_deref() == Some("reverse") && !parsed.is_arbitrary => {
             Some(vec![decl("__space-x-reverse", "1")])
         }
@@ -93,6 +90,15 @@ mod tests {
     fn resolves_divide_color_from_theme() {
         let t = theme();
         assert_eq!(resolve(&parse_class("divide-color-gray-3"), &t), Some(vec![decl("__divide-color", "#d1d5db")]));
+    }
+
+    #[test]
+    fn resolves_inline_slash_opacity_on_divide_color() {
+        let t = theme();
+        assert_eq!(
+            resolve(&parse_class("divide-color-gray-3/50"), &t),
+            Some(vec![decl("__divide-color", "rgba(209,213,219,0.5)")]),
+        );
     }
 
     #[test]

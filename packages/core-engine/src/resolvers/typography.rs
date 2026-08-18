@@ -1,4 +1,3 @@
-use super::color::lookup_hex;
 use super::{decl, resolve_length, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
@@ -134,7 +133,10 @@ fn decoration_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Dec
     if DECORATION_STYLE.contains(&value) {
         return Some(vec![decl("text-decoration-style", value)]);
     }
-    lookup_hex(theme, value).map(|hex| vec![decl("text-decoration-color", hex)])
+    // is_arbitrary is guaranteed false here (that case already returned
+    // above) — color_value's own opacity-suffix handling
+    // (`decoration-blue-6/50`) is what this reuses it for.
+    super::color::color_value(theme, parsed).map(|v| vec![decl("text-decoration-color", &v)])
 }
 
 pub(super) fn text_align(key: &str) -> Option<&'static str> {
@@ -469,6 +471,15 @@ mod tests {
         assert_eq!(resolve(&parse_class("decoration-blue-6"), &t), Some(vec![decl("text-decoration-color", "#2563eb")]));
         assert_eq!(resolve(&parse_class("decoration-[3px]"), &t), Some(vec![decl("text-decoration-thickness", "3px")]));
         assert_eq!(resolve(&parse_class("decoration-[red]"), &t), Some(vec![decl("text-decoration-color", "red")]));
+    }
+
+    #[test]
+    fn resolves_inline_slash_opacity_on_decoration_color() {
+        let t = theme();
+        assert_eq!(
+            resolve(&parse_class("decoration-blue-6/50"), &t),
+            Some(vec![decl("text-decoration-color", "rgba(37,99,235,0.5)")]),
+        );
     }
 
     #[test]

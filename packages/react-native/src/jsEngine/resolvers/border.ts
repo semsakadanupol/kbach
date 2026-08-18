@@ -4,7 +4,7 @@
  * CSS-only properties RN doesn't have, which is harmless — RN just logs an
  * unknown-style-property warning, same precedent the Rust engine documents).
  */
-import { lookupHex } from './color';
+import { colorValue } from './color';
 import { decl, resolveLength, type Declaration } from '../shared';
 import type { ParsedClass } from '../parser';
 import type { ThemeConfig } from '../../theme';
@@ -56,8 +56,8 @@ function borderValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | n
     return [decl('border-style', value)];
   }
 
-  const hex = lookupHex(theme, value);
-  return hex === null ? null : [decl('border-color', hex)];
+  const color = colorValue(theme, parsed);
+  return color === null ? null : [decl('border-color', color)];
 }
 
 /** Per-side width/style/color — used by `border-t`/`border-r`/`border-b`/`border-l` (distinct from the bare literals above). */
@@ -72,8 +72,8 @@ function borderSideValue(theme: ThemeConfig, parsed: ParsedClass, sideProperty: 
   if (value === 'solid' || value === 'dashed' || value === 'dotted' || value === 'double' || value === 'hidden' || value === 'none') {
     return [decl(`${sideProperty}-style`, value)];
   }
-  const hex = lookupHex(theme, value);
-  return hex === null ? null : [decl(`${sideProperty}-color`, hex)];
+  const color = colorValue(theme, parsed);
+  return color === null ? null : [decl(`${sideProperty}-color`, color)];
 }
 
 /** Same shape as `borderSideValue`, for the two-sides-at-once `border-x`/`border-y` shorthands. */
@@ -88,8 +88,8 @@ function borderAxisValue(theme: ThemeConfig, parsed: ParsedClass, sideA: string,
   if (value === 'solid' || value === 'dashed' || value === 'dotted' || value === 'double' || value === 'hidden' || value === 'none') {
     return [decl(`${sideA}-style`, value), decl(`${sideB}-style`, value)];
   }
-  const hex = lookupHex(theme, value);
-  return hex === null ? null : [decl(`${sideA}-color`, hex), decl(`${sideB}-color`, hex)];
+  const color = colorValue(theme, parsed);
+  return color === null ? null : [decl(`${sideA}-color`, color), decl(`${sideB}-color`, color)];
 }
 
 /** Per-corner/side border-radius property names. */
@@ -143,8 +143,8 @@ function outlineValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | 
   const w = outlineWidthValue(value);
   if (w !== null) return [decl('outline-width', w)];
   if (OUTLINE_STYLES.includes(value)) return [decl('outline-style', value)];
-  const hex = lookupHex(theme, value);
-  return hex === null ? null : [decl('outline-color', hex)];
+  const color = colorValue(theme, parsed);
+  return color === null ? null : [decl('outline-color', color)];
 }
 
 function outlineOffsetValue(parsed: ParsedClass): Declaration[] | null {
@@ -179,7 +179,7 @@ function ringValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | nul
     const w = ringWidth(value);
     if (w !== null) return [decl('--kb-ring-width', w), decl('box-shadow', RING_BOX_SHADOW)];
   }
-  const color = parsed.isArbitrary ? value : lookupHex(theme, value);
+  const color = colorValue(theme, parsed);
   if (color === null) return null;
   return [decl('--kb-ring-color', color), decl('box-shadow', RING_BOX_SHADOW)];
 }
@@ -191,7 +191,7 @@ function ringOffsetValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[]
     const w = ringWidth(value);
     if (w !== null) return [decl('--kb-ring-offset-width', w), decl('box-shadow', RING_BOX_SHADOW)];
   }
-  const color = parsed.isArbitrary ? value : lookupHex(theme, value);
+  const color = colorValue(theme, parsed);
   if (color === null) return null;
   return [decl('--kb-ring-offset-color', color), decl('box-shadow', RING_BOX_SHADOW)];
 }

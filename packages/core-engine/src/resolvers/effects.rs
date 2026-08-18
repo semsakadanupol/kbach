@@ -1,4 +1,4 @@
-use super::color::lookup_hex;
+use super::color::color_value;
 use super::{decl, resolve_percent, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
@@ -56,9 +56,12 @@ fn shadow_value(key: &str) -> Option<String> {
 /// distinguishable from that and isn't supported — a real color name
 /// (`shadow-red-500`) is unambiguous and works.
 fn shadow_color_declarations(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declaration>> {
-    let value = parsed.value.as_deref()?;
-    let color = lookup_hex(theme, value)?;
-    Some(vec![decl("--kb-shadow-color", color)])
+    // color_value's own opacity-suffix handling (`shadow-blue-6/50`) is
+    // what this reuses it for — safe to call unconditionally despite its
+    // own is_arbitrary check, since (per this function's own doc comment)
+    // it's never reached with is_arbitrary set in the first place.
+    let color = color_value(theme, parsed)?;
+    Some(vec![decl("--kb-shadow-color", &color)])
 }
 
 /// React Native has no CSS `box-shadow` at all — iOS uses four discrete
@@ -154,7 +157,7 @@ fn text_shadow_dash_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<V
         if let Some(v) = text_shadow_value(value) {
             return Some(vec![decl("text-shadow", v)]);
         }
-        return lookup_hex(theme, value).map(|hex| vec![decl("text-shadow", &format!("0 1px 2px {hex}"))]);
+        return color_value(theme, parsed).map(|c| vec![decl("text-shadow", &format!("0 1px 2px {c}"))]);
     }
     Some(vec![decl("text-shadow", value)])
 }
@@ -343,6 +346,16 @@ mod tests {
     }
 
     #[test]
+    fn resolves_inline_slash_opacity_on_shadow_color() {
+        let mut t = ThemeConfig::default();
+        t.colors.insert("red-5".to_string(), crate::theme::ColorValue::Plain("#ef4444".to_string()));
+        assert_eq!(
+            resolve(&parse_class("shadow-red-5/50"), &t),
+            Some(vec![decl("--kb-shadow-color", "rgba(239,68,68,0.5)")]),
+        );
+    }
+
+    #[test]
     fn native_shadow_resolves_bare_shadow_to_the_default_tier() {
         let decls = native_shadow_declarations(&parse_class("shadow")).unwrap();
         assert_eq!(decls, vec![
@@ -459,6 +472,15 @@ mod tests {
         assert_eq!(resolve(&parse_class("text-shadow-none"), &t), Some(vec![decl("text-shadow", "none")]));
         assert_eq!(resolve(&parse_class("text-shadow-blue-6"), &t), Some(vec![decl("text-shadow", "0 1px 2px #2563eb")]));
         assert_eq!(resolve(&parse_class("text-shadow-[0_0_2px_red]"), &t), Some(vec![decl("text-shadow", "0 0 2px red")]));
+    }
+
+    #[test]
+    fn resolves_inline_slash_opacity_on_text_shadow_color() {
+        let t = theme_with_color();
+        assert_eq!(
+            resolve(&parse_class("text-shadow-blue-6/50"), &t),
+            Some(vec![decl("text-shadow", "0 1px 2px rgba(37,99,235,0.5)")]),
+        );
     }
 
     #[test]

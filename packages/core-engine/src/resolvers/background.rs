@@ -31,7 +31,7 @@
 //! real Tailwind's identical requirement that `from-*` always starts the
 //! chain, not a bug.
 
-use super::color::lookup_hex;
+use super::color::color_value;
 use super::{decl, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
@@ -180,7 +180,10 @@ fn resolve_stop(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Stop> {
     if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
         return Some(Stop::Position(format!("{value}%")));
     }
-    lookup_hex(theme, value).map(|hex| Stop::Color(hex.to_string()))
+    // is_arbitrary is guaranteed false here (that case already returned
+    // above) — color_value's own opacity-suffix handling
+    // (`from-blue-6/50`) is what this reuses it for.
+    color_value(theme, parsed).map(Stop::Color)
 }
 
 fn resolve_from(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declaration>> {
@@ -349,6 +352,23 @@ mod tests {
         assert_eq!(
             resolve(&parse_class("to-blue-6"), &t),
             Some(vec![decl("--kb-gradient-to", "#2563eb var(--kb-gradient-to-position, 100%)")]),
+        );
+    }
+
+    #[test]
+    fn resolves_inline_slash_opacity_on_gradient_stop_colors() {
+        let t = theme();
+        assert_eq!(
+            resolve(&parse_class("from-blue-6/50"), &t),
+            Some(vec![
+                decl("--kb-gradient-from", "rgba(37,99,235,0.5) var(--kb-gradient-from-position, 0%)"),
+                decl("--kb-gradient-to", "rgb(255 255 255 / 0) var(--kb-gradient-to-position, 100%)"),
+                decl("--kb-gradient-stops", "var(--kb-gradient-from), var(--kb-gradient-to)"),
+            ]),
+        );
+        assert_eq!(
+            resolve(&parse_class("to-blue-6/50"), &t),
+            Some(vec![decl("--kb-gradient-to", "rgba(37,99,235,0.5) var(--kb-gradient-to-position, 100%)")]),
         );
     }
 

@@ -183,8 +183,10 @@ pub fn resolve_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<
 /// reused: `color::resolve()`'s whole design is CSS custom-property opacity
 /// composition (`rgba(r,g,b,var(--bg-opacity, 1))`), which RN cannot parse
 /// at all (no var() support) — reusing it would just mean stripping the
-/// wrapper back out immediately. `color::lookup_hex` (the underlying
-/// plain-hex lookup) and `typography::text_size`/`text_align` (the same
+/// wrapper back out immediately. `color::color_value` (the underlying
+/// named/arbitrary lookup, which also bakes an inline `/N` opacity suffix
+/// into a plain `rgba(...)` string — the one shape both dispatchers can
+/// use directly) and `typography::text_size`/`text_align` (the same
 /// three-way "text-" disambiguation `color::resolve_text` uses) ARE reused.
 ///
 /// `leading`/`tracking` resolve for their numeric scale and arbitrary

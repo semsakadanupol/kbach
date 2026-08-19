@@ -166,3 +166,134 @@ describe('kbach() plugin — tag-pruned base reset', () => {
     expect(css).toContain('button { appearance: none');
   });
 });
+
+describe('kbach() plugin — safelist option', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('includes a safelisted class even when no scanned source file references it', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="flex" />', 'utf-8');
+
+    const plugin = kbach({ safelist: ['sr-only'] });
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).toContain('.sr-only');
+  });
+
+  it('omits a class that is neither scanned nor safelisted', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="flex" />', 'utf-8');
+
+    const plugin = kbach();
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).not.toContain('.sr-only');
+  });
+});
+
+// configureServer wires up 'add'/'unlink' watcher events — separate from
+// handleHotUpdate above, which Vite only fires for edits (type === "update")
+// to an already-existing file, never for a file being created or deleted.
+describe('kbach() plugin — configureServer add/unlink handling', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  // Minimal fake mirroring the one piece of Vite's dev-server `watcher`
+  // this plugin actually uses: registering 'add'/'unlink' listeners
+  // (configureServer) and later emitting 'change' to itself
+  // (syncMainCSSFile, on every sync — asserted separately from the emitted
+  // event's effect, which is Vite's own concern, not this plugin's).
+  function fakeServer() {
+    const listeners: Record<string, ((file: string) => void)[]> = {};
+    return {
+      watcher: {
+        on(event: string, cb: (file: string) => void) {
+          (listeners[event] ??= []).push(cb);
+        },
+        emit: () => undefined,
+      },
+      trigger(event: string, file: string) {
+        for (const cb of listeners[event] ?? []) cb(file);
+      },
+    };
+  }
+
+  it('adds a newly created file\'s classes to kbach.css', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="flex" />', 'utf-8');
+
+    const plugin = kbach();
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    const server = fakeServer();
+    (plugin.configureServer as unknown as (s: typeof server) => void)(server);
+
+    const newFile = join(dir, 'src', 'New.tsx');
+    writeFileSync(newFile, '<div className="italic" />', 'utf-8');
+    server.trigger('add', newFile);
+
+    const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).toContain('font-style: italic');
+  });
+
+  it("removes a deleted file's classes from kbach.css", () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="flex" />', 'utf-8');
+    const goingAwayFile = join(dir, 'src', 'GoingAway.tsx');
+    writeFileSync(goingAwayFile, '<div className="italic" />', 'utf-8');
+
+    const plugin = kbach();
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    let css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).toContain('font-style: italic');
+
+    const server = fakeServer();
+    (plugin.configureServer as unknown as (s: typeof server) => void)(server);
+    rmSync(goingAwayFile);
+    server.trigger('unlink', goingAwayFile);
+
+    css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).not.toContain('font-style: italic');
+    expect(css).toContain('display: flex');
+  });
+
+  it('ignores non-JS/TSX files and anything under node_modules', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="flex" />', 'utf-8');
+
+    const plugin = kbach();
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    const server = fakeServer();
+    (plugin.configureServer as unknown as (s: typeof server) => void)(server);
+
+    // Neither call should throw or touch kbach.css, despite matching
+    // filenames that don't exist on disk — the extension/path guards must
+    // reject them before any read is attempted.
+    expect(() => server.trigger('add', join(dir, 'src', 'notes.md'))).not.toThrow();
+    expect(() => server.trigger('add', join(dir, 'node_modules', 'x', 'index.tsx'))).not.toThrow();
+
+    const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).toContain('display: flex');
+  });
+});

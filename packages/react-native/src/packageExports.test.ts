@@ -63,3 +63,33 @@ describe('package.json exports — no top-level "import" condition for native en
     );
   });
 });
+
+/**
+ * Guards a real (confirmed by hand against an actual `expo start` Metro
+ * session, not just reasoned about) diagnostic-noise bug: without an
+ * explicit `"react-native"` condition, Metro's exports resolution for these
+ * three subpaths matches NOTHING for `platform: 'android'` (no
+ * "browser"/"node" match on native, and apparently Metro's own native
+ * condition list doesn't fall through to a bare top-level `"require"`) —
+ * it prints "Attempted to import... however no match was resolved...
+ * Falling back to file-based resolution" and recovers via the package's
+ * top-level `"main"` field instead. That fallback happens to land on the
+ * SAME file `"require"` already points to (confirmed: the built bundle's
+ * darkModeStore-sharing was still correct), so this was never a
+ * CORRECTNESS bug — but relying on an unrelated field's coincidental value
+ * matching is fragile, not a real fix, so an explicit `"react-native"`
+ * condition (pointing at the identical target `"require"` already does)
+ * is what actually closes it.
+ */
+describe('package.json exports — explicit "react-native" condition (avoids a Metro exports-fallback warning)', () => {
+  const nativeSubpaths = ['.', './jsx-runtime', './jsx-dev-runtime'] as const;
+
+  it.each(nativeSubpaths)('%s has a "react-native" condition matching its "require" condition exactly', (subpath) => {
+    const entry = (packageJson.exports as Record<string, unknown>)[subpath] as
+      | { 'react-native'?: string; require?: string }
+      | undefined;
+    expect(entry, `exports["${subpath}"] should exist`).toBeDefined();
+    expect(entry?.['react-native'], `exports["${subpath}"]["react-native"] should exist`).toBeDefined();
+    expect(entry?.['react-native']).toBe(entry?.require);
+  });
+});

@@ -38,46 +38,65 @@ import { join } from 'path';
 const distDir = join(__dirname, '..', 'dist');
 const distExists = existsSync(join(distDir, 'index.js'));
 
-// A handful of identifiers that only ever exist inside darkModeStore.ts's
-// or theme.ts's own module-level closures — their presence in a DIFFERENT
-// entry's bundle means that entry inlined its own separate copy instead of
-// requiring the shared sibling file.
+// A handful of identifiers that only ever exist inside darkModeStore.ts's,
+// theme.ts's, or dynamicTokens.ts's own module-level closures — their
+// presence in a DIFFERENT entry's bundle means that entry inlined its own
+// separate copy instead of requiring the shared sibling file.
 // NOT `seedDefaultMode` — it's a real EXPORTED function (ThemeProvider.tsx
 // imports it directly), so it legitimately appears as a property access
 // (`import_darkModeStore.seedDefaultMode`) in any entry that re-exports
-// ThemeProvider. `hasExplicitChoice`/`resolveIsDark` are both private,
-// never-exported module-scope identifiers — the only way either name can
-// appear anywhere is a full inlined copy of the module's own source.
+// ThemeProvider. Same reasoning rules out dynamicTokens.ts's own exported
+// names (`getDynamicTokensVersion` etc — used by jsxRuntimeCore.ts AND
+// re-exported from index.ts, so legitimately appears as a property access
+// in multiple entries either way). `hasExplicitChoice`/`resolveIsDark`
+// (darkModeStore) are private, never-exported module-scope identifiers;
+// `setProperty` is dynamicTokens.ts's own private `applyToDom`'s literal
+// DOM call (`style.setProperty`, distinct from darkModeStore's own
+// differently-shaped `applyToDom`) — the only way any of these can appear
+// anywhere is a full inlined copy of that module's own source.
 const DARK_MODE_STORE_OWN_IDENTIFIERS = ['hasExplicitChoice', 'resolveIsDark'];
 const THEME_OWN_IDENTIFIERS = ['activeThemeJson', 'defaultTheme ='];
+const DYNAMIC_TOKENS_OWN_IDENTIFIERS = ['setProperty'];
 
 // Every CJS entry uses theme.ts (at minimum for getThemeJson()), so all six
-// must require it. darkModeStore.ts is only used where JS-side dark-mode
-// state actually matters — that's every entry EXCEPT jsx-runtime.web.js:
-// on web, `dark:` resolves to real CSS via a DOM attribute (see
-// darkModeStore.ts's own `applyToDom` doc comment), so the class-resolution
-// entry itself has no runtime branching on dark mode to do, and legitimately
-// never references darkModeStore at all — nothing to inline OR share there.
+// must require it. darkModeStore.ts/dynamicTokens.ts are only used where
+// JS-side dark-mode/dynamic-token state actually matters — that's every
+// entry EXCEPT jsx-runtime.web.js: on web, `dark:`/`var(--x)` both resolve
+// to real CSS (a DOM attribute write, a real CSS custom property) — see
+// darkModeStore.ts's/dynamicTokens.ts's own `applyToDom` doc comments — so
+// the class-resolution entry itself has no runtime branching to do for
+// either, and legitimately never references them at all. jsx-dev-runtime.web.js
+// is the one asymmetry between the two stores: it references darkModeStore
+// (confirmed by inspecting the real build output) but not dynamicTokens —
+// nothing in this package's own dev-mode wrapping touches dynamic tokens.
 const cjsEntries = ['index.js', 'index.web.js', 'jsx-runtime.js', 'jsx-runtime.web.js', 'jsx-dev-runtime.js', 'jsx-dev-runtime.web.js'];
 const entriesThatUseDarkModeStore = new Set(cjsEntries.filter((f) => f !== 'jsx-runtime.web.js'));
+const entriesThatUseDynamicTokens = new Set(cjsEntries.filter((f) => f !== 'jsx-runtime.web.js' && f !== 'jsx-dev-runtime.web.js'));
 
-describe.skipIf(!distExists)('dist/ build output — darkModeStore/theme are shared, not inlined per-entry', () => {
-  it('darkModeStore.js and theme.js exist as their own sibling CJS files', () => {
+describe.skipIf(!distExists)('dist/ build output — darkModeStore/theme/dynamicTokens are shared, not inlined per-entry', () => {
+  it('darkModeStore.js, theme.js, and dynamicTokens.js exist as their own sibling CJS files', () => {
     expect(existsSync(join(distDir, 'darkModeStore.js'))).toBe(true);
     expect(existsSync(join(distDir, 'theme.js'))).toBe(true);
+    expect(existsSync(join(distDir, 'dynamicTokens.js'))).toBe(true);
   });
 
-  it.each(cjsEntries)('%s requires the shared theme/darkModeStore files rather than inlining them', (file) => {
+  it.each(cjsEntries)('%s requires the shared theme/darkModeStore/dynamicTokens files rather than inlining them', (file) => {
     const content = readFileSync(join(distDir, file), 'utf-8');
     expect(content).toMatch(/require\(["']\.\/theme["']\)/);
     if (entriesThatUseDarkModeStore.has(file)) {
       expect(content).toMatch(/require\(["']\.\/darkModeStore["']\)/);
+    }
+    if (entriesThatUseDynamicTokens.has(file)) {
+      expect(content).toMatch(/require\(["']\.\/dynamicTokens["']\)/);
     }
     for (const id of DARK_MODE_STORE_OWN_IDENTIFIERS) {
       expect(content, `${file} should not inline darkModeStore's own "${id}"`).not.toContain(id);
     }
     for (const id of THEME_OWN_IDENTIFIERS) {
       expect(content, `${file} should not inline theme's own "${id}"`).not.toContain(id);
+    }
+    for (const id of DYNAMIC_TOKENS_OWN_IDENTIFIERS) {
+      expect(content, `${file} should not inline dynamicTokens' own "${id}"`).not.toContain(id);
     }
   });
 });

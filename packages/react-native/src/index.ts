@@ -26,3 +26,11 @@ export type { ThemeMode } from './darkModeStore';
 
 export { useColors } from './useColors';
 export type { ColorsAPI, ColorScale } from './useColors';
+
+// Dynamic tokens: the native counterpart to a real CSS custom property —
+// `var(--name)` used directly in a `className` already works on Expo Web
+// via real CSS with zero help from this file; these exist so the SAME
+// className works on native too, and so JS can both write a token
+// (`setDynamicToken`) and read one back reactively (`useDynamicToken`).
+export { setDynamicToken, getDynamicToken, deleteDynamicToken, subscribeDynamicTokens } from './dynamicTokens';
+export { useDynamicToken } from './useDynamicToken';

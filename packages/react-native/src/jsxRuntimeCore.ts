@@ -19,12 +19,45 @@ import type { ReactElement } from 'react';
 import type { PressableStateCallbackType } from 'react-native';
 import type { StyleObject } from './nativeBridge';
 import { getGlobalDarkMode, subscribeGlobalDarkMode } from './darkModeStore';
+import { getDynamicToken, subscribeDynamicTokens, getDynamicTokensVersion } from './dynamicTokens';
 import { getTheme } from './theme';
 
 export { Fragment };
 export type { JSX } from 'react';
 
 export type ResolveStyleFn = (classString: string, pressed?: boolean) => StyleObject;
+
+// Matches a bare `var(--token-name)` reference anywhere in a className —
+// deliberately the SAME syntax real CSS custom properties use (not a
+// Kbach-specific spelling), since Expo Web already resolves this exact
+// text natively via real CSS with zero code here (see
+// jsxRuntimeCoreWeb.ts's own doc comment); this is what gives native an
+// equivalent for the same className, not a parallel dialect.
+const DYNAMIC_TOKEN_MATCH_RE = /var\(--([a-zA-Z0-9-]+)\)/g;
+
+/**
+ * Substitutes every `var(--name)` occurrence in `classStrRaw` whose `name`
+ * is currently registered via `setDynamicToken()` with its literal current
+ * value, BEFORE the string ever reaches `resolveStyle()` — so from
+ * resolveStyle's own perspective, `w-[var(--sidebar-width)]` is just an
+ * ordinary arbitrary value like `w-[240px]` would be, reusing every
+ * existing arbitrary-value code path (including the calc()/clamp()
+ * reduction and invalid-value warning added alongside this) for free,
+ * rather than needing its own separate resolution logic. An UNREGISTERED
+ * token name is left untouched — it then falls through to the same
+ * "not a valid native value" warning any other unresolvable arbitrary CSS
+ * text already gets (see resolve_style.rs's own `rn_style_value` doc
+ * comment), which is correct: a `var()` naming nothing this app ever set
+ * genuinely isn't resolvable on native, same as it would be invalid CSS on
+ * web if nothing ever defined that custom property either.
+ */
+function substituteDynamicTokens(classStrRaw: string): string {
+  if (!classStrRaw.includes('var(--')) return classStrRaw;
+  return classStrRaw.replace(DYNAMIC_TOKEN_MATCH_RE, (whole, name: string) => {
+    const value = getDynamicToken(name);
+    return value ?? whole;
+  });
+}
 
 function makeElement(
   isStaticChildren: boolean,
@@ -37,7 +70,7 @@ function makeElement(
 
 /** Resolves `classStrRaw` for a given press state and merges in `userStyle`. */
 function resolvedStyleFor(resolveStyle: ResolveStyleFn, classStrRaw: string, userStyle: unknown, pressed: boolean): unknown {
-  const resolved = resolveStyle(classStrRaw, pressed);
+  const resolved = resolveStyle(substituteDynamicTokens(classStrRaw), pressed);
   if (userStyle === undefined) {
     return resolved;
   }
@@ -91,6 +124,23 @@ function breakpointKeySuffix(classStrRaw: string, width: number): string {
   return `:kb-bp-${state}`;
 }
 
+/**
+ * Same "already-mounted host component doesn't repaint on a new style
+ * VALUE" issue dark:/breakpoints have, for `var(--token)` references —
+ * `substituteDynamicTokens` already makes `resolveStyle` see the CURRENT
+ * value on every call, but nothing forces a REPAINT of an existing element
+ * when only the token changed and no ancestor re-rendered. Reduces to just
+ * the current values of the SPECIFIC token(s) this className references
+ * (not the store's global version counter) so a different, unrelated
+ * token's change never remounts an element that doesn't use it.
+ */
+function dynamicTokenKeySuffix(classStrRaw: string): string {
+  const matches = classStrRaw.match(DYNAMIC_TOKEN_MATCH_RE);
+  if (!matches) return '';
+  const values = matches.map((m) => getDynamicToken(m.slice('var(--'.length, -1)) ?? '');
+  return `:kb-dt-${values.join('|')}`;
+}
+
 interface ReactiveProps {
   hostType: unknown;
   hostRest: Record<string, unknown>;
@@ -118,15 +168,16 @@ interface ReactiveProps {
  * whatever they were on first mount, never reacting to a theme change or a
  * device rotation/resize again.
  *
- * This component fixes that by subscribing to both darkModeStore (via
- * `useSyncExternalStore`) and `useWindowDimensions()` itself — a REAL React
- * component can call hooks, so this one re-renders on every dark-mode or
- * dimension change independent of what any ancestor does, recomputing the
- * resolved style and the forced-remount key (darkModeKeySuffix +
- * breakpointKeySuffix) fresh each time. Both hooks are called
- * unconditionally regardless of which modifier(s) the className actually
- * uses — cheap, and keeps this component's hook list fixed across renders;
- * the key suffix helpers are what scope the actual remount behavior.
+ * This component fixes that by subscribing to darkModeStore, dynamicTokens
+ * (both via `useSyncExternalStore`), and `useWindowDimensions()` itself —
+ * a REAL React component can call hooks, so this one re-renders on every
+ * dark-mode, dynamic-token, or dimension change independent of what any
+ * ancestor does, recomputing the resolved style and the forced-remount key
+ * (darkModeKeySuffix + breakpointKeySuffix + dynamicTokenKeySuffix) fresh
+ * each time. All three hooks are called unconditionally regardless of
+ * which modifier(s)/token(s) the className actually uses — cheap, and
+ * keeps this component's hook list fixed across renders; the key suffix
+ * helpers are what scope the actual remount behavior.
  */
 function ReactiveElement({
   hostType,
@@ -138,6 +189,7 @@ function ReactiveElement({
   isStaticChildren,
 }: ReactiveProps): ReactElement {
   useSyncExternalStore(subscribeGlobalDarkMode, getGlobalDarkMode);
+  useSyncExternalStore(subscribeDynamicTokens, getDynamicTokensVersion);
   const { width } = useWindowDimensions();
 
   const finalStyle =
@@ -145,7 +197,7 @@ function ReactiveElement({
       ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed)
       : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false);
 
-  const suffix = darkModeKeySuffix(classStrRaw) + breakpointKeySuffix(classStrRaw, width);
+  const suffix = darkModeKeySuffix(classStrRaw) + breakpointKeySuffix(classStrRaw, width) + dynamicTokenKeySuffix(classStrRaw);
   const finalKey = suffix ? `${elementKey ?? ''}${suffix}` : elementKey;
 
   return makeElement(isStaticChildren, hostType, { ...hostRest, style: finalStyle }, finalKey);
@@ -170,7 +222,7 @@ function processElement(
     return makeElement(isStaticChildren, type, rawProps, key);
   }
 
-  if (DARK_MODIFIER_RE.test(classStrRaw) || BREAKPOINT_MODIFIER_RE.test(classStrRaw)) {
+  if (DARK_MODIFIER_RE.test(classStrRaw) || BREAKPOINT_MODIFIER_RE.test(classStrRaw) || classStrRaw.includes('var(--')) {
     return _jsx(
       ReactiveElement,
       { hostType: type, hostRest: rest, classStrRaw, userStyle, resolveStyle, elementKey: key, isStaticChildren },

@@ -63,27 +63,40 @@ export default defineConfig([
     external: ['react-native'],
   },
   {
-    // CJS: every entry (native + web), plus theme/darkModeStore as their
-    // own sibling entries. esbuild has no code-splitting support for
-    // CommonJS output at all (a hard esbuild limitation, not a config
-    // oversight), so without building theme/darkModeStore separately and
-    // marking them `external`, every entry below would independently
-    // inline its OWN copy of darkModeStore.ts's module-level state
-    // (`mode`/`isDark`/`listeners`) and theme.ts's (`activeTheme`).
+    // CJS: every entry (native + web), plus theme/darkModeStore/
+    // dynamicTokens as their own sibling entries. esbuild has no
+    // code-splitting support for CommonJS output at all (a hard esbuild
+    // limitation, not a config oversight), so without building these
+    // separately and marking them `external`, every entry below would
+    // independently inline its OWN copy of each one's module-level state
+    // (darkModeStore's `mode`/`isDark`/`listeners`, theme's `activeTheme`,
+    // dynamicTokens' `tokens`/`listeners`/`version`) — the exact same
+    // cross-bundle duplication bug documented above for darkModeStore
+    // applies identically to dynamicTokens.ts, since it's ALSO imported by
+    // both the index entry (setDynamicToken/useDynamicToken) and the
+    // jsx-runtime entry (jsxRuntimeCore.ts's className substitution) —
+    // calling setDynamicToken via one entry must notify the other.
     //
     // Building them as their own sibling CJS entries and marking them
     // `external` makes every other entry emit a plain
-    // `require("./theme")`/`require("./darkModeStore")` instead of inlining
-    // — since all these files land as siblings in the same dist/ directory,
-    // that relative require resolves to the SAME physical file everywhere,
-    // and Node's/Metro's require() cache (keyed by resolved absolute path)
-    // naturally gives it single-instance semantics — no public package.json
+    // `require("./theme")`/`require("./darkModeStore")`/
+    // `require("./dynamicTokens")` instead of inlining — since all these
+    // files land as siblings in the same dist/ directory, that relative
+    // require resolves to the SAME physical file everywhere, and Node's/
+    // Metro's require() cache (keyed by resolved absolute path) naturally
+    // gives it single-instance semantics — no public package.json
     // "exports" subpath needed, this is purely an internal sharing
     // mechanism between dist/ siblings.
-    entry: { ...nativeEntries, ...webEntries, theme: 'src/theme.ts', darkModeStore: 'src/darkModeStore.ts' },
+    entry: {
+      ...nativeEntries,
+      ...webEntries,
+      theme: 'src/theme.ts',
+      darkModeStore: 'src/darkModeStore.ts',
+      dynamicTokens: 'src/dynamicTokens.ts',
+    },
     format: ['cjs'],
     dts: true, // The only dts pass now — covers every public entry (native + web), since the ESM pass above only builds a subset.
     clean: false, // See the ESM pass's own `clean: false` comment — cleaning happens once, up front, in the npm scripts instead of either tsup pass.
-    external: ['react-native', './theme', './darkModeStore'],
+    external: ['react-native', './theme', './darkModeStore', './dynamicTokens'],
   },
 ]);

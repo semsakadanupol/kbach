@@ -99,6 +99,8 @@ describe('jsx-runtime (react-native)', () => {
     toggleGlobalDarkMode = store.toggleGlobalDarkMode;
     store._resetForTests();
     resetMockWidthForTests();
+    const dynamicTokens = await import('./dynamicTokens');
+    dynamicTokens._resetForTests();
   });
 
   afterEach(() => {
@@ -313,6 +315,101 @@ describe('jsx-runtime (react-native)', () => {
         toggleGlobalDarkMode();
       });
       expect(mockResolveStyle).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // Cross-platform dynamic style values — the native counterpart to a real
+  // CSS custom property (which already works on Expo Web with zero code
+  // here, see jsxRuntimeCoreWeb.ts). `var(--x)` in a className gets
+  // substituted with the CURRENT registered value before resolveStyle ever
+  // sees it — mockResolveStyle above echoes its `classString` arg back as
+  // `resolved`, so asserting on `resolved` here proves the substitution
+  // actually happened, not just that a re-render occurred.
+  describe('dynamic tokens (var(--x) reactivity)', () => {
+    it('substitutes a registered token value into the className before resolving', async () => {
+      // A var(--x) reference routes through ReactiveElement (same as
+      // dark:/breakpoints), so resolution only happens once actually
+      // rendered — a bare jsx() call, unlike the plain-class tests earlier
+      // in this file, would observe zero calls.
+      const { setDynamicToken } = await import('./dynamicTokens');
+      setDynamicToken('sidebar-width', '240px');
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[var(--sidebar-width)]' }, undefined);
+      const renderer = mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledWith('w-[240px]', false);
+      expect(renderer.root.findByType('View' as any).props.style).toMatchObject({ resolved: 'w-[240px]' });
+    });
+
+    it('leaves an unregistered token reference untouched (falls through to the usual invalid-value handling)', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[var(--never-set)]' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledWith('w-[var(--never-set)]', false);
+    });
+
+    it('resolves once on mount', async () => {
+      const { setDynamicToken } = await import('./dynamicTokens');
+      setDynamicToken('sidebar-width', '240px');
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[var(--sidebar-width)]' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-resolves on its own when the token value changes, with no ancestor re-rendering', async () => {
+      const { setDynamicToken } = await import('./dynamicTokens');
+      setDynamicToken('sidebar-width', '240px');
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[var(--sidebar-width)]' }, undefined);
+      const renderer = mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+      expect(renderer.root.findByType('View' as any).props.style).toMatchObject({ resolved: 'w-[240px]' });
+
+      act(() => {
+        setDynamicToken('sidebar-width', '320px');
+      });
+
+      // Nothing re-rendered the tree from above — only the token store
+      // notified — so a second call with the NEW value proves the
+      // element's own subscription is what triggered this.
+      expect(mockResolveStyle).toHaveBeenCalledTimes(2);
+      expect(renderer.root.findByType('View' as any).props.style).toMatchObject({ resolved: 'w-[320px]' });
+    });
+
+    it('does not add any reactivity overhead for an element with no var(--x) reference', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex bg-blue-6' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+
+      const { setDynamicToken } = await import('./dynamicTokens');
+      act(() => {
+        setDynamicToken('sidebar-width', '240px');
+      });
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+    });
+
+    it('still resolves the correct value when an UNRELATED token changes', async () => {
+      // The store's own version counter bumps for ANY token change (see
+      // dynamicTokens.ts's own doc comment on why), so the element's
+      // useSyncExternalStore subscription fires and re-resolves even for a
+      // token this className doesn't reference — but the resolved value
+      // must stay correct (dynamicTokenKeySuffix's per-className scoping,
+      // exercised at the unit level in jsxRuntimeCore, is what keeps this
+      // from also forcing a spurious remount; not independently observable
+      // through this mock, so not asserted here).
+      const { setDynamicToken } = await import('./dynamicTokens');
+      setDynamicToken('sidebar-width', '240px');
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[var(--sidebar-width)]' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        setDynamicToken('unrelated-token', 'anything');
+      });
+      expect(mockResolveStyle).toHaveBeenCalledTimes(2);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('w-[240px]', false);
     });
   });
 });

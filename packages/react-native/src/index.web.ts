@@ -41,3 +41,12 @@ export type { ThemeMode } from './darkModeStore';
 
 export { useColors } from './useColors';
 export type { ColorsAPI, ColorScale } from './useColors';
+
+// Dynamic tokens: `setDynamicToken` writes the real CSS custom property to
+// the DOM here (see dynamicTokens.ts's own `applyToDom`) — a plain
+// `var(--name)` in a className already picks it up via real CSS with zero
+// extra help, same as native's className path does via substitution
+// instead (see jsxRuntimeCore.ts). Exported for API parity with index.ts
+// so consuming code doesn't need a platform branch just to set one.
+export { setDynamicToken, getDynamicToken, deleteDynamicToken, subscribeDynamicTokens } from './dynamicTokens';
+export { useDynamicToken } from './useDynamicToken';

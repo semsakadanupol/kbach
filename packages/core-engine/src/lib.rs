@@ -1,3 +1,4 @@
+mod calc;
 mod css;
 #[cfg(target_os = "android")]
 mod jni_bridge;

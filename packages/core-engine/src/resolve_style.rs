@@ -34,6 +34,7 @@
 //! reaches this module is expected to be RN-representable, modulo the
 //! value typing below.
 
+use crate::calc::reduce_constant_math;
 use crate::parser::parse_class;
 use crate::registry::{self, DarkScheme};
 use crate::resolvers::resolve_utility_native;
@@ -108,28 +109,76 @@ const NUMERIC_LENGTH_PROPS: &[&str] = &[
     "outline-width", "outline-offset",
 ];
 
-/// Converts a resolved CSS value into its RN-correct JSON shape. Properties
-/// outside `NUMERIC_LENGTH_PROPS` (colors, `flexDirection`, `borderStyle`,
-/// ...) are untouched strings. For numeric-length properties: strips `px`;
-/// converts `rem` to px (`× 16`, matching the theme's own rem convention —
-/// e.g. `rounded-lg` = `0.5rem` = `8px`); falls back to parsing the raw
-/// value (covers `z-index`'s already-unitless `"50"`); and if none of
-/// those apply (e.g. an arbitrary `"50%"`), passes the string through as-is
-/// — exactly correct, since RN accepts percentage strings for these props.
-fn rn_style_value(property: &str, value: &str) -> Value {
-    if NUMERIC_LENGTH_PROPS.contains(&property) {
-        let px = if let Some(px) = value.strip_suffix("px") {
-            px.parse::<f64>().ok()
-        } else if let Some(rem) = value.strip_suffix("rem") {
-            rem.parse::<f64>().ok().map(|n| n * 16.0)
-        } else {
-            value.parse::<f64>().ok()
-        };
-        if let Some(n) = px.and_then(Number::from_f64) {
-            return Value::Number(n);
-        }
+/// A bare percentage string (`"50%"`, `"-33.3%"`) — real Tailwind fraction
+/// utilities (`w-1/2`) and plain arbitrary percentages both produce this
+/// shape, and RN genuinely accepts it as-is for every `NUMERIC_LENGTH_PROPS`
+/// entry. Distinct from a `calc(...)`/`clamp(...)` string that merely
+/// CONTAINS a `%` — those are NOT valid RN values even though they contain
+/// the same character, which is exactly why this checks the value is
+/// NOTHING BUT a percentage, not just that it contains one.
+fn is_plain_percentage(value: &str) -> bool {
+    let Some(digits) = value.strip_suffix('%') else { return false };
+    let digits = digits.strip_prefix('-').unwrap_or(digits);
+    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit() || c == '.')
+}
+
+/// Converts a resolved CSS value into its RN-correct JSON shape. Returns
+/// `(None, ...)` when the declaration should be DROPPED entirely — a value
+/// RN's style system genuinely cannot represent (rather than silently
+/// shipping an invalid string into the style object, which RN would either
+/// warn about unpredictably or just ignore) — paired with a warning message
+/// for the caller to surface in dev mode (see `resolve_style_json`'s own
+/// doc comment for where that warning actually reaches the developer).
+///
+/// For `NUMERIC_LENGTH_PROPS`, tries in order: strip `px`; convert `rem` to
+/// px (`× 16`, matching the theme's own rem convention — e.g. `rounded-lg`
+/// = `0.5rem` = `8px`); parse the raw value (covers `z-index`'s
+/// already-unitless `"50"`); a bare percentage string (RN accepts these
+/// as-is); a CONSTANT-ONLY `calc()`/`clamp()`/`min()`/`max()` expression
+/// reducible to a single px number at resolve time (see `calc.rs` — e.g.
+/// `calc(16px+8px)` becomes `24`, but `calc(50%-0.5rem)` can't reduce this
+/// way since a percentage needs the parent's actual layout size, which
+/// doesn't exist until paint time on native). Anything past all of those
+/// (an unreduced percentage-relative/viewport-relative `calc()`, a raw
+/// `var(...)`, an unrecognized CSS unit, ...) is dropped with a warning.
+///
+/// Properties outside `NUMERIC_LENGTH_PROPS` (colors, `flexDirection`,
+/// `borderStyle`, ...) are always passed through as untouched strings —
+/// never dropped, since this validation is specifically about RN's numeric
+/// style fields, the one place a free-text CSS value can't just work as-is.
+fn rn_style_value(property: &str, value: &str) -> (Option<Value>, Option<String>) {
+    if !NUMERIC_LENGTH_PROPS.contains(&property) {
+        return (Some(Value::String(value.to_string())), None);
     }
-    Value::String(value.to_string())
+
+    let px = if let Some(px) = value.strip_suffix("px") {
+        px.parse::<f64>().ok()
+    } else if let Some(rem) = value.strip_suffix("rem") {
+        rem.parse::<f64>().ok().map(|n| n * 16.0)
+    } else {
+        value.parse::<f64>().ok()
+    };
+    if let Some(n) = px.and_then(Number::from_f64) {
+        return (Some(Value::Number(n)), None);
+    }
+
+    if is_plain_percentage(value) {
+        return (Some(Value::String(value.to_string())), None);
+    }
+
+    if let Some(n) = reduce_constant_math(value).and_then(Number::from_f64) {
+        return (Some(Value::Number(n)), None);
+    }
+
+    let warning = format!(
+        "Kbach: \"{value}\" is not a valid native value for \"{property}\" — dropped. \
+         calc()/clamp()/min()/max() only resolve on native when every operand is a \
+         constant px/rem length (no %, vw, vh, var(), or other viewport/CSS-variable \
+         units — those need real layout/DOM, which doesn't exist on native at paint \
+         time). Use a plain px/rem calc, a fraction utility (e.g. w-1/2), or resolve \
+         this value in JS instead."
+    );
+    (None, Some(warning))
 }
 
 /// FFI-facing entry point — parses `theme_json`, resolves, and serializes
@@ -138,17 +187,40 @@ fn rn_style_value(property: &str, value: &str) -> Value {
 /// paths) since the web target has no use for a style-object shape at all.
 /// An unparseable theme yields an empty object rather than panicking
 /// across the FFI boundary.
+///
+/// When any declaration was dropped for being an invalid native value (see
+/// `rn_style_value`'s own doc comment), this embeds them under a
+/// `"__kbachWarnings"` key in the SAME returned object rather than adding a
+/// second FFI call/return shape — nativeBridge.ts reads and strips that key
+/// (dev-mode only) before handing the object to RN as `style`. The key is
+/// omitted entirely when there are no warnings, so the JSON shape for every
+/// already-passing call site is byte-for-byte unchanged.
 pub fn resolve_style_json(class_string: &str, theme_json: &str, color_scheme: &str, pressed: bool, width: f64) -> String {
     let theme: ThemeConfig = match serde_json::from_str(theme_json) {
         Ok(t) => t,
         Err(_) => return "{}".to_string(),
     };
-    let style = resolve_style(class_string, &theme, color_scheme, pressed, width);
+    let (mut style, warnings) = resolve_style_with_warnings(class_string, &theme, color_scheme, pressed, width);
+    if !warnings.is_empty() {
+        style.insert("__kbachWarnings".to_string(), Value::Array(warnings.into_iter().map(Value::String).collect()));
+    }
     serde_json::to_string(&style).unwrap_or_else(|_| "{}".to_string())
 }
 
-pub fn resolve_style(class_string: &str, theme: &ThemeConfig, color_scheme: &str, pressed: bool, width: f64) -> Map<String, Value> {
+/// Same resolution `resolve_style` does, plus the list of dev-facing
+/// warnings generated along the way (see `rn_style_value`) — a separate
+/// function rather than changing `resolve_style`'s own return type so its
+/// many existing call sites/tests (which only ever care about the style
+/// object) don't all need updating for a concern most of them never hit.
+pub fn resolve_style_with_warnings(
+    class_string: &str,
+    theme: &ThemeConfig,
+    color_scheme: &str,
+    pressed: bool,
+    width: f64,
+) -> (Map<String, Value>, Vec<String>) {
     let mut style = Map::new();
+    let mut warnings = Vec::new();
 
     for token in class_string.split_whitespace() {
         let parsed = parse_class(token);
@@ -182,12 +254,30 @@ pub fn resolve_style(class_string: &str, theme: &ThemeConfig, color_scheme: &str
                 }
                 continue;
             }
-            let value = rn_style_value(&d.property, &d.value);
-            style.insert(kebab_to_camel(&d.property), value);
+            let (value, warning) = rn_style_value(&d.property, &d.value);
+            if let Some(warning) = warning {
+                warnings.push(warning);
+            }
+            if let Some(value) = value {
+                style.insert(kebab_to_camel(&d.property), value);
+            }
         }
     }
 
-    style
+    (style, warnings)
+}
+
+// Only this module's own tests call this now — every production call site
+// (resolve_style_json, in turn used by both the WASM and JNI FFI exports)
+// goes straight through resolve_style_with_warnings for the warnings it
+// needs. Kept anyway (not deleted, not test-only-cfg-gated) purely for
+// dozens of existing tests' readability — `resolve_style(...)` reads better
+// than `resolve_style_with_warnings(...).0` when a test has nothing to do
+// with warnings at all. `#[allow(dead_code)]` because a release (non-test)
+// build genuinely never calls it, which would otherwise warn.
+#[allow(dead_code)]
+pub fn resolve_style(class_string: &str, theme: &ThemeConfig, color_scheme: &str, pressed: bool, width: f64) -> Map<String, Value> {
+    resolve_style_with_warnings(class_string, theme, color_scheme, pressed, width).0
 }
 
 #[cfg(test)]
@@ -446,5 +536,58 @@ mod tests {
     fn shadow_inner_does_not_resolve_on_native() {
         let style = resolve_style("shadow-inner", &theme(), "light", false, W);
         assert!(style.is_empty());
+    }
+
+    #[test]
+    fn resolves_a_constant_only_arbitrary_calc_to_a_plain_number() {
+        let style = resolve_style("p-[calc(16px+8px)]", &theme(), "light", false, W);
+        assert_eq!(style.get("padding").unwrap(), &Value::Number(Number::from_f64(24.0).unwrap()));
+    }
+
+    #[test]
+    fn resolves_a_constant_only_arbitrary_clamp_to_its_clamped_number() {
+        let style = resolve_style("w-[clamp(1rem,2rem,3rem)]", &theme(), "light", false, W);
+        assert_eq!(style.get("width").unwrap(), &Value::Number(Number::from_f64(32.0).unwrap()));
+    }
+
+    #[test]
+    fn drops_an_unreducible_percentage_relative_calc_and_returns_a_warning() {
+        let (style, warnings) = resolve_style_with_warnings("w-[calc(50%-0.5rem)]", &theme(), "light", false, W);
+        assert!(style.get("width").is_none(), "an invalid native value must not be emitted at all");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("calc(50%-0.5rem)"));
+        assert!(warnings[0].contains("width"));
+    }
+
+    #[test]
+    fn resolve_style_without_warnings_still_drops_the_same_invalid_value() {
+        // The plain resolve_style() wrapper discards warnings but must still
+        // drop the declaration the same way resolve_style_with_warnings does
+        // — it's a thin wrapper, not a second code path.
+        let style = resolve_style("w-[calc(50%-0.5rem)]", &theme(), "light", false, W);
+        assert!(style.get("width").is_none());
+    }
+
+    #[test]
+    fn resolve_style_json_embeds_warnings_under_a_dunder_key_only_when_present() {
+        let theme_json = r##"{"colors":{},"spacing":{},"screens":{},"darkMode":"attribute"}"##;
+
+        let clean = resolve_style_json("flex", theme_json, "light", false, W);
+        let clean: serde_json::Value = serde_json::from_str(&clean).unwrap();
+        assert!(clean.get("__kbachWarnings").is_none(), "a fully-valid resolution must not carry the warnings key at all");
+
+        let with_warning = resolve_style_json("w-[calc(50%-0.5rem)]", theme_json, "light", false, W);
+        let with_warning: serde_json::Value = serde_json::from_str(&with_warning).unwrap();
+        let warnings = with_warning["__kbachWarnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(with_warning.get("width").is_none());
+    }
+
+    #[test]
+    fn a_plain_percentage_still_passes_through_without_any_warning() {
+        // is_plain_percentage must not be confused with the calc()-contains-a-percent case.
+        let (style, warnings) = resolve_style_with_warnings("w-1/2", &theme(), "light", false, W);
+        assert_eq!(style.get("width").unwrap(), "50%");
+        assert!(warnings.is_empty());
     }
 }

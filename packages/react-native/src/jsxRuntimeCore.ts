@@ -14,11 +14,12 @@
  */
 import { jsx as _jsx, jsxs as _jsxs } from 'react/jsx-runtime';
 import { Fragment, useSyncExternalStore } from 'react';
-import { Pressable } from 'react-native';
+import { Pressable, useWindowDimensions } from 'react-native';
 import type { ReactElement } from 'react';
 import type { PressableStateCallbackType } from 'react-native';
 import type { StyleObject } from './nativeBridge';
 import { getGlobalDarkMode, subscribeGlobalDarkMode } from './darkModeStore';
+import { getTheme } from './theme';
 
 export { Fragment };
 export type { JSX } from 'react';
@@ -47,6 +48,10 @@ function resolvedStyleFor(resolveStyle: ResolveStyleFn, classStrRaw: string, use
 }
 
 const DARK_MODIFIER_RE = /(^|\s)dark:/;
+const BREAKPOINT_MODIFIER_RE = /(^|\s)(sm|md|lg|xl|2xl):/;
+// Same set as BREAKPOINT_MODIFIER_RE, used to enumerate which specific
+// breakpoint(s) a className references (see breakpointKeySuffix).
+const BREAKPOINT_MODIFIER_MATCH_RE = /(?:^|\s)(sm|md|lg|xl|2xl):/g;
 
 /**
  * A `dark:`-bearing element needs a key suffix that changes whenever the
@@ -57,18 +62,36 @@ const DARK_MODIFIER_RE = /(^|\s)dark:/;
  * what actually made the new colors show. Scoped to elements whose
  * className literally contains "dark:" (a cheap regex test) rather than
  * applied unconditionally, so an element with no mode-dependent styling
- * never remounts for no reason. `sm:`/`md:`/etc. likely have the identical
- * underlying issue (same "a live JS parameter, no React state, no built-in
- * re-render-triggers-repaint guarantee" shape as dark: — see
- * nativeBridge.ts's own width parameter doc comment) but haven't been
- * confirmed broken the same way, so this deliberately stays scoped to
- * dark: for now rather than guessing at a fix for an unconfirmed problem.
+ * never remounts for no reason.
  */
 function darkModeKeySuffix(classStrRaw: string): string {
   return DARK_MODIFIER_RE.test(classStrRaw) ? `:kb-dark-${getGlobalDarkMode()}` : '';
 }
 
-interface DarkAwareProps {
+/**
+ * `sm:`/`md:`/`lg:`/`xl:`/`2xl:` have the identical "already-mounted host
+ * component doesn't repaint on a new style VALUE" issue dark: has (same "a
+ * live JS parameter, no React state, no built-in re-render-triggers-repaint
+ * guarantee" shape — see nativeBridge.ts's own width parameter doc
+ * comment), confirmed by the same ReactiveElement design fixing it there.
+ * Reduces the live `width` to just the breakpoint(s) this particular
+ * className actually references (rather than the raw pixel width) so a
+ * resize/rotation that doesn't cross any breakpoint THIS element cares
+ * about never triggers a remount — e.g. an `md:` element ignores an `sm`
+ * crossing entirely.
+ */
+function breakpointKeySuffix(classStrRaw: string, width: number): string {
+  const matches = classStrRaw.match(BREAKPOINT_MODIFIER_MATCH_RE);
+  if (!matches) {
+    return '';
+  }
+  const screens = getTheme().screens;
+  const present = Array.from(new Set(matches.map((m) => m.trim().slice(0, -1))));
+  const state = present.map((name) => (screens[name] !== undefined && width >= screens[name] ? '1' : '0')).join('');
+  return `:kb-bp-${state}`;
+}
+
+interface ReactiveProps {
   hostType: unknown;
   hostRest: Record<string, unknown>;
   classStrRaw: string;
@@ -79,29 +102,33 @@ interface DarkAwareProps {
 }
 
 /**
- * A `dark:`-bearing element gets wrapped in this tiny component instead of
- * being emitted as a plain host element directly. `jsx()`/`jsxs()` are
- * plain functions invoked synchronously as part of whatever OTHER
- * component's render body wrote the JSX — they can't call hooks themselves
- * (they run conditionally/in loops along with the surrounding JSX, which
- * would violate the rules of hooks), so on their own they only ever read
- * `getGlobalDarkMode()` once, at whatever moment that surrounding component
- * happened to render. If nothing in the tree ever calls `useTheme()` (or
- * otherwise subscribes to the store) near enough to this element to force
- * it to render again — the common case, since `<ThemeProvider>` itself
- * deliberately doesn't subscribe (see its own doc comment) and most
- * screens never call `useTheme()` at all — a `dark:`-bearing element's
- * colors would silently freeze at whatever the mode was on first mount,
- * never reacting to `setGlobalThemeMode()`/`toggleGlobalDarkMode()` calls
- * or a live OS appearance change again.
+ * A `dark:`- or responsive-breakpoint-bearing element gets wrapped in this
+ * tiny component instead of being emitted as a plain host element directly.
+ * `jsx()`/`jsxs()` are plain functions invoked synchronously as part of
+ * whatever OTHER component's render body wrote the JSX — they can't call
+ * hooks themselves (they run conditionally/in loops along with the
+ * surrounding JSX, which would violate the rules of hooks), so on their own
+ * they only ever read `getGlobalDarkMode()`/the window width once, at
+ * whatever moment that surrounding component happened to render. If nothing
+ * in the tree ever calls `useTheme()`/`useWindowDimensions()` (or otherwise
+ * subscribes) near enough to this element to force it to render again — the
+ * common case, since `<ThemeProvider>` itself deliberately doesn't
+ * subscribe (see its own doc comment) and most screens never call either
+ * hook at all — this element's colors/layout would silently freeze at
+ * whatever they were on first mount, never reacting to a theme change or a
+ * device rotation/resize again.
  *
- * This component fixes that by subscribing to darkModeStore itself, via
- * `useSyncExternalStore` — a REAL React component can call hooks, so this
- * one re-renders on every dark-mode change independent of what any
- * ancestor does, recomputing both the resolved style and the
- * `darkModeKeySuffix`-forced remount key fresh each time.
+ * This component fixes that by subscribing to both darkModeStore (via
+ * `useSyncExternalStore`) and `useWindowDimensions()` itself — a REAL React
+ * component can call hooks, so this one re-renders on every dark-mode or
+ * dimension change independent of what any ancestor does, recomputing the
+ * resolved style and the forced-remount key (darkModeKeySuffix +
+ * breakpointKeySuffix) fresh each time. Both hooks are called
+ * unconditionally regardless of which modifier(s) the className actually
+ * uses — cheap, and keeps this component's hook list fixed across renders;
+ * the key suffix helpers are what scope the actual remount behavior.
  */
-function DarkAwareElement({
+function ReactiveElement({
   hostType,
   hostRest,
   classStrRaw,
@@ -109,15 +136,16 @@ function DarkAwareElement({
   resolveStyle,
   elementKey,
   isStaticChildren,
-}: DarkAwareProps): ReactElement {
+}: ReactiveProps): ReactElement {
   useSyncExternalStore(subscribeGlobalDarkMode, getGlobalDarkMode);
+  const { width } = useWindowDimensions();
 
   const finalStyle =
     hostType === Pressable
       ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed)
       : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false);
 
-  const suffix = darkModeKeySuffix(classStrRaw);
+  const suffix = darkModeKeySuffix(classStrRaw) + breakpointKeySuffix(classStrRaw, width);
   const finalKey = suffix ? `${elementKey ?? ''}${suffix}` : elementKey;
 
   return makeElement(isStaticChildren, hostType, { ...hostRest, style: finalStyle }, finalKey);
@@ -142,9 +170,9 @@ function processElement(
     return makeElement(isStaticChildren, type, rawProps, key);
   }
 
-  if (DARK_MODIFIER_RE.test(classStrRaw)) {
+  if (DARK_MODIFIER_RE.test(classStrRaw) || BREAKPOINT_MODIFIER_RE.test(classStrRaw)) {
     return _jsx(
-      DarkAwareElement,
+      ReactiveElement,
       { hostType: type, hostRest: rest, classStrRaw, userStyle, resolveStyle, elementKey: key, isStaticChildren },
       key,
     ) as ReactElement;

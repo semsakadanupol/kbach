@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act } from 'react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, useSyncExternalStore } from 'react';
 import TestRenderer from 'react-test-renderer';
 
 // A STATIC top-level `import './darkModeStore'` here would force it (and
@@ -36,21 +36,76 @@ vi.mock('./nativeBridge', () => ({
 // see its own doc comment), whose module-level code calls
 // Appearance.addChangeListener at import time.
 const MockPressable = () => null;
+// Mirrors RN's real useWindowDimensions() shape closely enough for the
+// sm:/md:/... reactivity tests below: a subscribable snapshot (not a plain
+// static return), so a width change can notify jsxRuntimeCore's own
+// subscription the same way a real device rotation/resize would, without
+// requiring an external tree re-render to observe it.
+let mockWidth = 375;
+let mockDimensionsSnapshot = { width: mockWidth, height: 812 };
+const widthListeners = new Set<() => void>();
+function setMockWidth(width: number): void {
+  mockWidth = width;
+  mockDimensionsSnapshot = { width, height: 812 };
+  widthListeners.forEach((listener) => listener());
+}
+// Silent counterpart for beforeEach — mirrors darkModeStore's own
+// _resetForTests() shape: resets state WITHOUT notifying subscribers, since
+// notifying here would spuriously re-render any renderer a prior test left
+// mounted (this file never unmounts between tests, same as it never did for
+// darkModeStore's subscribers), inflating this test's own call counts.
+function resetMockWidthForTests(): void {
+  mockWidth = 375;
+  mockDimensionsSnapshot = { width: mockWidth, height: 812 };
+}
 vi.mock('react-native', () => ({
   Pressable: MockPressable,
   Appearance: {
     getColorScheme: () => 'light',
     addChangeListener: () => ({ remove: vi.fn() }),
   },
+  useWindowDimensions: () =>
+    useSyncExternalStore(
+      (cb: () => void) => {
+        widthListeners.add(cb);
+        return () => widthListeners.delete(cb);
+      },
+      () => mockDimensionsSnapshot,
+    ),
 }));
 
 describe('jsx-runtime (react-native)', () => {
+  // The reactivity suites below mount real TestRenderer trees whose
+  // ReactiveElement instances subscribe to darkModeStore/widthListeners.
+  // Left mounted, a later test's toggleGlobalDarkMode()/setMockWidth() call
+  // would also notify (and re-render) these leftover trees, inflating THAT
+  // test's own mockResolveStyle call count. Tracking and unmounting every
+  // renderer after each test keeps the subscriber sets — and thus each
+  // test's call counts — isolated.
+  const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
+  function mount(el: Parameters<typeof TestRenderer.create>[0]): TestRenderer.ReactTestRenderer {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(el);
+    });
+    mountedRenderers.push(renderer);
+    return renderer;
+  }
+
   beforeEach(async () => {
     vi.clearAllMocks();
     const store = await import('./darkModeStore');
     getGlobalDarkMode = store.getGlobalDarkMode;
     toggleGlobalDarkMode = store.toggleGlobalDarkMode;
     store._resetForTests();
+    resetMockWidthForTests();
+  });
+
+  afterEach(() => {
+    act(() => {
+      mountedRenderers.forEach((renderer) => renderer.unmount());
+    });
+    mountedRenderers.length = 0;
   });
 
   it('resolves a plain-string className into the style prop, not className', async () => {
@@ -138,7 +193,7 @@ describe('jsx-runtime (react-native)', () => {
   });
 
   // A `dark:`-bearing element is wrapped in its own self-subscribing
-  // component (DarkAwareElement, in jsxRuntimeCore.ts) specifically so it
+  // component (ReactiveElement, in jsxRuntimeCore.ts) specifically so it
   // recomputes on its own whenever the global dark-mode state changes —
   // with NO ancestor (no <ThemeProvider>, no useTheme() call anywhere)
   // needed in these trees at all. That self-sufficiency is exactly what
@@ -150,9 +205,7 @@ describe('jsx-runtime (react-native)', () => {
     it('resolves once on mount, reflecting the current dark state', async () => {
       const { jsx } = await import('./jsx-runtime');
       const el = jsx('View', { className: 'bg-blue-6 dark:bg-blue-8' }, undefined);
-      act(() => {
-        TestRenderer.create(el);
-      });
+      mount(el);
       expect(mockResolveStyle).toHaveBeenCalledTimes(1);
       expect(mockResolveStyle).toHaveBeenCalledWith('bg-blue-6 dark:bg-blue-8', false);
     });
@@ -161,11 +214,8 @@ describe('jsx-runtime (react-native)', () => {
       const { jsx } = await import('./jsx-runtime');
       const el = jsx('View', { className: 'bg-blue-6 dark:bg-blue-8' }, undefined);
 
-      let renderer: TestRenderer.ReactTestRenderer | undefined;
-      act(() => {
-        renderer = TestRenderer.create(el);
-      });
-      expect(renderer!.root.findByType('View' as any).props.style).toMatchObject({ dark: false });
+      const renderer = mount(el);
+      expect(renderer.root.findByType('View' as any).props.style).toMatchObject({ dark: false });
       expect(mockResolveStyle).toHaveBeenCalledTimes(1);
 
       act(() => {
@@ -173,15 +223,13 @@ describe('jsx-runtime (react-native)', () => {
       });
 
       expect(mockResolveStyle).toHaveBeenCalledTimes(2);
-      expect(renderer!.root.findByType('View' as any).props.style).toMatchObject({ dark: true });
+      expect(renderer.root.findByType('View' as any).props.style).toMatchObject({ dark: true });
     });
 
     it('does not add any reactivity overhead for an element with no "dark:" class', async () => {
       const { jsx } = await import('./jsx-runtime');
       const el = jsx('View', { className: 'flex bg-blue-6' }, undefined);
-      act(() => {
-        TestRenderer.create(el);
-      });
+      mount(el);
       expect(mockResolveStyle).toHaveBeenCalledTimes(1);
 
       act(() => {
@@ -198,11 +246,73 @@ describe('jsx-runtime (react-native)', () => {
       const { jsx } = await import('./jsx-runtime');
       const el = jsx(Pressable, { className: 'bg-blue-6 dark:bg-blue-8 active:bg-blue-9' }, undefined);
 
-      let renderer: TestRenderer.ReactTestRenderer | undefined;
+      const renderer = mount(el);
+      expect(typeof renderer.root.findByType(Pressable).props.style).toBe('function');
+    });
+  });
+
+  // Same shape as the dark: suite above, for the sibling bug flagged in
+  // jsxRuntimeCore.ts's own doc comments: an already-mounted host component
+  // doesn't repaint just because a live width parameter changed, so a
+  // `sm:`/`md:`/... element needs the same self-subscribing wrapper dark:
+  // elements get — here via RN's own `useWindowDimensions()` instead of
+  // darkModeStore. These tests exist specifically to lock in that fix and
+  // guard against it regressing the way dark: needed three separate hotfix
+  // commits to get right.
+  describe('responsive-breakpoint reactivity (recomputes on its own on a width change)', () => {
+    it('resolves once on mount', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex sm:flex-row' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-resolves on its own when the window width changes, with no ancestor re-rendering', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex sm:flex-row' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+
       act(() => {
-        renderer = TestRenderer.create(el);
+        setMockWidth(900);
       });
-      expect(typeof renderer!.root.findByType(Pressable).props.style).toBe('function');
+
+      // Nothing re-rendered the tree from above — only the width store
+      // notified — so a second call proves the element's own
+      // useWindowDimensions() subscription is what triggered this, not an
+      // external re-render.
+      expect(mockResolveStyle).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not add any reactivity overhead for an element with no responsive class', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex bg-blue-6' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        setMockWidth(900);
+      });
+      // Nothing subscribed this element to the width store, so it never
+      // re-renders — same reasoning as the dark: no-overhead test above.
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+    });
+
+    it('composes with dark: on the same element — either changing re-resolves it', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'bg-blue-6 dark:bg-blue-8 md:flex-row' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        setMockWidth(900);
+      });
+      expect(mockResolveStyle).toHaveBeenCalledTimes(2);
+
+      act(() => {
+        toggleGlobalDarkMode();
+      });
+      expect(mockResolveStyle).toHaveBeenCalledTimes(3);
     });
   });
 });

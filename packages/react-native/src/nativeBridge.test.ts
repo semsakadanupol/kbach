@@ -87,4 +87,47 @@ describe('nativeBridge', () => {
     resolveStyle('dark:bg-blue-8');
     expect(mockResolveStyle).toHaveBeenCalledWith('dark:bg-blue-8', expect.any(String), 'dark', false, expect.any(Number));
   });
+
+  describe('__kbachWarnings (native/JNI path)', () => {
+    it('strips the __kbachWarnings key out of the returned style object', async () => {
+      mockResolveStyle.mockReturnValue('{"width":"50%","__kbachWarnings":["some warning"]}');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { resolveStyle } = await import('./nativeBridge');
+      expect(resolveStyle('w-1/2 w-[calc(50%-8px)]')).toEqual({ width: '50%' });
+      warnSpy.mockRestore();
+    });
+
+    it('console.warns each embedded warning, including the className that produced it', async () => {
+      mockResolveStyle.mockReturnValue('{"__kbachWarnings":["Kbach: bad value"]}');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { resolveStyle } = await import('./nativeBridge');
+      resolveStyle('w-[calc(50%-8px)]');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]![0]).toContain('Kbach: bad value');
+      expect(warnSpy.mock.calls[0]![0]).toContain('w-[calc(50%-8px)]');
+      warnSpy.mockRestore();
+    });
+
+    it('does not warn at all when there are no warnings', async () => {
+      mockResolveStyle.mockReturnValue('{"display":"flex"}');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { resolveStyle } = await import('./nativeBridge');
+      resolveStyle('flex');
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('warnings from the jsEngine fallback path (Expo Go)', () => {
+    it('console.warns when the JS engine drops an unresolvable arbitrary value', async () => {
+      mockGet.mockReturnValue(null);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { resolveStyle } = await import('./nativeBridge');
+      const style = resolveStyle('w-[calc(50%-8px)]');
+      expect(style.width).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]![0]).toContain('calc(50%-8px)');
+      warnSpy.mockRestore();
+    });
+  });
 });

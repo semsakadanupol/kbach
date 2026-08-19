@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveStyleJs } from './resolveStyle';
+import { resolveStyleJs, resolveStyleJsWithWarnings } from './resolveStyle';
 import type { ThemeConfig } from '../theme';
 
 /**
@@ -260,5 +260,31 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('text-lg', theme(), 'light', false, W).fontSize).toBe(18);
     expect(resolveStyleJs('text-center', theme(), 'light', false, W).textAlign).toBe('center');
     expect(resolveStyleJs('text-blue-6', theme(), 'light', false, W).color).toBe('#2563eb');
+  });
+
+  it('resolves a constant-only arbitrary calc() to a plain number', () => {
+    expect(resolveStyleJs('p-[calc(16px+8px)]', theme(), 'light', false, W).padding).toBe(24);
+  });
+
+  it('resolves a constant-only arbitrary clamp() to its clamped number', () => {
+    expect(resolveStyleJs('w-[clamp(1rem,2rem,3rem)]', theme(), 'light', false, W).width).toBe(32);
+  });
+
+  it('drops an unreducible percentage-relative calc() and returns a warning', () => {
+    const { style, warnings } = resolveStyleJsWithWarnings('w-[calc(50%-0.5rem)]', theme(), 'light', false, W);
+    expect(style.width).toBeUndefined();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('calc(50%-0.5rem)');
+    expect(warnings[0]).toContain('width');
+  });
+
+  it('resolveStyleJs without warnings still drops the same invalid value', () => {
+    expect(resolveStyleJs('w-[calc(50%-0.5rem)]', theme(), 'light', false, W).width).toBeUndefined();
+  });
+
+  it('a plain percentage still passes through without any warning', () => {
+    const { style, warnings } = resolveStyleJsWithWarnings('w-1/2', theme(), 'light', false, W);
+    expect(style.width).toBe('50%');
+    expect(warnings).toHaveLength(0);
   });
 });

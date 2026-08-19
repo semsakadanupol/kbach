@@ -14,6 +14,7 @@
  */
 import { parseClass } from './parser';
 import { resolveUtilityNative } from './resolveUtilityNative';
+import { reduceConstantMath } from './calc';
 import type { ThemeConfig } from '../theme';
 import type { StyleObject } from '../nativeBridge';
 
@@ -55,27 +56,80 @@ const NUMERIC_LENGTH_PROPS = new Set([
   'outline-width', 'outline-offset',
 ]);
 
-/** Converts a resolved CSS value into its RN-correct JSON shape (strips `px`, converts `rem` × 16, or passes the raw string through — e.g. an arbitrary "50%"). */
-function rnStyleValue(property: string, value: string): string | number {
-  if (NUMERIC_LENGTH_PROPS.has(property)) {
-    let px: number | null = null;
-    if (value.endsWith('px')) {
-      const n = Number(value.slice(0, -2));
-      px = Number.isFinite(n) ? n : null;
-    } else if (value.endsWith('rem')) {
-      const n = Number(value.slice(0, -3));
-      px = Number.isFinite(n) ? n * 16 : null;
-    } else {
-      const n = Number(value);
-      px = value.trim() !== '' && Number.isFinite(n) ? n : null;
-    }
-    if (px !== null) return px;
-  }
-  return value;
+/** A bare percentage string ("50%", "-33.3%") — see resolve_style.rs's `is_plain_percentage` for why this must be "nothing but a percentage", not just "contains one" (a calc() string can contain a % and still be invalid). */
+function isPlainPercentage(value: string): boolean {
+  if (!value.endsWith('%')) return false;
+  let digits = value.slice(0, -1);
+  if (digits.startsWith('-')) digits = digits.slice(1);
+  return digits.length > 0 && /^[0-9.]+$/.test(digits);
 }
 
-export function resolveStyleJs(classString: string, theme: ThemeConfig, colorScheme: string, pressed: boolean, width: number): StyleObject {
+/**
+ * Converts a resolved CSS value into its RN-correct JSON shape, mirroring
+ * resolve_style.rs's `rn_style_value` exactly (see that function's own doc
+ * comment for the full reasoning): strips `px`; converts `rem` × 16; parses
+ * a bare numeric string; passes a plain percentage through as-is; reduces a
+ * CONSTANT-ONLY `calc()`/`clamp()`/`min()`/`max()` to a single px number
+ * (see `./calc.ts`); anything past all of that (an unreduced
+ * percentage/viewport-relative calc(), a raw `var(...)`, ...) returns `null`
+ * for the value alongside a warning message, meaning the caller must DROP
+ * that declaration entirely rather than shipping an invalid string into
+ * RN's style object.
+ */
+function rnStyleValue(property: string, value: string): { value: string | number | null; warning: string | null } {
+  if (!NUMERIC_LENGTH_PROPS.has(property)) {
+    return { value, warning: null };
+  }
+
+  let px: number | null = null;
+  if (value.endsWith('px')) {
+    const n = Number(value.slice(0, -2));
+    px = Number.isFinite(n) ? n : null;
+  } else if (value.endsWith('rem')) {
+    const n = Number(value.slice(0, -3));
+    px = Number.isFinite(n) ? n * 16 : null;
+  } else {
+    const n = Number(value);
+    px = value.trim() !== '' && Number.isFinite(n) ? n : null;
+  }
+  if (px !== null) return { value: px, warning: null };
+
+  if (isPlainPercentage(value)) {
+    return { value, warning: null };
+  }
+
+  const reduced = reduceConstantMath(value);
+  if (reduced !== null) {
+    return { value: reduced, warning: null };
+  }
+
+  const warning =
+    `Kbach: "${value}" is not a valid native value for "${property}" — dropped. ` +
+    'calc()/clamp()/min()/max() only resolve on native when every operand is a ' +
+    'constant px/rem length (no %, vw, vh, var(), or other viewport/CSS-variable ' +
+    "units — those need real layout/DOM, which doesn't exist on native at paint " +
+    'time). Use a plain px/rem calc, a fraction utility (e.g. w-1/2), or resolve ' +
+    'this value in JS instead.';
+  return { value: null, warning };
+}
+
+/**
+ * Same resolution `resolveStyleJs` does, plus the list of dev-facing
+ * warnings generated along the way (see `rnStyleValue`) — a separate
+ * function rather than changing `resolveStyleJs`'s own return type so its
+ * many existing call sites (which only ever care about the style object)
+ * don't all need updating for a concern most of them never hit. Mirrors
+ * resolve_style.rs's own `resolve_style_with_warnings`/`resolve_style` split.
+ */
+export function resolveStyleJsWithWarnings(
+  classString: string,
+  theme: ThemeConfig,
+  colorScheme: string,
+  pressed: boolean,
+  width: number,
+): { style: StyleObject; warnings: string[] } {
   const style: StyleObject = {};
+  const warnings: string[] = [];
   let shadowOffset: { width?: number; height?: number } | null = null;
 
   for (const token of classString.split(/\s+/).filter(Boolean)) {
@@ -100,7 +154,9 @@ export function resolveStyleJs(classString: string, theme: ThemeConfig, colorSch
         shadowOffset[d.property === 'shadow-offset-x' ? 'width' : 'height'] = n;
         continue;
       }
-      style[kebabToCamel(d.property)] = rnStyleValue(d.property, d.value);
+      const { value, warning } = rnStyleValue(d.property, d.value);
+      if (warning !== null) warnings.push(warning);
+      if (value !== null) style[kebabToCamel(d.property)] = value;
     }
   }
 
@@ -108,5 +164,9 @@ export function resolveStyleJs(classString: string, theme: ThemeConfig, colorSch
     style.shadowOffset = { width: shadowOffset.width ?? 0, height: shadowOffset.height ?? 0 };
   }
 
-  return style;
+  return { style, warnings };
+}
+
+export function resolveStyleJs(classString: string, theme: ThemeConfig, colorScheme: string, pressed: boolean, width: number): StyleObject {
+  return resolveStyleJsWithWarnings(classString, theme, colorScheme, pressed, width).style;
 }

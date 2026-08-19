@@ -2,7 +2,7 @@ import { Dimensions, TurboModuleRegistry } from 'react-native';
 import type { TurboModule } from 'react-native';
 import { getTheme, getThemeJson } from './theme';
 import { getGlobalDarkMode } from './darkModeStore';
-import { resolveStyleJs } from './jsEngine/resolveStyle';
+import { resolveStyleJsWithWarnings } from './jsEngine/resolveStyle';
 
 // A plain string/number style value, OR the one nested shape RN's own style
 // system has no flat equivalent for — `shadowOffset: {width, height}`,
@@ -100,14 +100,43 @@ interface Spec extends TurboModule {
  * exactly as before. The JS engine covers a strict subset of what the
  * native/WASM engines resolve (see jsEngine/resolveUtilityNative.ts) — an
  * intentional, documented parity gap, not a bug.
+ *
+ * An arbitrary value that couldn't be resolved to something RN's style
+ * system can actually use (an unreduced percentage/viewport-relative
+ * `calc()`, a raw `var(...)`, ...) is dropped from the returned style —
+ * never passed through as an invalid string — and surfaced via
+ * `console.warn` here (dev builds only, mirroring RN's own convention for
+ * this kind of non-fatal correctness warning) rather than failing
+ * silently. The native/JNI path embeds these under a `"__kbachWarnings"`
+ * key in the same JSON `resolve_style_json` already returns (see that
+ * function's own doc comment for why — reusing the one JSON round-trip
+ * rather than adding a second FFI call); the jsEngine fallback returns
+ * them directly via `resolveStyleJsWithWarnings`. Both paths converge here
+ * so call sites never need to know which engine actually resolved anything.
  */
 export function resolveStyle(classString: string, pressed = false): StyleObject {
   const colorScheme = getGlobalDarkMode() ? 'dark' : 'light';
   const width = Dimensions.get('window').width;
   const KbachModule = TurboModuleRegistry.get<Spec>('KbachModule');
   if (!KbachModule) {
-    return resolveStyleJs(classString, getTheme(), colorScheme, pressed, width);
+    const { style, warnings } = resolveStyleJsWithWarnings(classString, getTheme(), colorScheme, pressed, width);
+    warnIfDev(classString, warnings);
+    return style;
   }
   const json = KbachModule.resolveStyle(classString, getThemeJson(), colorScheme, pressed, width);
-  return JSON.parse(json) as StyleObject;
+  const style = JSON.parse(json) as StyleObject & { __kbachWarnings?: string[] };
+  const warnings = style.__kbachWarnings;
+  if (warnings !== undefined) {
+    delete style.__kbachWarnings;
+    warnIfDev(classString, warnings);
+  }
+  return style;
+}
+
+function warnIfDev(classString: string, warnings: string[]): void {
+  if (warnings.length === 0) return;
+  if (typeof __DEV__ !== 'undefined' && !__DEV__) return;
+  for (const warning of warnings) {
+    console.warn(`${warning} (from className "${classString}")`);
+  }
 }

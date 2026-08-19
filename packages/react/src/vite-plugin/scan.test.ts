@@ -61,6 +61,31 @@ describe('extractClassStrings', () => {
     const code = `function add(a, b) { return a + b; }`;
     expect(extractClassStrings(code)).toEqual([]);
   });
+
+  it('does not tokenize a backtick span inside a line comment', () => {
+    const code = "// try `flex items-center` for centering\nfunction add(a, b) { return a + b; }";
+    expect(extractClassStrings(code)).toEqual([]);
+  });
+
+  it('does not tokenize a backtick span inside a block comment', () => {
+    const code = '/** @example <div className={`flex items-center`} /> */\nfunction add(a, b) { return a + b; }';
+    expect(extractClassStrings(code)).toEqual([]);
+  });
+
+  it('does not tokenize a commented-out className attribute', () => {
+    const code = '// <div className="bg-blue-6 p-4" />\nconst x = 1;';
+    expect(extractClassStrings(code)).toEqual([]);
+  });
+
+  it('still extracts real classes on the line right after a comment containing a backtick span', () => {
+    const code = "// try `flex items-center` for centering\n<div className=\"bg-blue-6\" />";
+    expect(extractClassStrings(code)).toEqual(['bg-blue-6']);
+  });
+
+  it('does not treat "//" inside a real string as a comment start', () => {
+    const code = `<a className="p-4" href="https://example.com">link</a>`;
+    expect(extractClassStrings(code)).toEqual(expect.arrayContaining(['p-4']));
+  });
 });
 
 describe('scanUsedTags', () => {
@@ -88,5 +113,10 @@ describe('scanUsedTags', () => {
 
   it('detects a bare tag with no attributes and no children', () => {
     expect(scanUsedTags(`<p>text</p>`).has('p')).toBe(true);
+  });
+
+  it('ignores a tag mentioned only inside a comment', () => {
+    const code = '// <video src="x.mp4" />\nfunction add(a, b) { return a + b; }';
+    expect(scanUsedTags(code).size).toBe(0);
   });
 });

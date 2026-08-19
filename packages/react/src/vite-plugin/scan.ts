@@ -8,6 +8,88 @@
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 
+/**
+ * Strips `//` and `/* *­/` comments out of `code` before any extraction rule
+ * below runs, WITHOUT touching string/template content (a "//" inside a URL
+ * string must survive). Without this, a JSDoc example like
+ * `` // try `flex items-center` for centering `` gets tokenized as two real
+ * classes by the unconditional template-literal rule further down — this
+ * pre-pass fixes that for every rule at once, not just that one, since a
+ * commented-out `className="..."` attribute has the identical problem.
+ *
+ * Deliberately not a full JS/TS tokenizer: a template literal's `${...}`
+ * interpolation is tracked only via brace depth (consistent with
+ * `pushTemplateLiteralBody`'s own one-level nesting elsewhere in this
+ * file), so a comment genuinely nested inside an interpolation's own
+ * expression isn't stripped — a rare case, and failing to strip it there
+ * only risks under-stripping, never the false-positive class extraction
+ * this function exists to prevent.
+ */
+function stripComments(code: string): string {
+  let out = '';
+  let i = 0;
+  const n = code.length;
+
+  while (i < n) {
+    const two = code[i]! + (code[i + 1] ?? '');
+
+    if (two === '//') {
+      i += 2;
+      while (i < n && code[i] !== '\n') i++;
+      continue;
+    }
+    if (two === '/*') {
+      i += 2;
+      while (i < n && code[i] + (code[i + 1] ?? '') !== '*/') i++;
+      i += 2;
+      continue;
+    }
+
+    const ch = code[i]!;
+    if (ch === '"' || ch === "'") {
+      out += ch;
+      i++;
+      while (i < n && code[i] !== ch) {
+        if (code[i] === '\\') { out += code[i]! + (code[i + 1] ?? ''); i += 2; continue; }
+        out += code[i];
+        i++;
+      }
+      out += code[i] ?? '';
+      i++;
+      continue;
+    }
+    if (ch === '`') {
+      out += ch;
+      i++;
+      let interpolationDepth = 0;
+      while (i < n) {
+        if (interpolationDepth === 0 && code[i] === '`') { out += code[i]; i++; break; }
+        if (interpolationDepth === 0 && code[i] === '\\') { out += code[i]! + (code[i + 1] ?? ''); i += 2; continue; }
+        if (interpolationDepth === 0 && code[i] + (code[i + 1] ?? '') === '${') {
+          out += '${';
+          i += 2;
+          interpolationDepth = 1;
+          continue;
+        }
+        if (interpolationDepth > 0) {
+          if (code[i] === '{') interpolationDepth++;
+          else if (code[i] === '}') {
+            interpolationDepth--;
+            if (interpolationDepth === 0) { out += '}'; i++; continue; }
+          }
+        }
+        out += code[i];
+        i++;
+      }
+      continue;
+    }
+
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 function splitClassTokens(str: string): string[] {
   return str.split(/\s+/).filter(Boolean);
 }
@@ -57,15 +139,17 @@ const JSX_TAG_RE = /<([a-z][a-zA-Z0-9]*)[\s/>]/g;
 
 /** Exported for tests only — internal to the plugin otherwise. */
 export function scanUsedTags(code: string): Set<string> {
+  const cleaned = stripComments(code);
   const tags = new Set<string>();
   let m: RegExpExecArray | null;
   JSX_TAG_RE.lastIndex = 0;
-  while ((m = JSX_TAG_RE.exec(code)) !== null) tags.add(m[1]!);
+  while ((m = JSX_TAG_RE.exec(cleaned)) !== null) tags.add(m[1]!);
   return tags;
 }
 
 /** Exported for tests only — internal to the plugin otherwise. */
-export function extractClassStrings(code: string): string[] {
+export function extractClassStrings(rawCode: string): string[] {
+  const code = stripComments(rawCode);
   const found = new Set<string>();
 
   // 1. Simple string attrs: className="..." or kb="...".

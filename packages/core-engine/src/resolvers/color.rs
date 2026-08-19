@@ -61,6 +61,12 @@ pub(super) fn color_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<S
 }
 
 fn hex_to_rgb(hex: &str) -> Option<(u8, u8, u8)> {
+    // Byte-slices below assume 1 byte == 1 char; reject non-ASCII up front
+    // (e.g. an arbitrary value like `bg-[#café1]`) so a multi-byte codepoint
+    // can't land mid-slice and panic on a non-char-boundary index.
+    if !hex.is_ascii() {
+        return None;
+    }
     match hex.len() {
         6 => Some((
             u8::from_str_radix(&hex[0..2], 16).ok()?,
@@ -309,6 +315,24 @@ mod tests {
         assert_eq!(resolve(&parse_class("stroke-blue-6/50"), &theme), Some(vec![decl("stroke", "rgba(37,99,235,0.5)")]));
         assert_eq!(resolve(&parse_class("caret-blue-6/50"), &theme), Some(vec![decl("caret-color", "rgba(37,99,235,0.5)")]));
         assert_eq!(resolve(&parse_class("accent-blue-6/50"), &theme), Some(vec![decl("accent-color", "rgba(37,99,235,0.5)")]));
+    }
+
+    #[test]
+    fn hex_to_rgb_rejects_non_ascii_instead_of_panicking() {
+        // "café1" is 6 bytes but 5 chars — byte-slicing this without an
+        // ASCII check panics on a non-char-boundary index.
+        assert_eq!(hex_to_rgb("café1"), None);
+        assert_eq!(hex_to_rgb("é"), None);
+    }
+
+    #[test]
+    fn resolves_arbitrary_bg_color_with_non_ascii_hex_without_panicking() {
+        let theme = theme_with_colors();
+        let decls = resolve(&parse_class("bg-[#café1]"), &theme).unwrap();
+        // Not a valid hex value, so it's passed through as-is rather than
+        // decomposed into an rgba() — the important assertion is that this
+        // doesn't panic.
+        assert_eq!(decls, vec![decl("background-color", "#café1")]);
     }
 
     #[test]

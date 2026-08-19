@@ -34,6 +34,39 @@ workspaces (see their own `metro.config.js` doc comments for why) and need
 their own `npm install` from inside each directory, plus an Android/Java
 toolchain for native builds.
 
+### ⚠️ The Android native module is a PREBUILT BINARY — it will NOT
+### rebuild itself from a Rust change
+
+`packages/react-native/android/src/main/jniLibs/{arm64-v8a,x86_64}/
+libkbach_core_engine.so` are compiled binaries committed directly into the
+published `@kbach/react-native` package — unlike a real Gradle-native-build
+setup, they are **not** cross-compiled from Rust source at a consumer's own
+build time. Changing anything in `packages/core-engine/src/` and running
+the usual `npm run build` (wasm-pack, web/Node targets) does **not** touch
+these files.
+
+`packages/core-engine`'s own `npm run build` now runs `build:android` too,
+automatically, as its last step — but only when `cargo-ndk` + the Android
+NDK are actually available and locatable *in that exact process's
+environment*. This has been observed to succeed when run directly
+(`cd packages/core-engine && npm run build`) but silently fail to find the
+NDK when run via `npx turbo run build` on Windows/Git Bash, even with an
+otherwise-identical shell environment — a real, unresolved env-propagation
+quirk, not a config oversight. When it can't run, it warns loudly instead
+of either silently succeeding or failing the whole pipeline — **read the
+build output**, don't assume a green build means the `.so` is current.
+
+If you're not sure, verify directly rather than trust the log:
+```sh
+grep -ao "<some string unique to your Rust change>" \
+  packages/react-native/android/src/main/jniLibs/arm64-v8a/libkbach_core_engine.so
+```
+A real device/CLI native build failing to reflect a Rust change, with zero
+errors anywhere, is exactly what a stale `.so` looks like — this already
+happened once for real (calc()/warnings/typo-detection shipped fully wired
+up in JS/TS while the actual compiled binary was still running days-old
+code) before this safeguard existed.
+
 ## License
 
 MIT

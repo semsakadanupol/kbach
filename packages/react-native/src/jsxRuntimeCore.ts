@@ -1,22 +1,24 @@
 /**
- * Shared className-interception logic behind both jsx-runtime.tsx (native)
- * and jsx-runtime.web.tsx (Expo Web / react-native-web) — see either
- * file's own doc comment for why there have to be two separate entry
- * files at all (short version: @kbach/react-native ships pre-built dist/
- * output, and Metro's `.web.js` platform-extension resolution only swaps
- * between two already-built sibling files, not source-level imports a
- * single tsup/esbuild build already flattened away). This file holds
- * every bit of interception behavior that's IDENTICAL between the two —
- * only which `resolveStyle` implementation gets called differs, injected
- * by the caller via `createJsxFunctions`.
+ * className-interception logic behind jsx-runtime.tsx — the NATIVE
+ * (Android/iOS) entry only. Expo Web / react-native-web goes through
+ * jsxRuntimeCoreWeb.ts instead (real CSS + `dataSet`, not a resolved
+ * `style` object — genuinely different interception behavior, not just a
+ * different resolve function, since real CSS selectors already react to a
+ * DOM attribute change on their own with no React re-render involved at
+ * all; see that file's own doc comment). See jsx-runtime.tsx's doc comment
+ * for why native and web need to be separate entry files in the first
+ * place (short version: @kbach/react-native ships pre-built dist/ output,
+ * and Metro's `.web.js` platform-extension resolution only swaps between
+ * two already-built sibling files, not source-level imports a single
+ * tsup/esbuild build already flattened away).
  */
 import { jsx as _jsx, jsxs as _jsxs } from 'react/jsx-runtime';
-import { Fragment } from 'react';
+import { Fragment, useSyncExternalStore } from 'react';
 import { Pressable } from 'react-native';
 import type { ReactElement } from 'react';
 import type { PressableStateCallbackType } from 'react-native';
 import type { StyleObject } from './nativeBridge';
-import { getGlobalDarkMode } from './darkModeStore';
+import { getGlobalDarkMode, subscribeGlobalDarkMode } from './darkModeStore';
 
 export { Fragment };
 export type { JSX } from 'react';
@@ -49,24 +51,76 @@ const DARK_MODIFIER_RE = /(^|\s)dark:/;
 /**
  * A `dark:`-bearing element needs a key suffix that changes whenever the
  * global dark-mode state does — confirmed by hand against a real Expo Go
- * app: toggling dark mode re-renders the component that calls `useTheme()`
- * (so a value it reads directly, like `mode`, updates on screen correctly)
- * and `resolveStyle` genuinely returns the new colors on that re-render —
- * but React Native's own reconciler doesn't repaint an ALREADY-MOUNTED host
- * component (View/Text/Pressable) just because its `style` prop holds new
- * VALUES; forcing a remount via a changed `key` is what actually made the
- * new colors show. Scoped to elements whose className literally contains
- * "dark:" (a cheap regex test) rather than applied unconditionally, so an
- * element with no mode-dependent styling never remounts for no reason.
- * `sm:`/`md:`/etc. likely have the identical underlying issue (same "a live
- * JS parameter, no React state, no built-in re-render-triggers-repaint
- * guarantee" shape as dark: — see nativeBridge.ts's own width parameter
- * doc comment) but haven't been confirmed broken the same way, so this
- * deliberately stays scoped to dark: for now rather than guessing at a fix
- * for an unconfirmed problem.
+ * app: React Native's own reconciler doesn't reliably repaint an
+ * ALREADY-MOUNTED host component (View/Text/Pressable) just because its
+ * `style` prop holds new VALUES; forcing a remount via a changed `key` is
+ * what actually made the new colors show. Scoped to elements whose
+ * className literally contains "dark:" (a cheap regex test) rather than
+ * applied unconditionally, so an element with no mode-dependent styling
+ * never remounts for no reason. `sm:`/`md:`/etc. likely have the identical
+ * underlying issue (same "a live JS parameter, no React state, no built-in
+ * re-render-triggers-repaint guarantee" shape as dark: — see
+ * nativeBridge.ts's own width parameter doc comment) but haven't been
+ * confirmed broken the same way, so this deliberately stays scoped to
+ * dark: for now rather than guessing at a fix for an unconfirmed problem.
  */
 function darkModeKeySuffix(classStrRaw: string): string {
   return DARK_MODIFIER_RE.test(classStrRaw) ? `:kb-dark-${getGlobalDarkMode()}` : '';
+}
+
+interface DarkAwareProps {
+  hostType: unknown;
+  hostRest: Record<string, unknown>;
+  classStrRaw: string;
+  userStyle: unknown;
+  resolveStyle: ResolveStyleFn;
+  elementKey: string | undefined;
+  isStaticChildren: boolean;
+}
+
+/**
+ * A `dark:`-bearing element gets wrapped in this tiny component instead of
+ * being emitted as a plain host element directly. `jsx()`/`jsxs()` are
+ * plain functions invoked synchronously as part of whatever OTHER
+ * component's render body wrote the JSX — they can't call hooks themselves
+ * (they run conditionally/in loops along with the surrounding JSX, which
+ * would violate the rules of hooks), so on their own they only ever read
+ * `getGlobalDarkMode()` once, at whatever moment that surrounding component
+ * happened to render. If nothing in the tree ever calls `useTheme()` (or
+ * otherwise subscribes to the store) near enough to this element to force
+ * it to render again — the common case, since `<ThemeProvider>` itself
+ * deliberately doesn't subscribe (see its own doc comment) and most
+ * screens never call `useTheme()` at all — a `dark:`-bearing element's
+ * colors would silently freeze at whatever the mode was on first mount,
+ * never reacting to `setGlobalThemeMode()`/`toggleGlobalDarkMode()` calls
+ * or a live OS appearance change again.
+ *
+ * This component fixes that by subscribing to darkModeStore itself, via
+ * `useSyncExternalStore` — a REAL React component can call hooks, so this
+ * one re-renders on every dark-mode change independent of what any
+ * ancestor does, recomputing both the resolved style and the
+ * `darkModeKeySuffix`-forced remount key fresh each time.
+ */
+function DarkAwareElement({
+  hostType,
+  hostRest,
+  classStrRaw,
+  userStyle,
+  resolveStyle,
+  elementKey,
+  isStaticChildren,
+}: DarkAwareProps): ReactElement {
+  useSyncExternalStore(subscribeGlobalDarkMode, getGlobalDarkMode);
+
+  const finalStyle =
+    hostType === Pressable
+      ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed)
+      : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false);
+
+  const suffix = darkModeKeySuffix(classStrRaw);
+  const finalKey = suffix ? `${elementKey ?? ''}${suffix}` : elementKey;
+
+  return makeElement(isStaticChildren, hostType, { ...hostRest, style: finalStyle }, finalKey);
 }
 
 function processElement(
@@ -88,6 +142,14 @@ function processElement(
     return makeElement(isStaticChildren, type, rawProps, key);
   }
 
+  if (DARK_MODIFIER_RE.test(classStrRaw)) {
+    return _jsx(
+      DarkAwareElement,
+      { hostType: type, hostRest: rest, classStrRaw, userStyle, resolveStyle, elementKey: key, isStaticChildren },
+      key,
+    ) as ReactElement;
+  }
+
   // Pressable is the one component that knows press state at all — style
   // becomes a function so active: can react to it. Every other type keeps
   // the plain, static resolution it always had (pressed is always false).
@@ -96,10 +158,7 @@ function processElement(
       ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed)
       : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false);
 
-  const suffix = darkModeKeySuffix(classStrRaw);
-  const finalKey = suffix ? `${key ?? ''}${suffix}` : key;
-
-  return makeElement(isStaticChildren, type, { ...rest, style: finalStyle }, finalKey);
+  return makeElement(isStaticChildren, type, { ...rest, style: finalStyle }, key);
 }
 
 /**

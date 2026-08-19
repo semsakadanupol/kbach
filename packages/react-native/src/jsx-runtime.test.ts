@@ -1,6 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { act } from 'react';
+import TestRenderer from 'react-test-renderer';
 
-const mockResolveStyle = vi.fn((classString: string, pressed?: boolean) => ({ resolved: classString, pressed: pressed ?? false }));
+// A STATIC top-level `import './darkModeStore'` here would force it (and
+// the 'react-native' it imports) to evaluate before this file's own
+// `const MockPressable` below has run — the mocked 'react-native' factory
+// closes over MockPressable, so that ordering throws a
+// "Cannot access 'MockPressable' before initialization" TDZ error. Every
+// real import in this file is deferred (dynamic `import()`, populating
+// these) for exactly that reason — darkModeStore.ts is no exception.
+let getGlobalDarkMode: () => boolean;
+let toggleGlobalDarkMode: () => void;
+
+// Reads the CURRENT dark-mode state at call time (mirroring how the real
+// nativeBridge.ts's resolveStyle reads getGlobalDarkMode() internally,
+// rather than being told the mode via a parameter) — needed so the dark:
+// reactivity tests below can actually observe a value changing across a
+// re-render, not just a call count.
+const mockResolveStyle = vi.fn((classString: string, pressed?: boolean) => ({
+  resolved: classString,
+  pressed: pressed ?? false,
+  dark: getGlobalDarkMode(),
+}));
 
 vi.mock('./nativeBridge', () => ({
   resolveStyle: mockResolveStyle,
@@ -24,22 +45,26 @@ vi.mock('react-native', () => ({
 }));
 
 describe('jsx-runtime (react-native)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    const store = await import('./darkModeStore');
+    getGlobalDarkMode = store.getGlobalDarkMode;
+    toggleGlobalDarkMode = store.toggleGlobalDarkMode;
+    store._resetForTests();
   });
 
   it('resolves a plain-string className into the style prop, not className', async () => {
     const { jsx } = await import('./jsx-runtime');
     const el = jsx('View', { className: 'flex items-center' }, undefined);
     expect(mockResolveStyle).toHaveBeenCalledWith('flex items-center', false);
-    expect((el as any).props.style).toEqual({ resolved: 'flex items-center', pressed: false });
+    expect((el as any).props.style).toEqual({ resolved: 'flex items-center', pressed: false, dark: false });
     expect((el as any).props.className).toBeUndefined();
   });
 
   it('merges an explicit inline style prop AFTER the resolved style (explicit wins on overlap)', async () => {
     const { jsx } = await import('./jsx-runtime');
     const el = jsx('View', { className: 'bg-blue-6', style: { opacity: 0.5 } }, undefined);
-    expect((el as any).props.style).toEqual([{ resolved: 'bg-blue-6', pressed: false }, { opacity: 0.5 }]);
+    expect((el as any).props.style).toEqual([{ resolved: 'bg-blue-6', pressed: false, dark: false }, { opacity: 0.5 }]);
   });
 
   it('forwards unrelated props and children unchanged', async () => {
@@ -76,7 +101,7 @@ describe('jsx-runtime (react-native)', () => {
     const { jsxs } = await import('./jsx-runtime');
     const el = jsxs('View', { className: 'flex-row', children: ['a', 'b'] }, undefined);
     expect(mockResolveStyle).toHaveBeenCalledWith('flex-row', false);
-    expect((el as any).props.style).toEqual({ resolved: 'flex-row', pressed: false });
+    expect((el as any).props.style).toEqual({ resolved: 'flex-row', pressed: false, dark: false });
   });
 
   it('gives Pressable a style FUNCTION instead of a static value', async () => {
@@ -94,10 +119,10 @@ describe('jsx-runtime (react-native)', () => {
     const el = jsx(Pressable, { className: 'active:bg-blue-8' }, undefined);
     const styleFn = (el as any).props.style as (state: { pressed: boolean }) => unknown;
 
-    expect(styleFn({ pressed: false })).toEqual({ resolved: 'active:bg-blue-8', pressed: false });
+    expect(styleFn({ pressed: false })).toEqual({ resolved: 'active:bg-blue-8', pressed: false, dark: false });
     expect(mockResolveStyle).toHaveBeenLastCalledWith('active:bg-blue-8', false);
 
-    expect(styleFn({ pressed: true })).toEqual({ resolved: 'active:bg-blue-8', pressed: true });
+    expect(styleFn({ pressed: true })).toEqual({ resolved: 'active:bg-blue-8', pressed: true, dark: false });
     expect(mockResolveStyle).toHaveBeenLastCalledWith('active:bg-blue-8', true);
   });
 
@@ -108,50 +133,76 @@ describe('jsx-runtime (react-native)', () => {
     const el = jsx(Pressable, { className: 'bg-blue-6', style: userStyleFn }, undefined);
     const styleFn = (el as any).props.style as (state: { pressed: boolean }) => unknown;
 
-    expect(styleFn({ pressed: true })).toEqual([{ resolved: 'bg-blue-6', pressed: true }, { opacity: 0.5 }]);
+    expect(styleFn({ pressed: true })).toEqual([{ resolved: 'bg-blue-6', pressed: true, dark: false }, { opacity: 0.5 }]);
     expect(userStyleFn).toHaveBeenCalledWith({ pressed: true });
   });
 
-  // React Native's reconciler doesn't repaint an already-mounted host
-  // component just because its `style` prop's VALUES changed (confirmed
-  // by hand against a real Expo Go app) — a `dark:`-bearing element's key
-  // is suffixed with the current dark state specifically so a toggle
-  // forces a remount instead. See jsxRuntimeCore.ts's darkModeKeySuffix
-  // doc comment for the full story.
-  describe('dark: key suffix (forces a remount on dark-mode change)', () => {
-    it('leaves the key untouched for an element with no "dark:" class at all', async () => {
+  // A `dark:`-bearing element is wrapped in its own self-subscribing
+  // component (DarkAwareElement, in jsxRuntimeCore.ts) specifically so it
+  // recomputes on its own whenever the global dark-mode state changes —
+  // with NO ancestor (no <ThemeProvider>, no useTheme() call anywhere)
+  // needed in these trees at all. That self-sufficiency is exactly what
+  // these tests exercise: unlike the tests above, they render through a
+  // real TestRenderer instead of just inspecting jsx()'s synchronous
+  // return value, since the fix now depends on an actual hook lifecycle
+  // (useSyncExternalStore), not a value read once at JSX-creation time.
+  describe('dark: reactivity (recomputes on its own, with no ancestor subscribed)', () => {
+    it('resolves once on mount, reflecting the current dark state', async () => {
       const { jsx } = await import('./jsx-runtime');
-      const el = jsx('View', { className: 'flex bg-blue-6' }, 'my-key');
-      expect((el as any).key).toBe('my-key');
+      const el = jsx('View', { className: 'bg-blue-6 dark:bg-blue-8' }, undefined);
+      act(() => {
+        TestRenderer.create(el);
+      });
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+      expect(mockResolveStyle).toHaveBeenCalledWith('bg-blue-6 dark:bg-blue-8', false);
     });
 
-    it('leaves an undefined key as undefined when there is no "dark:" class', async () => {
+    it('re-resolves on its own when the store changes, picking up the new dark state', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'bg-blue-6 dark:bg-blue-8' }, undefined);
+
+      let renderer: TestRenderer.ReactTestRenderer | undefined;
+      act(() => {
+        renderer = TestRenderer.create(el);
+      });
+      expect(renderer!.root.findByType('View' as any).props.style).toMatchObject({ dark: false });
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        toggleGlobalDarkMode();
+      });
+
+      expect(mockResolveStyle).toHaveBeenCalledTimes(2);
+      expect(renderer!.root.findByType('View' as any).props.style).toMatchObject({ dark: true });
+    });
+
+    it('does not add any reactivity overhead for an element with no "dark:" class', async () => {
       const { jsx } = await import('./jsx-runtime');
       const el = jsx('View', { className: 'flex bg-blue-6' }, undefined);
-      expect((el as any).key).toBeNull(); // React normalizes a missing key to null on the element
+      act(() => {
+        TestRenderer.create(el);
+      });
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        toggleGlobalDarkMode();
+      });
+      // Nothing subscribed this element to the store, so it never re-renders
+      // — same as before this fix, and exactly why the fix is scoped to
+      // dark:-bearing elements only.
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
     });
 
-    it('appends a dark-state suffix to the key for an element with a "dark:" class', async () => {
+    it('Pressable keeps its style-function shape even when wrapped for dark:', async () => {
+      const { Pressable } = await import('react-native');
       const { jsx } = await import('./jsx-runtime');
-      const el = jsx('View', { className: 'bg-blue-6 dark:bg-blue-8' }, 'my-key');
-      expect((el as any).key).toBe('my-key:kb-dark-false');
-    });
+      const el = jsx(Pressable, { className: 'bg-blue-6 dark:bg-blue-8 active:bg-blue-9' }, undefined);
 
-    it('suffixes even a previously-undefined key, so the element remounts on toggle', async () => {
-      const { jsx } = await import('./jsx-runtime');
-      const el = jsx('View', { className: 'dark:bg-blue-8' }, undefined);
-      expect((el as any).key).toBe(':kb-dark-false');
-    });
-
-    it('the suffix reflects the CURRENT dark state, not always false', async () => {
-      vi.resetModules();
-      vi.doMock('react-native', () => ({
-        Pressable: MockPressable,
-        Appearance: { getColorScheme: () => 'dark', addChangeListener: () => ({ remove: vi.fn() }) },
-      }));
-      const { jsx } = await import('./jsx-runtime');
-      const el = jsx('View', { className: 'dark:bg-blue-8' }, undefined);
-      expect((el as any).key).toBe(':kb-dark-true');
+      let renderer: TestRenderer.ReactTestRenderer | undefined;
+      act(() => {
+        renderer = TestRenderer.create(el);
+      });
+      expect(typeof renderer!.root.findByType(Pressable).props.style).toBe('function');
     });
   });
 });

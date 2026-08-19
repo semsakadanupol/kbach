@@ -172,6 +172,54 @@ dark mode — this palette's own convention is 1 = lightest, 12 = darkest, so
 that's the same visual weight relative to its own background, no manual
 `colors.blue[isDark ? 7 : 6]` needed.
 
+## Arbitrary math: `calc()`, `clamp()`, `min()`, `max()`
+
+```tsx
+<View className="p-[calc(16px+8px)]" />       // -> padding: 24
+<View className="w-[clamp(1rem,2rem,3rem)]" /> // -> width: 32
+```
+
+Resolves at **build/resolve time**, not runtime — every operand must be a
+constant `px`/`rem` length (or a bare number). This works because native has
+no CSS engine to evaluate a real `calc()` string at paint time, so the only
+way to support it at all is to compute the answer ourselves.
+
+A **percentage- or viewport-relative** expression (`calc(50%-0.5rem)`,
+`calc(10vw+8px)`) can't be reduced this way — it genuinely needs the
+parent's actual layout size, which doesn't exist until paint time on
+native. These already work fine on web (real CSS); on native the
+declaration is dropped and a `console.warn` explains why (dev builds only),
+rather than silently shipping an invalid value into the style object. Use a
+fraction utility (`w-1/2`) for relative sizing on native instead — see
+`resolvers/spacing.rs`'s `fraction_percent` — or resolve the value in JS.
+
+## Dynamic tokens
+
+The native counterpart to a real CSS custom property — `var(--x)` already
+works in a `className` on Expo Web with zero help from this package (real
+CSS, resolved by the browser). This gives native the same className syntax:
+
+```tsx
+import { setDynamicToken, useDynamicToken } from '@kbach/react-native';
+
+setDynamicToken('sidebar-width', '240px'); // updates every subscribed element, on both platforms
+<View className="w-[var(--sidebar-width)]" />
+
+// Reading the raw value in JS, reactively:
+function Sidebar() {
+  const width = useDynamicToken('sidebar-width'); // '240px' | undefined
+}
+```
+
+On web, `setDynamicToken` writes the real CSS custom property to the DOM —
+every element using it repaints instantly via the browser's own CSS engine,
+no React re-render involved. On native, the className is substituted with
+the token's current value before every resolve, and an element referencing
+a token re-renders/repaints on its own when that specific token changes
+(same `key`-remount mechanism `dark:` and `sm:`/`md:`/... already use — see
+`jsxRuntimeCore.ts`'s own doc comments). An unregistered token name falls
+through to the same native invalid-value warning above.
+
 ## License
 
 MIT

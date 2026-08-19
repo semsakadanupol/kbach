@@ -116,6 +116,31 @@ describe('nativeBridge', () => {
       expect(warnSpy).not.toHaveBeenCalled();
       warnSpy.mockRestore();
     });
+
+    it('prints the exact same warning only once, even across many resolveStyle calls', async () => {
+      mockResolveStyle.mockReturnValue('{"__kbachWarnings":["Kbach: bad value"]}');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { resolveStyle } = await import('./nativeBridge');
+      resolveStyle('w-[calc(50%-8px)]');
+      resolveStyle('w-[calc(50%-8px)]');
+      resolveStyle('w-[calc(50%-8px)]');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      warnSpy.mockRestore();
+    });
+
+    it('still warns for a DIFFERENT className even after another one was already de-duped', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { resolveStyle } = await import('./nativeBridge');
+
+      mockResolveStyle.mockReturnValue('{"__kbachWarnings":["Kbach: bad value"]}');
+      resolveStyle('w-[calc(50%-8px)]');
+
+      mockResolveStyle.mockReturnValue('{"__kbachWarnings":["Kbach: another bad value"]}');
+      resolveStyle('h-[calc(50%-8px)]');
+
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+      warnSpy.mockRestore();
+    });
   });
 
   describe('warnings from the jsEngine fallback path (Expo Go)', () => {

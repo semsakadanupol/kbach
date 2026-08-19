@@ -193,6 +193,33 @@ rather than silently shipping an invalid value into the style object. Use a
 fraction utility (`w-1/2`) for relative sizing on native instead — see
 `resolvers/spacing.rs`'s `fraction_percent` — or resolve the value in JS.
 
+## Unknown-class warnings (typo detection)
+
+```tsx
+<View className="flexx-center" /> // real Kbach classes never have to guess — a typo warns
+```
+
+```
+Kbach: "flexx-center" doesn't match any known Kbach utility — typo? (skipped) (from className "flexx-center")
+```
+
+On native/dev-client builds, a class that doesn't match *any* Kbach
+utility on *any* platform gets a `console.warn` (dev builds only, printed
+once per unique message) instead of silently doing nothing — the same
+signal `@kbach/react`'s Vite plugin already gives you at build time on
+web, just at resolve time here instead. A real utility this engine simply
+doesn't support on native yet (`grid-cols-3`, `scale-150`, `blur`, ...)
+never warns — that's an intentional, documented platform gap (see
+`resolve_style.rs`'s own doc comment), not a typo, so it stays silent the
+same way it always has.
+
+Not available in Expo Go's pure-JS fallback engine today — that engine has
+no web-shaped resolver to check "is this a real Kbach utility at all"
+against, only the (smaller) native-supported subset, so it can't
+distinguish a genuine typo from a real-but-native-unsupported class
+without a much larger port. A real dev-client/CLI build always gets this
+check.
+
 ## Dynamic tokens
 
 The native counterpart to a real CSS custom property — `var(--x)` already

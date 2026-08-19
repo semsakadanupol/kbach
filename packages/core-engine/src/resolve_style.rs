@@ -35,11 +35,34 @@
 //! value typing below.
 
 use crate::calc::reduce_constant_math;
-use crate::parser::parse_class;
+use crate::parser::{parse_class, ParsedClass};
 use crate::registry::{self, DarkScheme};
-use crate::resolvers::resolve_utility_native;
+use crate::resolvers::{resolve_utility, resolve_utility_native};
 use crate::theme::ThemeConfig;
 use serde_json::{Map, Number, Value};
+
+/// Bare classes with no styling meaning of their own — they exist purely as
+/// selector-target markers (`group-hover:` matches `.group:hover .child`,
+/// `peer-hover:` matches `.peer:hover ~ .sibling`), so no resolver anywhere
+/// (web or native) ever produces a declaration for the literal `group`/
+/// `peer` token itself. Mirrors @kbach/react's own `unknownClassWarnings.ts`
+/// `MARKER_CLASSES` allowlist exactly — same reason: "resolves to zero
+/// declarations" is indistinguishable from "not a real utility" by return
+/// shape alone, so these two need a manual exception.
+const MARKER_UTILITIES: &[&str] = &["group", "peer"];
+
+/// Whether `parsed`'s BASE utility (ignoring modifiers and their current
+/// state entirely) is a real Kbach utility on ANY platform — the ground
+/// truth for "is this a typo", deliberately using `resolve_utility` (the
+/// WEB dispatcher, the fullest vocabulary) rather than
+/// `resolve_utility_native`: a real utility this engine just doesn't
+/// support on native YET (`grid-cols-3`, `scale-150`, `blur`, ...) is an
+/// intentional, documented platform gap (see this module's own top doc
+/// comment: "Explicitly deferred, not silently broken") — NOT a typo, and
+/// must never warn as one. Only a string that resolves NOWHERE at all is.
+fn is_recognized_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> bool {
+    MARKER_UTILITIES.contains(&parsed.utility.as_str()) || resolve_utility(parsed, theme).is_some()
+}
 
 /// Whether a single modifier's condition currently holds, for the three
 /// modifier kinds native actually understands — `None` for anything else
@@ -224,6 +247,18 @@ pub fn resolve_style_with_warnings(
 
     for token in class_string.split_whitespace() {
         let parsed = parse_class(token);
+
+        // Checked BEFORE the modifier-gate below, and independent of it —
+        // a typo behind a currently-inactive modifier (`dark:flexx-center`
+        // in light mode) is still a typo; skipping this check whenever
+        // modifiers don't currently hold would only catch it half the time,
+        // by accident, depending on runtime dark-mode/breakpoint state.
+        if !is_recognized_utility(&parsed, theme) {
+            warnings.push(format!(
+                "Kbach: \"{token}\" doesn't match any known Kbach utility — typo? (skipped)"
+            ));
+        }
+
         let all_modifiers_hold = parsed
             .modifiers
             .iter()
@@ -589,5 +624,61 @@ mod tests {
         let (style, warnings) = resolve_style_with_warnings("w-1/2", &theme(), "light", false, W);
         assert_eq!(style.get("width").unwrap(), "50%");
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn warns_on_a_genuinely_unknown_utility() {
+        let (style, warnings) = resolve_style_with_warnings("flexx-center", &theme(), "light", false, W);
+        assert!(style.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("flexx-center"));
+        assert!(warnings[0].contains("typo"));
+    }
+
+    #[test]
+    fn does_not_warn_for_group_or_peer_marker_classes() {
+        let (_, warnings) = resolve_style_with_warnings("group peer", &theme(), "light", false, W);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn does_not_warn_for_a_real_utility_thats_only_unsupported_on_native() {
+        // grid-cols-3/scale-150/blur are real Kbach utilities (real Tailwind
+        // ones too) that this engine simply doesn't resolve on native yet —
+        // an intentional platform gap, not a typo. Mirrors
+        // resolveUtilityNative's own existing "resolves nothing" tests.
+        let (style, warnings) = resolve_style_with_warnings("grid-cols-3 scale-150 blur", &theme(), "light", false, W);
+        assert!(style.is_empty());
+        assert!(warnings.is_empty(), "expected no warnings, got: {warnings:?}");
+    }
+
+    #[test]
+    fn warns_on_a_typo_even_behind_a_currently_inactive_modifier() {
+        // dark: isn't active (scheme is "light"), so this token is skipped
+        // for APPLICATION either way — but it's still a typo, and must
+        // still warn regardless of runtime dark-mode state.
+        let (style, warnings) = resolve_style_with_warnings("dark:flexx-center", &theme(), "light", false, W);
+        assert!(style.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("dark:flexx-center"));
+    }
+
+    #[test]
+    fn does_not_warn_for_a_real_utility_behind_an_unsupported_modifier() {
+        // hover: isn't one of the three modifiers native understands, but
+        // bg-blue-6 itself is completely real — not a typo.
+        let (style, warnings) = resolve_style_with_warnings("hover:bg-blue-6", &theme(), "light", false, W);
+        assert!(style.is_empty());
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn typo_warning_rides_along_in_resolve_style_json_the_same_way_calc_warnings_do() {
+        let theme_json = r##"{"colors":{},"spacing":{},"screens":{},"darkMode":"attribute"}"##;
+        let json = resolve_style_json("flexx-center", theme_json, "light", false, W);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let warnings = parsed["__kbachWarnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].as_str().unwrap().contains("flexx-center"));
     }
 }

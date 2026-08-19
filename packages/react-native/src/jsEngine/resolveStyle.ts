@@ -11,6 +11,19 @@
  * the three checks below ARE registry.rs's entire native-relevant surface
  * — every other modifier (hover, group-*, has-[...], ...) parses without
  * error but never applies here, same as the Rust engine.
+ *
+ * Deliberately does NOT port resolve_style.rs's typo/unknown-utility
+ * warning (`is_recognized_utility`, in resolve_style.rs): that check's
+ * ground truth is `resolve_utility` — the WEB dispatcher, the FULL Kbach
+ * vocabulary — used specifically so a real utility this engine just
+ * doesn't support yet (grid-cols-3, scale-150, blur, ...) is never
+ * mistaken for a typo. This jsEngine directory has no web-shaped resolver
+ * at all (it only ports the NATIVE subset — see resolveUtilityNative.ts's
+ * own doc comment), so there's no equivalent full-vocabulary ground truth
+ * to check against here without porting the entire web resolver just for
+ * this. Expo Go therefore doesn't get typo warnings today — a real,
+ * intentionally scoped gap (same category as the jsEngine's existing
+ * documented parity subset), not an oversight.
  */
 import { parseClass } from './parser';
 import { resolveUtilityNative } from './resolveUtilityNative';

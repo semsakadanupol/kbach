@@ -133,10 +133,26 @@ export function resolveStyle(classString: string, pressed = false): StyleObject 
   return style;
 }
 
+// De-duplicates by the exact warning text, not just per-call — a resolve
+// this reactive (dark:/breakpoint/dynamic-token elements can all re-resolve
+// on every relevant change, see jsxRuntimeCore.ts) would otherwise spam the
+// SAME "invalid value"/"typo" message on every re-render of a
+// still-broken className, forever. NOT cross-bundle-shared the way
+// theme.ts/darkModeStore.ts/dynamicTokens.ts are (see tsup.config.ts) —
+// nativeBridge.ts isn't externalized, so index.js and jsx-runtime.js each
+// get their own copy of this Set. Harmless: the worst case is the exact
+// same message printing twice (once per entry) instead of once, never a
+// correctness issue, so not worth the extra externalized-entry complexity
+// just for de-dup cosmetics.
+const warnedMessages = new Set<string>();
+
 function warnIfDev(classString: string, warnings: string[]): void {
   if (warnings.length === 0) return;
   if (typeof __DEV__ !== 'undefined' && !__DEV__) return;
   for (const warning of warnings) {
-    console.warn(`${warning} (from className "${classString}")`);
+    const message = `${warning} (from className "${classString}")`;
+    if (warnedMessages.has(message)) continue;
+    warnedMessages.add(message);
+    console.warn(message);
   }
 }

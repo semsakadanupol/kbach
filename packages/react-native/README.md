@@ -74,6 +74,56 @@ useEffect(() => setMounted(true), []);
 <View className={mounted ? 'bg-gray-1 dark:bg-gray-12' : 'bg-gray-1'} />;
 ```
 
+### Monorepo installs (npm/yarn/pnpm workspaces)
+
+If your app lives in a monorepo where `@kbach/react-native` is a workspace
+package (a `file:`/`link:` dependency, or hoisted rather than nested), watch
+for **two physical copies of `react-native`/`react`** ending up in your
+dependency tree — one this package would otherwise resolve up to from its
+own directory, and a different one your app's own files resolve to. Metro
+walks `node_modules` hierarchically per-file, so it can silently hand two
+different files two different copies of the *same* module, each with its
+own separate module state.
+
+This isn't hypothetical: it's the root cause of a real dark-mode bug this
+package shipped and fixed — `useColorScheme()`/`Appearance` in one copy
+never saw changes made through the other, so an explicit theme toggle
+appeared to do nothing. The fix is a Metro config override that forces a
+single instance, **required in your app**, not something this package can
+do on your behalf from inside `node_modules`:
+
+```js
+// metro.config.js
+const path = require('path');
+// React Native CLI: const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+// Expo:              const { getDefaultConfig } = require('expo/metro-config');
+
+const projectRoot = __dirname;
+const workspaceRoot = path.resolve(projectRoot, '../..'); // -> your monorepo root
+
+const config = getDefaultConfig(projectRoot);
+config.watchFolders = [workspaceRoot];
+
+const forcedSingleInstance = {
+  'react-native': path.resolve(projectRoot, 'node_modules/react-native'),
+  react: path.resolve(projectRoot, 'node_modules/react'),
+};
+const defaultResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (Object.prototype.hasOwnProperty.call(forcedSingleInstance, moduleName)) {
+    return { type: 'sourceFile', filePath: require.resolve(forcedSingleInstance[moduleName]) };
+  }
+  return defaultResolveRequest
+    ? defaultResolveRequest(context, moduleName, platform)
+    : context.resolveRequest(context, moduleName, platform);
+};
+
+module.exports = config; // (React Native CLI: mergeConfig(getDefaultConfig(projectRoot), config))
+```
+
+A single, non-monorepo `npm install` never hits this — only relevant if your
+app and `@kbach/react-native` share a workspace root.
+
 ## Dark mode
 
 ```tsx

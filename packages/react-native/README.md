@@ -184,14 +184,36 @@ constant `px`/`rem` length (or a bare number). This works because native has
 no CSS engine to evaluate a real `calc()` string at paint time, so the only
 way to support it at all is to compute the answer ourselves.
 
-A **percentage- or viewport-relative** expression (`calc(50%-0.5rem)`,
-`calc(10vw+8px)`) can't be reduced this way — it genuinely needs the
-parent's actual layout size, which doesn't exist until paint time on
-native. These already work fine on web (real CSS); on native the
-declaration is dropped and a `console.warn` explains why (dev builds only),
-rather than silently shipping an invalid value into the style object. Use a
-fraction utility (`w-1/2`) for relative sizing on native instead — see
-`resolvers/spacing.rs`'s `fraction_percent` — or resolve the value in JS.
+A **viewport-relative** expression (`calc(10vw+8px)`) can't be reduced this
+way — no such unit exists on native at all. It already works fine on web
+(real CSS); on native the declaration is dropped and a `console.warn`
+explains why (dev builds only).
+
+**Percentage-relative width/height** (`calc(100%-3rem)`, `calc(50%+16px)`)
+IS supported, differently: since native has no way to know "100% of what"
+ahead of time, this measures the element's own real layout instead —
+
+```tsx
+<View className="w-[calc(100%_-_3rem)]" />
+```
+
+Renders once at a plain `100%` (a real RN percentage, resolved correctly by
+RN's own layout engine against the parent) purely to trigger a layout
+event, then immediately corrects to the actual computed number once
+measured — a genuine one-frame measure-then-snap, not instant math like the
+constant-only case above, and it keeps re-measuring on every layout (screen
+rotation, parent resize, ...) rather than freezing after the first value.
+Scoped to exactly one percentage term plus one constant term on `width`/
+`height` only — `calc(50%-50%)`, other properties, or anything with `*`/`/`
+falls through to the same drop-and-warn behavior as before.
+
+**Arbitrary values can't contain literal spaces** — this is a pre-existing
+rule (real Tailwind has the same one), not specific to `calc()`: a space
+inside `[...]` is indistinguishable from the whitespace that separates
+class tokens in the first place, so `w-[calc(100% - 3rem)]` silently splits
+into three broken tokens before `calc()` is ever even recognized. Write
+`w-[calc(100%_-_3rem)]` (underscores) instead — this is exactly what the
+unknown-class warning below is for: it'll tell you when this happens.
 
 ## Unknown-class warnings (typo detection)
 

@@ -412,4 +412,74 @@ describe('jsx-runtime (react-native)', () => {
       expect(mockResolveStyle).toHaveBeenLastCalledWith('w-[240px]', false);
     });
   });
+
+  // Percentage-relative calc() — w-[calc(100%_-_3rem)] and friends. Unlike
+  // the other three reactive mechanisms, there's no external store here:
+  // the "current value" is this element's own layout, learned by
+  // simulating a real RN onLayout event through TestRenderer.
+  describe('percentage-relative calc() (measure-then-snap via onLayout)', () => {
+    it('strips the calc(...%...) token before calling resolveStyle, and renders 100% first', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'bg-blue-6 w-[calc(100%_-_3rem)]' }, undefined);
+      const renderer = mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledWith('bg-blue-6', false);
+      const style = renderer.root.findByType('View' as any).props.style;
+      expect(style.width).toBe('100%');
+    });
+
+    it('computes the real absolute width once onLayout reports the measured size', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[calc(100%_-_3rem)]' }, undefined);
+      const renderer = mount(el);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 100 } } });
+      });
+
+      // 390 * 100/100 - 48 (3rem) = 342
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(342);
+    });
+
+    it('re-measures on a subsequent layout change (e.g. rotation)', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[calc(100%_-_3rem)]' }, undefined);
+      const renderer = mount(el);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 100 } } });
+      });
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(342);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 800, height: 100 } } });
+      });
+      // 800 - 48 = 752
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(752);
+    });
+
+    it('composes with a caller-provided onLayout handler instead of replacing it', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const userOnLayout = vi.fn();
+      const el = jsx('View', { className: 'w-[calc(100%_-_3rem)]', onLayout: userOnLayout }, undefined);
+      const renderer = mount(el);
+
+      const event = { nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 100 } } };
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout(event);
+      });
+
+      expect(userOnLayout).toHaveBeenCalledWith(event);
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(342);
+    });
+
+    it('does not add any reactivity overhead for an element with no percent-relative calc', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[calc(16px+8px)]' }, undefined);
+      mount(el);
+      // A constant-only calc still resolves through the normal
+      // resolveStyle path (unchanged from before this feature) — never
+      // routes through ReactiveElement's layout machinery at all.
+      expect(mockResolveStyle).toHaveBeenCalledWith('w-[calc(16px+8px)]', false);
+    });
+  });
 });

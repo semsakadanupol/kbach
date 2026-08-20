@@ -13,14 +13,15 @@
  * tsup/esbuild build already flattened away).
  */
 import { jsx as _jsx, jsxs as _jsxs } from 'react/jsx-runtime';
-import { Fragment, useSyncExternalStore } from 'react';
+import { Fragment, useCallback, useState, useSyncExternalStore } from 'react';
 import { Pressable, useWindowDimensions } from 'react-native';
 import type { ReactElement } from 'react';
-import type { PressableStateCallbackType } from 'react-native';
+import type { LayoutChangeEvent, PressableStateCallbackType } from 'react-native';
 import type { StyleObject } from './nativeBridge';
 import { getGlobalDarkMode, subscribeGlobalDarkMode } from './darkModeStore';
 import { getDynamicToken, subscribeDynamicTokens, getDynamicTokensVersion } from './dynamicTokens';
 import { getTheme } from './theme';
+import { parsePercentRelativeCalc, resolvePercentRelativeCalc, type PercentRelativeCalc } from './layoutCalc';
 
 export { Fragment };
 export type { JSX } from 'react';
@@ -59,6 +60,31 @@ function substituteDynamicTokens(classStrRaw: string): string {
   });
 }
 
+// Cheap pre-check before bothering to split+parse every token — matches
+// the SHAPE parsePercentRelativeCalc actually accepts (w-[calc(...%...)]/
+// h-[calc(...%...)]) closely enough to gate the more expensive per-token
+// work in processElement's dispatch, without duplicating that function's
+// own parsing logic.
+const PERCENT_RELATIVE_CALC_HINT_RE = /[wh]-\[calc\([^)]*%[^)]*\)\]/;
+
+/** Every `w-[calc(...)]`/`h-[calc(...)]` token in `classStrRaw` that resolves via `parsePercentRelativeCalc` — usually 0, at most 2 (one per property). */
+function extractPercentRelativeCalcs(classStrRaw: string): PercentRelativeCalc[] {
+  const found: PercentRelativeCalc[] = [];
+  for (const token of classStrRaw.split(/\s+/)) {
+    const parsed = parsePercentRelativeCalc(token);
+    if (parsed) found.push(parsed);
+  }
+  return found;
+}
+
+/** Removes every token `extractPercentRelativeCalcs` would also match — these are handled entirely here (see `ReactiveElement`'s own `onLayout` handling) and must never reach `resolveStyle()`, which would otherwise drop them with a warning it has no way to know is being handled another way. */
+function stripPercentRelativeCalcTokens(classStrRaw: string): string {
+  return classStrRaw
+    .split(/\s+/)
+    .filter((token) => token && parsePercentRelativeCalc(token) === null)
+    .join(' ');
+}
+
 function makeElement(
   isStaticChildren: boolean,
   type: unknown,
@@ -68,9 +94,27 @@ function makeElement(
   return (isStaticChildren ? _jsxs : _jsx)(type as any, props as any, key) as ReactElement;
 }
 
-/** Resolves `classStrRaw` for a given press state and merges in `userStyle`. */
-function resolvedStyleFor(resolveStyle: ResolveStyleFn, classStrRaw: string, userStyle: unknown, pressed: boolean): unknown {
-  const resolved = resolveStyle(substituteDynamicTokens(classStrRaw), pressed);
+/**
+ * Resolves `classStrRaw` for a given press state and merges in `userStyle`.
+ * `layoutOverrides` (only ever non-empty for a `w-[calc(...%...)]`/
+ * `h-[calc(...%...)]` token — see `ReactiveElement`'s own `onLayout`
+ * handling) is merged in AFTER the normal resolve, taking precedence —
+ * those specific tokens are stripped out before `resolveStyle` ever sees
+ * them (see `stripPercentRelativeCalcTokens`), so there's nothing to
+ * collide with regardless, this is just where the computed value lands.
+ */
+function resolvedStyleFor(
+  resolveStyle: ResolveStyleFn,
+  classStrRaw: string,
+  userStyle: unknown,
+  pressed: boolean,
+  layoutOverrides?: Record<string, number | string>,
+): unknown {
+  const cleaned = stripPercentRelativeCalcTokens(substituteDynamicTokens(classStrRaw));
+  const resolved = resolveStyle(cleaned, pressed) as Record<string, unknown>;
+  if (layoutOverrides) {
+    Object.assign(resolved, layoutOverrides);
+  }
   if (userStyle === undefined) {
     return resolved;
   }
@@ -141,6 +185,25 @@ function dynamicTokenKeySuffix(classStrRaw: string): string {
   return `:kb-dt-${values.join('|')}`;
 }
 
+/**
+ * `measuredBasis` is component-LOCAL state (see `ReactiveElement`), so
+ * unlike the other three key-suffix helpers this doesn't read any external
+ * store — it's still needed for the same underlying reason: a plain
+ * `setState` update alone hasn't been reliable at repainting an
+ * ALREADY-MOUNTED host component on native either (same class of issue
+ * `darkModeKeySuffix` documents at length), so the computed VALUE itself
+ * (not just "did it change") goes into the key, same shape as the other
+ * three.
+ */
+function percentCalcKeySuffix(percentCalcs: PercentRelativeCalc[], measuredBasis: { width: number; height: number } | null): string {
+  if (percentCalcs.length === 0) return '';
+  const values = percentCalcs.map((calc) => {
+    const basis = measuredBasis?.[calc.property];
+    return basis === undefined ? 'pending' : resolvePercentRelativeCalc(basis, calc);
+  });
+  return `:kb-pc-${values.join('|')}`;
+}
+
 interface ReactiveProps {
   hostType: unknown;
   hostRest: Record<string, unknown>;
@@ -173,11 +236,29 @@ interface ReactiveProps {
  * a REAL React component can call hooks, so this one re-renders on every
  * dark-mode, dynamic-token, or dimension change independent of what any
  * ancestor does, recomputing the resolved style and the forced-remount key
- * (darkModeKeySuffix + breakpointKeySuffix + dynamicTokenKeySuffix) fresh
- * each time. All three hooks are called unconditionally regardless of
- * which modifier(s)/token(s) the className actually uses — cheap, and
- * keeps this component's hook list fixed across renders; the key suffix
- * helpers are what scope the actual remount behavior.
+ * (darkModeKeySuffix + breakpointKeySuffix + dynamicTokenKeySuffix +
+ * percentCalcKeySuffix below) fresh each time. All three store
+ * subscriptions are made unconditionally regardless of which
+ * modifier(s)/token(s) the className actually uses — cheap, and keeps this
+ * component's hook list fixed across renders; the key suffix helpers are
+ * what scope the actual remount behavior.
+ *
+ * `w-[calc(...%...)]`/`h-[calc(...%...)]` (see layoutCalc.ts) work
+ * differently from the other three: there's no external store to
+ * subscribe to at all — the "current value" IS this element's own layout,
+ * which nothing knows ahead of time. `measuredBasis` (component-local
+ * state, not a global store) tracks it: the FIRST render sets the
+ * property to a plain `'100%'` — a real RN percentage RN's own layout
+ * engine resolves correctly against the parent — purely to get an
+ * `onLayout` event at all; once that fires, `measuredBasis` updates with
+ * the real pixel size, and a second render computes the actual
+ * `resolvePercentRelativeCalc` answer as a plain number. That's a genuine
+ * measure-then-snap (briefly renders at `100%` before correcting) — there
+ * is no way to know "100% of the parent" without asking RN to lay
+ * something out first, same reason resolve_style.rs's constant-only
+ * reducer can't handle this case at all. Re-measures on every layout
+ * (rotation, parent resize, ...) rather than only once, so it keeps
+ * tracking correctly rather than freezing after the first correct value.
  */
 function ReactiveElement({
   hostType,
@@ -192,15 +273,49 @@ function ReactiveElement({
   useSyncExternalStore(subscribeDynamicTokens, getDynamicTokensVersion);
   const { width } = useWindowDimensions();
 
+  const [measuredBasis, setMeasuredBasis] = useState<{ width: number; height: number } | null>(null);
+  const measure = useCallback((e: LayoutChangeEvent) => {
+    const { width: w, height: h } = e.nativeEvent.layout;
+    setMeasuredBasis((prev) => (prev && prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+  }, []);
+
+  const percentCalcs = extractPercentRelativeCalcs(classStrRaw);
+  let layoutOverrides: Record<string, number | string> | undefined;
+  let hostRestWithLayout = hostRest;
+  if (percentCalcs.length > 0) {
+    layoutOverrides = {};
+    for (const calc of percentCalcs) {
+      const basis = measuredBasis?.[calc.property];
+      layoutOverrides[calc.property] = basis === undefined ? '100%' : resolvePercentRelativeCalc(basis, calc);
+    }
+    // Compose with the caller's own onLayout (if any) rather than silently
+    // replacing it — this is the one place ReactiveElement adds a prop
+    // beyond `style`/`key`, so it's the one place a collision is possible.
+    const userOnLayout = hostRest.onLayout as ((e: LayoutChangeEvent) => void) | undefined;
+    hostRestWithLayout = {
+      ...hostRest,
+      onLayout: userOnLayout
+        ? (e: LayoutChangeEvent) => {
+            measure(e);
+            userOnLayout(e);
+          }
+        : measure,
+    };
+  }
+
   const finalStyle =
     hostType === Pressable
-      ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed)
-      : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false);
+      ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed, layoutOverrides)
+      : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false, layoutOverrides);
 
-  const suffix = darkModeKeySuffix(classStrRaw) + breakpointKeySuffix(classStrRaw, width) + dynamicTokenKeySuffix(classStrRaw);
+  const suffix =
+    darkModeKeySuffix(classStrRaw) +
+    breakpointKeySuffix(classStrRaw, width) +
+    dynamicTokenKeySuffix(classStrRaw) +
+    percentCalcKeySuffix(percentCalcs, measuredBasis);
   const finalKey = suffix ? `${elementKey ?? ''}${suffix}` : elementKey;
 
-  return makeElement(isStaticChildren, hostType, { ...hostRest, style: finalStyle }, finalKey);
+  return makeElement(isStaticChildren, hostType, { ...hostRestWithLayout, style: finalStyle }, finalKey);
 }
 
 function processElement(
@@ -222,7 +337,12 @@ function processElement(
     return makeElement(isStaticChildren, type, rawProps, key);
   }
 
-  if (DARK_MODIFIER_RE.test(classStrRaw) || BREAKPOINT_MODIFIER_RE.test(classStrRaw) || classStrRaw.includes('var(--')) {
+  if (
+    DARK_MODIFIER_RE.test(classStrRaw) ||
+    BREAKPOINT_MODIFIER_RE.test(classStrRaw) ||
+    classStrRaw.includes('var(--') ||
+    PERCENT_RELATIVE_CALC_HINT_RE.test(classStrRaw)
+  ) {
     return _jsx(
       ReactiveElement,
       { hostType: type, hostRest: rest, classStrRaw, userStyle, resolveStyle, elementKey: key, isStaticChildren },

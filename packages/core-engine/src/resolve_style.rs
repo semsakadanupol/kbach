@@ -16,7 +16,9 @@
 //!     min-width, mirroring real Tailwind's mobile-first "min-width and up"
 //!     semantics (same scale css.rs's `is_responsive` handling uses for
 //!     the web `@media` output — see registry.rs).
+//!
 //! All three compose: `dark:sm:bg-blue-8` applies only when BOTH hold.
+//!
 //! Every other modifier (`hover:`, `group-*`, `has-[...]`, container
 //! queries, ...) parses without error but isn't applied on native — no
 //! selector/pseudo-state/ancestor system exists here to apply them with.
@@ -122,7 +124,7 @@ const NUMERIC_LENGTH_PROPS: &[&str] = &[
     "border-radius", "border-width", "font-size", "z-index",
     "line-height", "letter-spacing",
     "flex", "flex-grow", "flex-shrink", "order", "flex-basis",
-    "shadow-opacity", "shadow-radius", "elevation",
+    "shadow-opacity", "shadow-radius", "elevation", "opacity",
     // Per-side border width + per-corner radius — added alongside
     // border.rs's per-side/per-corner resolvers; RN's style system wants
     // plain numbers for these exactly like the generic "border-width"/
@@ -548,6 +550,12 @@ mod tests {
     fn merges_multiple_tokens_into_one_flat_object() {
         let style = resolve_style("flex flex-row items-center justify-center bg-blue-6", &theme(), "light", false, W);
         assert_eq!(style.len(), 5);
+    }
+
+    #[test]
+    fn resolves_opacity_to_a_json_number_not_a_string() {
+        let style = resolve_style("opacity-50", &theme(), "light", false, W);
+        assert_eq!(style.get("opacity").unwrap(), &Value::Number(Number::from_f64(0.5).unwrap()));
     }
 
     #[test]

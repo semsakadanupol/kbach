@@ -32,7 +32,7 @@ fn resolve_object(value: &str) -> Option<Vec<Declaration>> {
     if let Some(fit) = OBJECT_FIT.iter().find(|(k, _)| *k == value).map(|(_, v)| *v) {
         return Some(vec![decl("object-fit", fit)]);
     }
-    OBJECT_POSITION.iter().find(|(k, _)| *k == value).map(|(_, v)| vec![decl("object-position", *v)])
+    OBJECT_POSITION.iter().find(|(k, _)| *k == value).map(|(_, v)| vec![decl("object-position", v)])
 }
 
 fn overscroll_value(axis_property: &str, value: &str) -> Option<Vec<Declaration>> {

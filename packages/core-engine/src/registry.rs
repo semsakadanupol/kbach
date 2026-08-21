@@ -47,6 +47,12 @@ pub struct ModifierDef {
     pub pseudo_element: Option<&'static str>,
     /// Ancestor/sibling selector prefixed before the base selector, e.g. ".group:hover ".
     pub ancestor_selector: Option<&'static str>,
+    /// Descendant-combinator suffix appended AFTER the base selector, e.g.
+    /// " > *" for the bare `*:` variant — the structural inverse of
+    /// `ancestor_selector` (which styles THIS element based on an ancestor's
+    /// state; this styles a DESCENDANT based on THIS element carrying the
+    /// class at all). Only ever set for `*`/`**` below.
+    pub descendant_selector: Option<&'static str>,
     /// Media query condition (without the "@media " prefix).
     pub media_query: Option<&'static str>,
     pub dark_scheme: Option<DarkScheme>,
@@ -65,6 +71,7 @@ const BASE: ModifierDef = ModifierDef {
     pseudo: None,
     pseudo_element: None,
     ancestor_selector: None,
+    descendant_selector: None,
     media_query: None,
     dark_scheme: None,
     is_responsive: false,
@@ -87,13 +94,39 @@ pub static MODIFIERS: LazyLock<HashMap<&'static str, ModifierDef>> = LazyLock::n
     // lose to an unrelated same-specificity rule that happens to load later.
     m.insert("disabled", ModifierDef { pseudo: Some(":disabled"), order: 16.0, forces_important: true, ..BASE });
     m.insert("checked", ModifierDef { pseudo: Some(":checked"), order: 17.0, ..BASE });
+    // ── Form-state/validation pseudo-classes — real Tailwind ships both
+    // these NATIVE pseudo-classes and the `aria-*` shortcuts above as
+    // genuinely separate variants (":required" vs "[aria-required]"), not
+    // aliases of each other, so both need their own registry entry.
+    m.insert("enabled", ModifierDef { pseudo: Some(":enabled"), order: 17.011, ..BASE });
+    m.insert("read-only", ModifierDef { pseudo: Some(":read-only"), order: 17.012, ..BASE });
+    m.insert("required", ModifierDef { pseudo: Some(":required"), order: 17.013, ..BASE });
+    m.insert("optional", ModifierDef { pseudo: Some(":optional"), order: 17.014, ..BASE });
+    m.insert("valid", ModifierDef { pseudo: Some(":valid"), order: 17.015, ..BASE });
+    m.insert("invalid", ModifierDef { pseudo: Some(":invalid"), order: 17.016, ..BASE });
+    m.insert("in-range", ModifierDef { pseudo: Some(":in-range"), order: 17.017, ..BASE });
+    m.insert("out-of-range", ModifierDef { pseudo: Some(":out-of-range"), order: 17.018, ..BASE });
+    m.insert("default", ModifierDef { pseudo: Some(":default"), order: 17.019, ..BASE });
+    m.insert("indeterminate", ModifierDef { pseudo: Some(":indeterminate"), order: 17.021, ..BASE });
+    m.insert("placeholder-shown", ModifierDef { pseudo: Some(":placeholder-shown"), order: 17.022, ..BASE });
+    m.insert("autofill", ModifierDef { pseudo: Some(":autofill"), order: 17.023, ..BASE });
+    m.insert("user-valid", ModifierDef { pseudo: Some(":user-valid"), order: 17.024, ..BASE });
+    m.insert("user-invalid", ModifierDef { pseudo: Some(":user-invalid"), order: 17.025, ..BASE });
+    // ── Other native pseudo-classes with no aria-* counterpart at all.
+    m.insert("target", ModifierDef { pseudo: Some(":target"), order: 17.031, ..BASE });
+    m.insert("fullscreen", ModifierDef { pseudo: Some(":fullscreen"), order: 17.032, ..BASE });
+    m.insert("popover-open", ModifierDef { pseudo: Some(":popover-open"), order: 17.033, ..BASE });
 
     // ── Structural pseudo-classes (tier 5) ──────────────────────────────────
     m.insert("first", ModifierDef { pseudo: Some(":first-child"), order: 5.0, ..BASE });
+    m.insert("first-of-type", ModifierDef { pseudo: Some(":first-of-type"), order: 5.05, ..BASE });
     m.insert("last", ModifierDef { pseudo: Some(":last-child"), order: 5.1, ..BASE });
+    m.insert("last-of-type", ModifierDef { pseudo: Some(":last-of-type"), order: 5.15, ..BASE });
     m.insert("only", ModifierDef { pseudo: Some(":only-child"), order: 5.2, ..BASE });
+    m.insert("only-of-type", ModifierDef { pseudo: Some(":only-of-type"), order: 5.25, ..BASE });
     m.insert("odd", ModifierDef { pseudo: Some(":nth-child(odd)"), order: 5.3, ..BASE });
     m.insert("even", ModifierDef { pseudo: Some(":nth-child(even)"), order: 5.4, ..BASE });
+    m.insert("empty", ModifierDef { pseudo: Some(":empty"), order: 5.45, ..BASE });
 
     // ── Native element-state attributes (tier 6) ────────────────────────────
     m.insert("open", ModifierDef { pseudo: Some("[open]"), order: 6.0, ..BASE });
@@ -105,6 +138,16 @@ pub static MODIFIERS: LazyLock<HashMap<&'static str, ModifierDef>> = LazyLock::n
     m.insert("peer-hover", ModifierDef { ancestor_selector: Some(".peer:hover ~ "), order: 22.0, ..BASE });
     m.insert("peer-focus", ModifierDef { ancestor_selector: Some(".peer:focus ~ "), order: 23.0, ..BASE });
     m.insert("peer-checked", ModifierDef { ancestor_selector: Some(".peer:checked ~ "), order: 24.0, ..BASE });
+
+    // ── Direct children / all descendants (tier 19) — the structural
+    // inverse of group-*/peer-*: `*:flex` styles this element's DIRECT
+    // CHILDREN, not the element carrying the class itself; `**:flex`
+    // reaches every descendant, not just direct children. Sorted just
+    // before the ancestor tier (20+) since it's selector-shape, not
+    // ancestor-state, but after pseudo-elements — same rationale as every
+    // other selector-shape-vs-value-shape ordering in this table.
+    m.insert("*", ModifierDef { descendant_selector: Some(" > *"), order: 19.0, ..BASE });
+    m.insert("**", ModifierDef { descendant_selector: Some(" *"), order: 19.1, ..BASE });
 
     // ── Static ARIA-state shortcuts (tier 17.1-17.9) ────────────────────────
     // The boolean-shorthand form real Tailwind ships (`aria-expanded:` means
@@ -137,6 +180,7 @@ pub static MODIFIERS: LazyLock<HashMap<&'static str, ModifierDef>> = LazyLock::n
     m.insert("first-letter", ModifierDef { pseudo_element: Some("::first-letter"), order: 18.56, ..BASE });
     m.insert("file", ModifierDef { pseudo_element: Some("::file-selector-button"), order: 18.57, ..BASE });
     m.insert("backdrop", ModifierDef { pseudo_element: Some("::backdrop"), order: 18.58, ..BASE });
+    m.insert("details-content", ModifierDef { pseudo_element: Some("::details-content"), order: 18.59, ..BASE });
 
     // ── Dark mode (tier 30) ──────────────────────────────────────────────────
     m.insert("dark", ModifierDef { dark_scheme: Some(DarkScheme::Dark), order: 30.0, ..BASE });
@@ -149,6 +193,10 @@ pub static MODIFIERS: LazyLock<HashMap<&'static str, ModifierDef>> = LazyLock::n
     m.insert("landscape", ModifierDef { media_query: Some("(orientation: landscape)"), order: 37.2, ..BASE });
     m.insert("contrast-more", ModifierDef { media_query: Some("(prefers-contrast: more)"), order: 37.3, ..BASE });
     m.insert("contrast-less", ModifierDef { media_query: Some("(prefers-contrast: less)"), order: 37.4, ..BASE });
+    m.insert("pointer-coarse", ModifierDef { media_query: Some("(pointer: coarse)"), order: 37.5, ..BASE });
+    m.insert("pointer-fine", ModifierDef { media_query: Some("(pointer: fine)"), order: 37.6, ..BASE });
+    m.insert("any-pointer-coarse", ModifierDef { media_query: Some("(any-pointer: coarse)"), order: 37.7, ..BASE });
+    m.insert("any-pointer-fine", ModifierDef { media_query: Some("(any-pointer: fine)"), order: 37.8, ..BASE });
 
     // ── Direction pseudo-classes (tier 17.95) — grouped with the other
     // static pseudo-class shortcuts above rather than the media-query tier:
@@ -194,7 +242,16 @@ pub struct ResolvedModifier {
     /// above registers.
     pub pseudo_element: Option<String>,
     pub ancestor_selector: Option<String>,
+    /// See `ModifierDef::descendant_selector`'s own doc comment.
+    pub descendant_selector: Option<String>,
     pub media_query: Option<String>,
+    /// `@supports (...)` feature-query condition (without the "@supports "
+    /// prefix) — e.g. `"(display: grid)"` for `supports-[display:_grid]:`.
+    /// Wrapped in `@supports` by `css.rs`, the same shape `media_query`
+    /// gets wrapped in `@media`, just a different (AND independent, so
+    /// nesting order relative to `@media`/`@container` doesn't matter)
+    /// at-rule keyword.
+    pub supports_query: Option<String>,
     pub dark_scheme: Option<DarkScheme>,
     pub is_responsive: bool,
     /// Container-query condition (without the "@container " prefix) — e.g.
@@ -223,7 +280,9 @@ impl From<ModifierDef> for ResolvedModifier {
             pseudo: def.pseudo.map(String::from),
             pseudo_element: def.pseudo_element.map(String::from),
             ancestor_selector: def.ancestor_selector.map(String::from),
+            descendant_selector: def.descendant_selector.map(String::from),
             media_query: def.media_query.map(String::from),
+            supports_query: None,
             dark_scheme: def.dark_scheme,
             is_responsive: def.is_responsive,
             container_query: None,
@@ -287,7 +346,9 @@ impl Default for ResolvedModifier {
             pseudo: None,
             pseudo_element: None,
             ancestor_selector: None,
+            descendant_selector: None,
             media_query: None,
+            supports_query: None,
             dark_scheme: None,
             is_responsive: false,
             container_query: None,
@@ -309,6 +370,10 @@ fn ancestor_only(ancestor_selector: String, order: f64) -> ResolvedModifier {
 
 fn media_only(media_query: String, order: f64) -> ResolvedModifier {
     ResolvedModifier { media_query: Some(media_query), order, ..Default::default() }
+}
+
+fn supports_query_only(supports_query: String, order: f64) -> ResolvedModifier {
+    ResolvedModifier { supports_query: Some(supports_query), order, ..Default::default() }
 }
 
 fn container_query_only(container_query: String, order: f64) -> ResolvedModifier {
@@ -335,6 +400,16 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
     // `:nth-last-child()` pseudo-class formula syntax verbatim
     // (`nth-[3n+1]:` -> `:nth-child(3n+1)`), a superset of the static
     // `odd:`/`even:` shortcuts already in the table above.
+    // "nth-last-of-type-"/"nth-of-type-" before their shorter "nth-last-"/
+    // "nth-" counterparts, same longer-before-shorter rule as everywhere
+    // else in this chain — "nth-of-type-[3n+1]" must not be wrongly claimed
+    // by the "nth-" arm as if it were "nth-[of-type-3n+1]".
+    if let Some(inner) = bracket_content(name, "nth-last-of-type-") {
+        return Some(pseudo_only(format!(":nth-last-of-type({})", unescape(inner)), 5.51));
+    }
+    if let Some(inner) = bracket_content(name, "nth-of-type-") {
+        return Some(pseudo_only(format!(":nth-of-type({})", unescape(inner)), 5.51));
+    }
     if let Some(inner) = bracket_content(name, "nth-last-") {
         return Some(pseudo_only(format!(":nth-last-child({})", unescape(inner)), 5.5));
     }
@@ -374,6 +449,13 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
     if let Some(inner) = bracket_content(name, "max-") {
         return Some(media_only(format!("(max-width: {})", unescape(inner)), 45.0));
     }
+    // `@supports (...)` feature query — self-contained bracket condition,
+    // same shape as `min-[...]`/`max-[...]` above, just a different at-rule
+    // keyword (`css.rs` wraps `supports_query` in `@supports`, independent
+    // of and freely nestable with `@media`/`@container`).
+    if let Some(inner) = bracket_content(name, "supports-") {
+        return Some(supports_query_only(format!("({})", unescape(inner)), 45.5));
+    }
     if let Some(rest) = name.strip_prefix("group-") {
         // Generalizes ANY group-<pseudo> combination whose base pseudo
         // modifier already exists (group-active, group-disabled,
@@ -385,6 +467,21 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
     }
     if let Some(rest) = name.strip_prefix("peer-") {
         return get_modifier(rest).and_then(|def| def.pseudo).map(|p| ancestor_only(format!(".peer{p} ~ "), 26.0));
+    }
+    // `in-*` (real Tailwind v4's context-aware ancestor variant) —
+    // functionally `group-*` without needing a `.group` class on the
+    // ancestor: `:where(<pseudo>) ` matches ANY ancestor in that state,
+    // not just one specifically marked `.group`. `:where(...)` (rather than
+    // a bare `<pseudo> `) is deliberate — it keeps this variant's
+    // specificity at zero, matching real Tailwind's own `in-*` output,
+    // so an `in-hover:` rule never out-specifies an unrelated same-property
+    // rule just because of how this ancestor match happened to be spelled.
+    // Same substring-collision non-issue as `group-`/`peer-` above: any
+    // "in-<name>" that's ALSO a real static modifier (e.g. a hypothetical
+    // "in-range" — already registered above) resolves via the static table
+    // first, since `resolve()` tries that before ever calling this function.
+    if let Some(rest) = name.strip_prefix("in-") {
+        return get_modifier(rest).and_then(|def| def.pseudo).map(|p| ancestor_only(format!(":where({p}) "), 27.0));
     }
     // Container queries (Phase 25) — an "@"-prefixed modifier wraps in
     // `@container` instead of `@media`. `@min-[...]`/`@max-[...]` are fully
@@ -613,6 +710,84 @@ mod tests {
         assert_eq!(nth.pseudo.as_deref(), Some(":nth-child(3n+1)"));
         let nth_last = resolve("nth-last-[2]").unwrap();
         assert_eq!(nth_last.pseudo.as_deref(), Some(":nth-last-child(2)"));
+    }
+
+    #[test]
+    fn resolves_of_type_structural_pseudo_classes_and_empty() {
+        assert_eq!(resolve("first-of-type").unwrap().pseudo.as_deref(), Some(":first-of-type"));
+        assert_eq!(resolve("last-of-type").unwrap().pseudo.as_deref(), Some(":last-of-type"));
+        assert_eq!(resolve("only-of-type").unwrap().pseudo.as_deref(), Some(":only-of-type"));
+        assert_eq!(resolve("empty").unwrap().pseudo.as_deref(), Some(":empty"));
+    }
+
+    #[test]
+    fn resolves_form_state_and_validation_pseudo_classes() {
+        assert_eq!(resolve("enabled").unwrap().pseudo.as_deref(), Some(":enabled"));
+        assert_eq!(resolve("read-only").unwrap().pseudo.as_deref(), Some(":read-only"));
+        assert_eq!(resolve("required").unwrap().pseudo.as_deref(), Some(":required"));
+        assert_eq!(resolve("optional").unwrap().pseudo.as_deref(), Some(":optional"));
+        assert_eq!(resolve("valid").unwrap().pseudo.as_deref(), Some(":valid"));
+        assert_eq!(resolve("invalid").unwrap().pseudo.as_deref(), Some(":invalid"));
+        assert_eq!(resolve("in-range").unwrap().pseudo.as_deref(), Some(":in-range"));
+        assert_eq!(resolve("out-of-range").unwrap().pseudo.as_deref(), Some(":out-of-range"));
+        assert_eq!(resolve("default").unwrap().pseudo.as_deref(), Some(":default"));
+        assert_eq!(resolve("indeterminate").unwrap().pseudo.as_deref(), Some(":indeterminate"));
+        assert_eq!(resolve("placeholder-shown").unwrap().pseudo.as_deref(), Some(":placeholder-shown"));
+        assert_eq!(resolve("autofill").unwrap().pseudo.as_deref(), Some(":autofill"));
+        assert_eq!(resolve("user-valid").unwrap().pseudo.as_deref(), Some(":user-valid"));
+        assert_eq!(resolve("user-invalid").unwrap().pseudo.as_deref(), Some(":user-invalid"));
+    }
+
+    #[test]
+    fn resolves_target_fullscreen_and_popover_open() {
+        assert_eq!(resolve("target").unwrap().pseudo.as_deref(), Some(":target"));
+        assert_eq!(resolve("fullscreen").unwrap().pseudo.as_deref(), Some(":fullscreen"));
+        assert_eq!(resolve("popover-open").unwrap().pseudo.as_deref(), Some(":popover-open"));
+    }
+
+    #[test]
+    fn resolves_details_content_pseudo_element() {
+        assert_eq!(resolve("details-content").unwrap().pseudo_element.as_deref(), Some("::details-content"));
+    }
+
+    #[test]
+    fn resolves_pointer_media_modifiers() {
+        assert_eq!(resolve("pointer-coarse").unwrap().media_query.as_deref(), Some("(pointer: coarse)"));
+        assert_eq!(resolve("pointer-fine").unwrap().media_query.as_deref(), Some("(pointer: fine)"));
+        assert_eq!(resolve("any-pointer-coarse").unwrap().media_query.as_deref(), Some("(any-pointer: coarse)"));
+        assert_eq!(resolve("any-pointer-fine").unwrap().media_query.as_deref(), Some("(any-pointer: fine)"));
+    }
+
+    #[test]
+    fn resolves_arbitrary_nth_of_type_variants_distinct_from_nth_child() {
+        let nth = resolve("nth-of-type-[3n+1]").unwrap();
+        assert_eq!(nth.pseudo.as_deref(), Some(":nth-of-type(3n+1)"));
+        let nth_last = resolve("nth-last-of-type-[2]").unwrap();
+        assert_eq!(nth_last.pseudo.as_deref(), Some(":nth-last-of-type(2)"));
+        // Still resolves the shorter "nth-"/"nth-last-" (child) forms unchanged.
+        assert_eq!(resolve("nth-[3n+1]").unwrap().pseudo.as_deref(), Some(":nth-child(3n+1)"));
+    }
+
+    #[test]
+    fn resolves_direct_children_and_all_descendants() {
+        assert_eq!(resolve("*").unwrap().descendant_selector.as_deref(), Some(" > *"));
+        assert_eq!(resolve("**").unwrap().descendant_selector.as_deref(), Some(" *"));
+    }
+
+    #[test]
+    fn resolves_arbitrary_supports_feature_queries() {
+        let r = resolve("supports-[display:grid]").unwrap();
+        assert_eq!(r.supports_query.as_deref(), Some("(display:grid)"));
+        assert!(r.media_query.is_none());
+    }
+
+    #[test]
+    fn resolves_in_star_as_a_zero_specificity_ancestor_match() {
+        let r = resolve("in-hover").unwrap();
+        assert_eq!(r.ancestor_selector.as_deref(), Some(":where(:hover) "));
+        // Doesn't require a specific static pseudo-only modifier that has
+        // no pseudo at all (e.g. an ancestor-only one) to resolve.
+        assert!(resolve("in-group-hover").is_none());
     }
 
     #[test]

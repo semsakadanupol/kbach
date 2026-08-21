@@ -230,8 +230,8 @@ pub fn resolve_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<
 /// `background-position`/`-size`/`-repeat`/`-attachment`/`-clip`/`-origin`,
 /// and no gradient support without a third-party native module.
 ///
-/// `effects::resolve` (the WEB dispatch for this module) was never wired
-/// into this dispatcher at all — every other effects.rs addition from
+/// `effects::resolve` (the WEB dispatch for this module) is never called
+/// wholesale from this dispatcher — every other effects.rs addition from
 /// Phase 22 (`text-shadow`/`mix-blend`/`bg-blend`/`animate`) stays
 /// excluded, each for its own reason: RN's `textShadow*` is a set of
 /// discrete style keys (color/offset/radius), not a single CSS shorthand,
@@ -239,13 +239,18 @@ pub fn resolve_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<
 /// `background-blend-mode` have no RN equivalent at all; `animate-*`'s
 /// `animation` shorthand + `@keyframes` are a pure CSS mechanism RN has no
 /// concept of (RN animation is imperative, via the `Animated` API).
-/// `shadow`/`shadow-*` is the one exception — `effects::
-/// native_shadow_declarations` is a separate, NATIVE-only entry point
-/// (also living in effects.rs, just never called from `effects::resolve`)
-/// that maps the same named tiers to RN's discrete
+/// `shadow`/`shadow-*` and `opacity` are the two exceptions, each via its
+/// own dedicated native entry point rather than a forward to
+/// `effects::resolve` itself: `effects::native_shadow_declarations` (also
+/// living in effects.rs, just never called from `effects::resolve`) maps
+/// the named shadow tiers to RN's discrete
 /// `shadowColor`/`shadowOffset`/`shadowOpacity`/`shadowRadius` (iOS) +
 /// `elevation` (Android) keys instead of a CSS string — see that
-/// function's own doc comment. `ring-offset-*`'s extension of
+/// function's own doc comment. `opacity` needs no translation at all — RN's
+/// `opacity` style is already a plain 0-1 number, exactly what
+/// `resolve_percent` (this module's own helper, already shared with
+/// `effects::resolve`'s web arm) produces — see `resolve_opacity_native`
+/// below. `ring-offset-*`'s extension of
 /// `border::resolve`'s existing `ring` handling inherits that arm's
 /// already-established "resolves to a CSS-only property, harmless"
 /// precedent unchanged — same for Phase 23's `border-collapse`/
@@ -291,7 +296,18 @@ pub fn resolve_utility_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Opti
         .or_else(|| resolve_color_native(parsed, theme))
         .or_else(|| resolve_leading_tracking_native(parsed))
         .or_else(|| resolve_typography_native(parsed, theme))
+        .or_else(|| resolve_opacity_native(parsed))
         .or_else(|| effects::native_shadow_declarations(parsed))
+}
+
+/// RN's `opacity` style is a plain 0-1 number — see this function's own
+/// caller-side doc note in `resolve_utility_native` above for why this is a
+/// dedicated entry point rather than forwarding to `effects::resolve`.
+fn resolve_opacity_native(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
+    if parsed.utility != "opacity" {
+        return None;
+    }
+    resolve_percent(parsed).map(|v| vec![decl("opacity", &v)])
 }
 
 /// `font-weight`/`text-transform`/`text-decoration-line`/`font-style` all
@@ -647,6 +663,13 @@ mod native_dispatcher_tests {
         let ring_offset_result = resolve_utility_native(&parse_class("ring-offset-4"), &t);
         assert!(ring_offset_result.is_some());
         assert_eq!(ring_offset_result.unwrap()[0], decl("--kb-ring-offset-width", "4px"));
+    }
+
+    #[test]
+    fn resolves_opacity_on_native_to_a_decimal() {
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("opacity-50"), &t), Some(vec![decl("opacity", "0.5")]));
+        assert_eq!(resolve_utility_native(&parse_class("opacity-[0.42]"), &t), Some(vec![decl("opacity", "0.42")]));
     }
 
     #[test]

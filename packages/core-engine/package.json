@@ -1,6 +1,6 @@
 {
   "name": "@kbach/core-engine",
-  "version": "1.0.0-beta.5",
+  "version": "1.0.0-beta.6",
   "description": "Rust/WASM utility-class resolution engine powering @kbach/react and @kbach/react-native.",
   "keywords": ["css", "wasm", "rust", "tailwind", "utility-first", "styling"],
   "license": "MIT",
@@ -35,7 +35,7 @@
     "build": "wasm-pack build --target web --out-dir dist && wasm-pack build --target nodejs --out-dir dist-node && node -e \"require('fs').rmSync('dist/.gitignore',{force:true});require('fs').rmSync('dist-node/.gitignore',{force:true})\" && node scripts/build-android-if-available.mjs",
     "build:android": "node scripts/build-android.mjs",
     "test": "cargo test",
-    "lint": "cargo check",
+    "lint": "cargo check && cargo clippy --all-targets --all-features -- -D warnings",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('dist-node',{recursive:true,force:true});require('fs').rmSync('target',{recursive:true,force:true})\""
   }
 }

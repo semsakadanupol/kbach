@@ -5,6 +5,11 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "@kbach/core-engine#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"],
+      "cache": false
+    },
     "dev": {
       "dependsOn": ["^build"],
       "persistent": true,
@@ -12,6 +17,11 @@
     },
     "test": {
       "dependsOn": ["^build"],
+      "outputs": ["coverage/**"],
+      "cache": false
+    },
+    "@kbach/react-native#test": {
+      "dependsOn": ["^build", "build"],
       "outputs": ["coverage/**"],
       "cache": false
     },

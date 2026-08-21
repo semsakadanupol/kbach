@@ -8,7 +8,7 @@
  * comment for the full reasoning behind each exclusion. Keep this in sync
  * by diffing against `resolve_utility_native` whenever it changes.
  */
-import { decl, type Declaration } from './shared';
+import { decl, resolvePercent, type Declaration } from './shared';
 import * as layout from './resolvers/layout';
 import * as spacing from './resolvers/spacing';
 import * as border from './resolvers/border';
@@ -18,12 +18,34 @@ import { nativeShadowDeclarations } from './resolvers/effects';
 import type { ParsedClass } from './parser';
 import type { ThemeConfig } from '../theme';
 
-function resolveTypographyNative(parsed: ParsedClass): Declaration[] | null {
+/**
+ * The first comma-separated segment of a CSS-shaped font stack, with any
+ * surrounding quotes stripped — port of `resolvers/mod.rs`'s
+ * `first_font_name`. RN's `fontFamily` prop takes exactly ONE registered
+ * font name, not a CSS fallback list.
+ */
+function firstFontName(stack: string): string {
+  const first = stack.split(',')[0] ?? stack;
+  return first.trim().replace(/^["']|["']$/g, '');
+}
+
+/**
+ * `font-<name>` (not a weight keyword) resolves here too, unlike web's
+ * `font-family` value — see `resolvers/mod.rs`'s `resolve_typography_native`
+ * doc comment for why this takes just the first segment of whatever
+ * `fontFamilyValue` returns.
+ */
+function resolveTypographyNative(parsed: ParsedClass, theme: ThemeConfig): Declaration[] | null {
   switch (parsed.utility) {
     case 'font': {
       if (parsed.value === null) return null;
+      if (parsed.isArbitrary) {
+        return [decl('font-family', firstFontName(parsed.value))];
+      }
       const w = typography.fontWeight(parsed.value);
-      return w === null ? null : [decl('font-weight', w)];
+      if (w !== null) return [decl('font-weight', w)];
+      const family = typography.fontFamilyValue(theme, parsed.value);
+      return family === null ? null : [decl('font-family', firstFontName(family))];
     }
     case 'uppercase':
       return [decl('text-transform', 'uppercase')];
@@ -96,6 +118,13 @@ function resolveColorNative(parsed: ParsedClass, theme: ThemeConfig): Declaratio
   }
 }
 
+/** RN's `opacity` style is a plain 0-1 number — trivially representable, unlike most of `effects::resolve`'s other web-only arms, so this is a dedicated native entry point rather than a forward to the (excluded) `effects` module wholesale. */
+function resolveOpacityNative(parsed: ParsedClass): Declaration[] | null {
+  if (parsed.utility !== 'opacity') return null;
+  const v = resolvePercent(parsed);
+  return v === null ? null : [decl('opacity', v)];
+}
+
 export function resolveUtilityNative(parsed: ParsedClass, theme: ThemeConfig): Declaration[] | null {
   return (
     layout.resolveFlex(parsed, false) ??
@@ -104,7 +133,8 @@ export function resolveUtilityNative(parsed: ParsedClass, theme: ThemeConfig): D
     border.resolve(parsed, theme) ??
     resolveColorNative(parsed, theme) ??
     resolveLeadingTrackingNative(parsed) ??
-    resolveTypographyNative(parsed) ??
+    resolveTypographyNative(parsed, theme) ??
+    resolveOpacityNative(parsed) ??
     nativeShadowDeclarations(parsed)
   );
 }

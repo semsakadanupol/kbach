@@ -56,6 +56,16 @@ quirk, not a config oversight. When it can't run, it warns loudly instead
 of either silently succeeding or failing the whole pipeline — **read the
 build output**, don't assume a green build means the `.so` is current.
 
+`turbo.json` gives `core-engine`'s `build` task its own `@kbach/core-engine#build`
+override with `"cache": false`, specifically so this step can never be
+skipped by a turbo cache hit — the android script's `.so` output lives
+outside `dist/**` (this task's only declared output, and outside
+`core-engine`'s own directory entirely), so turbo has no way to know
+whether a cached build is safe with respect to that file. Without the
+override, a cache hit would skip re-running the script — and its warning —
+entirely, and a stale `.so` could go unnoticed even on an apparently
+successful build.
+
 If you're not sure, verify directly rather than trust the log:
 ```sh
 grep -ao "<some string unique to your Rust change>" \

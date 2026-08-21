@@ -184,6 +184,85 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('shadow-inner', theme(), 'light', false, W)).toEqual({});
   });
 
+  it('resolves opacity to a number, not a string', () => {
+    expect(resolveStyleJs('opacity-50', theme(), 'light', false, W).opacity).toBe(0.5);
+    expect(resolveStyleJs('opacity-[0.42]', theme(), 'light', false, W).opacity).toBe(0.42);
+  });
+
+  it('has no negative form for opacity, matching the Rust engine', () => {
+    // Regression: resolvePercent (shared.ts) was missing the negative-value
+    // guard resolve_percent has in Rust — "-opacity-50" resolved to 0.5 here
+    // while the Rust/WASM engine correctly resolved nothing, a real
+    // cross-engine divergence for the exact same class string.
+    expect(resolveStyleJs('-opacity-50', theme(), 'light', false, W).opacity).toBeUndefined();
+  });
+
+  it('resolves the full text-size scale through 9xl, not just up to 4xl', () => {
+    // font-size is in NUMERIC_LENGTH_PROPS — rem converts to a plain px number (× 16).
+    expect(resolveStyleJs('text-5xl', theme(), 'light', false, W).fontSize).toBe(48);
+    expect(resolveStyleJs('text-9xl', theme(), 'light', false, W).fontSize).toBe(128);
+  });
+
+  it('resolves the full font-weight scale, including extralight/light/black', () => {
+    expect(resolveStyleJs('font-extralight', theme(), 'light', false, W).fontWeight).toBe('200');
+    expect(resolveStyleJs('font-light', theme(), 'light', false, W).fontWeight).toBe('300');
+    expect(resolveStyleJs('font-black', theme(), 'light', false, W).fontWeight).toBe('900');
+  });
+
+  it('resolves logical text-start/text-end alignment', () => {
+    expect(resolveStyleJs('text-start', theme(), 'light', false, W).textAlign).toBe('start');
+    expect(resolveStyleJs('text-end', theme(), 'light', false, W).textAlign).toBe('end');
+  });
+
+  it('resolves a theme-configured font-family to a single stripped name', () => {
+    const t = theme({ fontFamily: { sans: 'Inter, sans-serif', display: '"Cal Sans", sans-serif' } });
+    expect(resolveStyleJs('font-sans', t, 'light', false, W).fontFamily).toBe('Inter');
+    expect(resolveStyleJs('font-display', t, 'light', false, W).fontFamily).toBe('Cal Sans');
+    expect(resolveStyleJs('font-[Georgia]', t, 'light', false, W).fontFamily).toBe('Georgia');
+    // font-weight still takes priority over any theme-configured family name.
+    expect(resolveStyleJs('font-bold', t, 'light', false, W).fontWeight).toBe('700');
+  });
+
+  it('resolves justify-normal/stretch and align-content normal', () => {
+    expect(resolveStyleJs('justify-normal', theme(), 'light', false, W).justifyContent).toBe('normal');
+    expect(resolveStyleJs('justify-stretch', theme(), 'light', false, W).justifyContent).toBe('stretch');
+    expect(resolveStyleJs('content-normal', theme(), 'light', false, W).alignContent).toBe('normal');
+  });
+
+  it('resolves overflow-clip, overflow-x/y, and overscroll-*', () => {
+    expect(resolveStyleJs('overflow-clip', theme(), 'light', false, W).overflow).toBe('clip');
+    expect(resolveStyleJs('overflow-x-hidden', theme(), 'light', false, W).overflowX).toBe('hidden');
+    expect(resolveStyleJs('overflow-y-scroll', theme(), 'light', false, W).overflowY).toBe('scroll');
+    expect(resolveStyleJs('overscroll-contain', theme(), 'light', false, W).overscrollBehavior).toBe('contain');
+    expect(resolveStyleJs('overscroll-x-none', theme(), 'light', false, W).overscrollBehaviorX).toBe('none');
+    expect(resolveStyleJs('overscroll-y-auto', theme(), 'light', false, W).overscrollBehaviorY).toBe('auto');
+  });
+
+  it('resolves inset-x/inset-y to both sides of that axis', () => {
+    const t = theme({ spacing: { '4': 16 } });
+    const style = resolveStyleJs('inset-x-4', t, 'light', false, W);
+    expect(style.left).toBe(16);
+    expect(style.right).toBe(16);
+    const styleY = resolveStyleJs('inset-y-4', t, 'light', false, W);
+    expect(styleY.top).toBe(16);
+    expect(styleY.bottom).toBe(16);
+  });
+
+  it('resolves logical start/end inset', () => {
+    // "inset-inline-start"/"inset-inline-end" aren't in NUMERIC_LENGTH_PROPS
+    // (neither engine strips "px" for them) — stays a string, same as Rust.
+    const t = theme({ spacing: { '4': 16 } });
+    expect(resolveStyleJs('start-4', t, 'light', false, W).insetInlineStart).toBe('16px');
+    expect(resolveStyleJs('end-4', t, 'light', false, W).insetInlineEnd).toBe('16px');
+  });
+
+  it('resolves aspect-auto and an arbitrary aspect ratio, not just square/video', () => {
+    expect(resolveStyleJs('aspect-auto', theme(), 'light', false, W).aspectRatio).toBe('auto');
+    expect(resolveStyleJs('aspect-[3/4]', theme(), 'light', false, W).aspectRatio).toBe('3/4');
+    expect(resolveStyleJs('aspect-square', theme(), 'light', false, W).aspectRatio).toBe('1 / 1');
+    expect(resolveStyleJs('aspect-video', theme(), 'light', false, W).aspectRatio).toBe('16 / 9');
+  });
+
   it('resolves full but not screen sizing on native', () => {
     expect(resolveStyleJs('w-full', theme(), 'light', false, W).width).toBe('100%');
     expect(resolveStyleJs('w-screen', theme(), 'light', false, W).width).toBeUndefined();

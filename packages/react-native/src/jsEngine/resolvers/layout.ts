@@ -8,6 +8,32 @@ function negateRaw(value: string, negative: boolean): string {
   return negative ? `-${value}` : value;
 }
 
+/** Port of `resolvers/layout.rs`'s `overflow_axis_value`. */
+function overflowAxisValue(property: string, value: string): Declaration[] | null {
+  switch (value) {
+    case 'auto':
+    case 'hidden':
+    case 'clip':
+    case 'visible':
+    case 'scroll':
+      return [decl(property, value)];
+    default:
+      return null;
+  }
+}
+
+/** Port of `resolvers/layout.rs`'s `overscroll_value`. */
+function overscrollValue(property: string, value: string): Declaration[] | null {
+  switch (value) {
+    case 'auto':
+    case 'contain':
+    case 'none':
+      return [decl(property, value)];
+    default:
+      return null;
+  }
+}
+
 export function resolve(parsed: ParsedClass, theme: ThemeConfig): Declaration[] | null {
   switch (parsed.utility) {
     case 'flex':
@@ -54,6 +80,12 @@ export function resolve(parsed: ParsedClass, theme: ThemeConfig): Declaration[] 
       return [decl('justify-content', 'space-around')];
     case 'justify-evenly':
       return [decl('justify-content', 'space-evenly')];
+    case 'justify-normal':
+      return [decl('justify-content', 'normal')];
+    case 'justify-stretch':
+      return [decl('justify-content', 'stretch')];
+    case 'content-normal':
+      return [decl('align-content', 'normal')];
     case 'content-start':
       return [decl('align-content', 'flex-start')];
     case 'content-end':
@@ -88,6 +120,18 @@ export function resolve(parsed: ParsedClass, theme: ThemeConfig): Declaration[] 
       return [decl('overflow', 'scroll')];
     case 'overflow-visible':
       return [decl('overflow', 'visible')];
+    case 'overflow-clip':
+      return [decl('overflow', 'clip')];
+    case 'overflow-x':
+      return parsed.value === null ? null : overflowAxisValue('overflow-x', parsed.value);
+    case 'overflow-y':
+      return parsed.value === null ? null : overflowAxisValue('overflow-y', parsed.value);
+    case 'overscroll':
+      return parsed.value === null ? null : overscrollValue('overscroll-behavior', parsed.value);
+    case 'overscroll-x':
+      return parsed.value === null ? null : overscrollValue('overscroll-behavior-x', parsed.value);
+    case 'overscroll-y':
+      return parsed.value === null ? null : overscrollValue('overscroll-behavior-y', parsed.value);
     case 'static':
       return [decl('position', 'static')];
     case 'relative':
@@ -128,10 +172,43 @@ export function resolve(parsed: ParsedClass, theme: ThemeConfig): Declaration[] 
       const v = resolveNegatableLength(theme, parsed);
       return v === null ? null : [decl('inset', v)];
     }
-    case 'aspect-square':
-      return [decl('aspect-ratio', '1 / 1')];
-    case 'aspect-video':
-      return [decl('aspect-ratio', '16 / 9')];
+    case 'inset-x': {
+      const v = resolveNegatableLength(theme, parsed);
+      return v === null ? null : [decl('left', v), decl('right', v)];
+    }
+    case 'inset-y': {
+      const v = resolveNegatableLength(theme, parsed);
+      return v === null ? null : [decl('top', v), decl('bottom', v)];
+    }
+    // Logical inset — just a different CSS property name, same reasoning
+    // as Rust's layout.rs (no direction-tracking logic needed here).
+    case 'start': {
+      const v = resolveNegatableLength(theme, parsed);
+      return v === null ? null : [decl('inset-inline-start', v)];
+    }
+    case 'end': {
+      const v = resolveNegatableLength(theme, parsed);
+      return v === null ? null : [decl('inset-inline-end', v)];
+    }
+    // "aspect-" is a registered VALUE_PREFIXES entry (parser.ts), so
+    // "aspect-square"/"aspect-video"/"aspect-auto"/arbitrary all arrive
+    // here as utility="aspect" + a value, mirroring layout.rs's own
+    // "aspect" arm.
+    case 'aspect': {
+      const value = parsed.value;
+      if (value === null) return null;
+      if (parsed.isArbitrary) return [decl('aspect-ratio', value)];
+      switch (value) {
+        case 'square':
+          return [decl('aspect-ratio', '1 / 1')];
+        case 'video':
+          return [decl('aspect-ratio', '16 / 9')];
+        case 'auto':
+          return [decl('aspect-ratio', 'auto')];
+        default:
+          return null;
+      }
+    }
     default:
       return null;
   }

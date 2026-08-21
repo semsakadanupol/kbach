@@ -234,8 +234,10 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
     // first in the stylesheet).
     let mut needs_content_var = false;
     let mut ancestor_prefix = String::new();
+    let mut descendant_suffix = String::new();
     let mut media_wrappers: Vec<String> = Vec::new();
     let mut container_wrappers: Vec<String> = Vec::new();
+    let mut supports_wrappers: Vec<String> = Vec::new();
     let mut dark_scheme: Option<DarkScheme> = None;
     let mut needs_important = parsed.important;
     let mut order = 0.0_f64;
@@ -257,11 +259,17 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
         if let Some(a) = def.ancestor_selector {
             ancestor_prefix.push_str(&a);
         }
+        if let Some(d) = def.descendant_selector {
+            descendant_suffix.push_str(&d);
+        }
         if let Some(mq) = def.media_query {
             media_wrappers.push(mq);
         }
         if let Some(cq) = def.container_query {
             container_wrappers.push(cq);
+        }
+        if let Some(sq) = def.supports_query {
+            supports_wrappers.push(sq);
         }
         if let Some(scheme) = def.dark_scheme {
             dark_scheme = Some(scheme);
@@ -325,15 +333,23 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
     // fixed order applies regardless of which order the modifiers were
     // actually WRITTEN in (`before:hover:` and `hover:before:` produce the
     // identical selector shape).
-    let child_suffix = if needs_child_combinator { CHILD_COMBINATOR_SUFFIX } else { "" };
+    // `descendant_suffix` (from `*:`/`**:`) takes priority over
+    // `child_suffix` (divide-x/divide-y/space-x/space-y's own automatic
+    // " > * + *") when a class combines both, e.g. `*:divide-x-2` —
+    // without this guard the two would concatenate into a garbled,
+    // unintended selector like ".foo > * + * > *". `*:`/`**:` is an
+    // explicit modifier the caller chose to write; the divide/space
+    // combinator is an implicit side effect of the utility value, so the
+    // explicit choice wins rather than the two silently combining.
+    let child_suffix = if needs_child_combinator && descendant_suffix.is_empty() { CHILD_COMBINATOR_SUFFIX } else { "" };
     let base_selector = match mode {
         SelectorMode::Class => {
             let escaped = escape_selector(&parsed.original);
-            format!(".{escaped}{pseudo_suffix}{pseudo_element_suffix}{child_suffix}")
+            format!(".{escaped}{pseudo_suffix}{pseudo_element_suffix}{child_suffix}{descendant_suffix}")
         }
         SelectorMode::DataAttribute => {
             let attr_value = escape_attr_value(&parsed.original);
-            format!("[data-kb~=\"{attr_value}\"]{pseudo_suffix}{pseudo_element_suffix}{child_suffix}")
+            format!("[data-kb~=\"{attr_value}\"]{pseudo_suffix}{pseudo_element_suffix}{child_suffix}{descendant_suffix}")
         }
     };
     let selector = format!("{ancestor_prefix}{base_selector}");
@@ -346,11 +362,11 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
     };
 
     // Wrapped innermost-first: `@starting-style` right around the base
-    // rule, then `@container`, then `@media` outermost — an arbitrary but
-    // fixed nesting order. At-rules like these are independent AND'd
-    // conditions with no interaction between them, so any consistent
-    // nesting order produces equivalent, valid CSS; this one just happens
-    // to match the order these blocks are computed in above.
+    // rule, then `@container`, then `@supports`, then `@media` outermost —
+    // an arbitrary but fixed nesting order. At-rules like these are
+    // independent AND'd conditions with no interaction between them, so any
+    // consistent nesting order produces equivalent, valid CSS; this one
+    // just happens to match the order these blocks are computed in above.
     if needs_starting_style {
         rule = format!("@starting-style {{ {rule} }}");
     }
@@ -360,6 +376,10 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
     }
     if let Some(width) = container_min_width {
         rule = format!("@container (min-width: {width}px) {{ {rule} }}");
+    }
+
+    for sq in &supports_wrappers {
+        rule = format!("@supports {sq} {{ {rule} }}");
     }
 
     for mq in &media_wrappers {
@@ -487,6 +507,53 @@ mod tests {
         let dark = build_rule(&parse_class("dark:bg-blue-6"), &[decl("background-color", "x")], &theme).unwrap();
         assert!(via.order < to.order);
         assert!(to.order < dark.order);
+    }
+
+    #[test]
+    fn direct_children_variant_targets_a_child_combinator() {
+        let theme = ThemeConfig::default();
+        let rule = build_rule(&parse_class("*:flex"), &[decl("display", "flex")], &theme).unwrap();
+        assert_eq!(rule.rule, ".\\*\\:flex > * { display: flex }");
+    }
+
+    #[test]
+    fn direct_children_variant_takes_priority_over_divides_own_child_combinator() {
+        // Regression: divide-x/divide-y/space-x/space-y's own automatic
+        // " > * + *" combinator (needs_child_combinator) and "*:"/"**:"'s
+        // own " > *"/" *" suffix (descendant_suffix) used to both apply
+        // unguarded — "*:divide-x" produced a garbled selector like
+        // ".foo > * + * > *" instead of either shape alone. The explicit
+        // "*:" modifier should win, not silently concatenate.
+        let theme = ThemeConfig::default();
+        let rule = build_rule(&parse_class("*:divide-x"), &[decl("__divide-x-width", "1px")], &theme).unwrap();
+        assert!(rule.rule.starts_with(".\\*\\:divide-x > * {"), "got: {}", rule.rule);
+        assert!(!rule.rule.contains("> * + * >"), "got: {}", rule.rule);
+
+        // Plain (non-"*:") divide-x is unaffected — still gets its own
+        // child-combinator suffix as before.
+        let plain = build_rule(&parse_class("divide-x"), &[decl("__divide-x-width", "1px")], &theme).unwrap();
+        assert!(plain.rule.starts_with(".divide-x > * + * {"), "got: {}", plain.rule);
+    }
+
+    #[test]
+    fn all_descendants_variant_targets_a_plain_descendant_combinator() {
+        let theme = ThemeConfig::default();
+        let rule = build_rule(&parse_class("**:flex"), &[decl("display", "flex")], &theme).unwrap();
+        assert_eq!(rule.rule, ".\\*\\*\\:flex * { display: flex }");
+    }
+
+    #[test]
+    fn supports_variant_wraps_the_rule_in_an_at_supports_block() {
+        let theme = ThemeConfig::default();
+        let rule = build_rule(&parse_class("supports-[display:grid]:flex"), &[decl("display", "flex")], &theme).unwrap();
+        assert_eq!(rule.rule, "@supports (display:grid) { .supports-\\[display\\:grid\\]\\:flex { display: flex } }");
+    }
+
+    #[test]
+    fn in_star_variant_matches_any_ancestor_in_that_state_via_where() {
+        let theme = ThemeConfig::default();
+        let rule = build_rule(&parse_class("in-hover:opacity-100"), &[decl("opacity", "1")], &theme).unwrap();
+        assert_eq!(rule.rule, ":where(:hover) .in-hover\\:opacity-100 { opacity: 1 }");
     }
 
     #[test]

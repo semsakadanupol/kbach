@@ -196,6 +196,22 @@ const STRUCTURAL_TOKENS: readonly string[] = [
   'aria-checked:', 'aria-disabled:', 'aria-expanded:', 'aria-hidden:',
   'aria-pressed:', 'aria-readonly:', 'aria-required:', 'aria-selected:', 'aria-busy:',
 
+  // registry.rs modifiers, added later — same "fixed/static, finite" bar
+  // as the Phase 24 block above. Structural -of-type/empty, form-state and
+  // validation pseudo-classes, other native pseudo-classes with no aria-*
+  // counterpart, a pseudo-element, pointer media variants, and the
+  // direct-children/all-descendants variants. "supports-[...]:"/"in-*:" are
+  // deliberately excluded here for the same "no finite enumerable set"
+  // reason as has-[...]:/group-<pseudo>: above.
+  'first-of-type:', 'last-of-type:', 'only-of-type:', 'empty:',
+  'enabled:', 'read-only:', 'required:', 'optional:', 'valid:', 'invalid:',
+  'in-range:', 'out-of-range:', 'default:', 'indeterminate:',
+  'placeholder-shown:', 'autofill:', 'user-valid:', 'user-invalid:',
+  'target:', 'fullscreen:', 'popover-open:',
+  'details-content:',
+  'pointer-coarse:', 'pointer-fine:', 'any-pointer-coarse:', 'any-pointer-fine:',
+  '*:', '**:',
+
   // Phase 25 (container queries & arbitrary properties). "@container" is a
   // real UTILITY (container-type: inline-size), not a modifier — included
   // as a bare token like "flex"/"hidden" above, not with the trailing ":"

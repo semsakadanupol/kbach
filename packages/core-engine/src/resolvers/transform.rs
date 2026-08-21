@@ -370,8 +370,8 @@ mod tests {
         assert!(TRANSFORM_COMPOSE_GPU.starts_with("translate3d(var(--kb-translate-x,0),var(--kb-translate-y,0),0)"));
         // Beyond the translate call shape, both variants reference the
         // exact same remaining slots in the exact same order.
-        let cpu_rest = TRANSFORM_COMPOSE_CPU.splitn(2, ' ').nth(1).unwrap();
-        let gpu_rest = TRANSFORM_COMPOSE_GPU.splitn(2, ' ').nth(1).unwrap();
+        let cpu_rest = TRANSFORM_COMPOSE_CPU.split_once(' ').unwrap().1;
+        let gpu_rest = TRANSFORM_COMPOSE_GPU.split_once(' ').unwrap().1;
         assert_eq!(cpu_rest, gpu_rest);
     }
 

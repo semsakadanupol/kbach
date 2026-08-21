@@ -18,10 +18,11 @@
  * Deliberately ONE listener set shared by every token, not per-token
  * subscriptions — same trade-off `darkModeStore.ts` already makes for
  * "any relevant change re-renders every subscribed element" simplicity.
- * `jsxRuntimeCore.ts`'s own key-suffix scoping (only the SPECIFIC token
- * names a given className references) is what keeps an unrelated token
- * change from forcing an unnecessary remount on an element that doesn't
- * use it, same shape as the responsive-breakpoint scoping already does.
+ * An unrelated token's change still re-renders every subscribed element
+ * (there's no per-token filtering), but `substituteDynamicTokens` in
+ * `jsxRuntimeCore.ts` re-reads each token's CURRENT value fresh on every
+ * one of those re-renders, so the resolved style stays correct regardless
+ * — the redundant re-render is a cheap, accepted trade-off, not a bug.
  */
 
 const tokens = new Map<string, string>();

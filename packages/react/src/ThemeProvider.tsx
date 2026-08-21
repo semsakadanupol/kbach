@@ -31,7 +31,7 @@ let warnedMultipleProviders = false;
 export function ThemeProvider({ children, defaultMode = 'system' }: ThemeProviderProps) {
   useEffect(() => {
     mountedProviderCount++;
-    if (mountedProviderCount > 1 && !warnedMultipleProviders) {
+    if (mountedProviderCount > 1 && !warnedMultipleProviders && process.env.NODE_ENV !== 'production') {
       warnedMultipleProviders = true;
       console.warn(
         '[kbach] Multiple <ThemeProvider> instances are mounted at once. ' +

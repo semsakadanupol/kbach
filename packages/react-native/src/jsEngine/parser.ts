@@ -33,7 +33,8 @@ const VALUE_PREFIXES: readonly string[] = [
   'ring-offset-', 'ring-', 'outline-offset-', 'outline-', 'shadow-', 'opacity-',
   'duration-', 'delay-', 'ease-', 'cursor-', 'mix-blend-', 'animate-',
   'leading-', 'tracking-', 'font-',
-  'z-', 'inset-', 'top-', 'right-', 'bottom-', 'left-',
+  'z-', 'inset-x-', 'inset-y-', 'inset-', 'top-', 'right-', 'bottom-', 'left-', 'start-', 'end-',
+  'overflow-x-', 'overflow-y-', 'overscroll-x-', 'overscroll-y-', 'overscroll-', 'aspect-',
   'divide-color-', 'space-x-', 'space-y-',
   'flex-', 'grow-', 'shrink-', 'order-',
   'grid-cols-', 'grid-rows-', 'grid-flow-', 'auto-cols-', 'auto-rows-',
@@ -83,8 +84,15 @@ export function isSafeArbitraryValue(value: string): boolean {
   return !value.includes('{') && !value.includes('}') && !value.includes(';');
 }
 
-/** Splits on ':' the same way `string.split(':')` would, except a ':' nested inside a `[...]` bracket never counts as a separator. */
-function splitRespectingBrackets(token: string): string[] {
+/**
+ * Splits on ':' the same way `string.split(':')` would, except a ':' nested
+ * inside a `[...]` bracket never counts as a separator. Exported (not just
+ * an internal `parseClass` helper) so `jsxRuntimeCore.ts` can reuse the
+ * exact same bracket-safe modifier-chain splitting for `hover:`/`focus:`/
+ * `disabled:` token rewriting, instead of re-deriving this logic a second
+ * time (see that file's own `stripModifiers` doc comment).
+ */
+export function splitRespectingBrackets(token: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;

@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { kbach } from './index';
+import { kbach, CSS_SYNC_DEBOUNCE_MS } from './index';
 
 // Regression coverage for a real bug: Vite's handleHotUpdate/watcher events
 // always report forward-slash absolute paths (Vite's own convention, on
@@ -40,10 +40,13 @@ describe('kbach() plugin — file path normalization', () => {
     writeFileSync(appFile, '<div className="block" />', 'utf-8');
     const forwardSlashPath = appFile.replace(/\\/g, '/');
     const fakeServer = { watcher: { emit: () => undefined } };
+    vi.useFakeTimers();
     (plugin.handleHotUpdate as unknown as (ctx: { file: string; server: typeof fakeServer }) => void)({
       file: forwardSlashPath,
       server: fakeServer,
     });
+    vi.advanceTimersByTime(CSS_SYNC_DEBOUNCE_MS);
+    vi.useRealTimers();
 
     css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
     expect(css).toContain('display: block');
@@ -157,10 +160,13 @@ describe('kbach() plugin — tag-pruned base reset', () => {
 
     writeFileSync(appFile, '<div className="flex"><button>go</button></div>', 'utf-8');
     const fakeServer = { watcher: { emit: () => undefined } };
+    vi.useFakeTimers();
     (plugin.handleHotUpdate as unknown as (ctx: { file: string; server: typeof fakeServer }) => void)({
       file: appFile,
       server: fakeServer,
     });
+    vi.advanceTimersByTime(CSS_SYNC_DEBOUNCE_MS);
+    vi.useRealTimers();
 
     css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
     expect(css).toContain('button { appearance: none');
@@ -245,7 +251,10 @@ describe('kbach() plugin — configureServer add/unlink handling', () => {
 
     const newFile = join(dir, 'src', 'New.tsx');
     writeFileSync(newFile, '<div className="italic" />', 'utf-8');
+    vi.useFakeTimers();
     server.trigger('add', newFile);
+    vi.advanceTimersByTime(CSS_SYNC_DEBOUNCE_MS);
+    vi.useRealTimers();
 
     const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
     expect(css).toContain('font-style: italic');
@@ -268,7 +277,10 @@ describe('kbach() plugin — configureServer add/unlink handling', () => {
     const server = fakeServer();
     (plugin.configureServer as unknown as (s: typeof server) => void)(server);
     rmSync(goingAwayFile);
+    vi.useFakeTimers();
     server.trigger('unlink', goingAwayFile);
+    vi.advanceTimersByTime(CSS_SYNC_DEBOUNCE_MS);
+    vi.useRealTimers();
 
     css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
     expect(css).not.toContain('font-style: italic');

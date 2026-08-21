@@ -58,9 +58,10 @@ way, no extra config.
 ### Expo Web
 
 Works out of the box — resolves through the same real-CSS engine
-`@kbach/react` uses on the DOM, with full modifier support (`hover:`,
-`focus:`, `group-hover:`, container queries, etc.), not just the
-`dark:`/`active:`/responsive subset native supports.
+`@kbach/react` uses on the DOM, with the FULL modifier set (`group-hover:`,
+`peer-hover:`, container queries, `has-[...]:`, etc.) — everything real
+Tailwind supports. Native supports a smaller, explicitly-scoped subset; see
+"Modifiers on native" below for exactly what that covers.
 
 **Static rendering (SSR) caveat:** `dark:`/responsive classes on content
 that's part of the initial pre-rendered HTML resolve against the *server*,
@@ -123,6 +124,38 @@ module.exports = config; // (React Native CLI: mergeConfig(getDefaultConfig(proj
 
 A single, non-monorepo `npm install` never hits this — only relevant if your
 app and `@kbach/react-native` share a workspace root.
+
+## Modifiers on native
+
+Native has no CSS selector/cascade engine, so only a fixed, explicitly
+supported set of modifiers actually applies — everything else (`group-*:`,
+`peer-*:`, `has-[...]:`, `aria-*:`, `data-*:`, container queries, ...)
+parses without error but never takes effect. Supported today:
+
+- **`dark:`** — reacts to the OS/app color scheme, see "Dark mode" below.
+- **`sm:`/`md:`/`lg:`/`xl:`/`2xl:`** — reacts to `useWindowDimensions()`
+  crossing the matching `theme.screens` breakpoint (rotation/resize/fold).
+- **`active:`** — `Pressable`'s own press state, via its style-callback API.
+- **`hover:`** — tracked via `onHoverIn`/`onHoverOut`, which RN only ever
+  fires on a platform with real pointer input (iOS 13+/Android/macOS/
+  Windows via a mouse/trackpad/Apple Pencil hover) — inert (never fires) on
+  a touch-only device, the same way real Tailwind's `hover:` already
+  degrades on a touch-only *browser*. Composing it onto any host type is
+  harmless even where it never fires.
+- **`focus:`** — tracked via `onFocus`/`onBlur` (keyboard/external-keyboard/
+  TV-remote/tab navigation, and `TextInput` focus).
+- **`disabled:`** — reads the element's own `disabled` prop directly; no
+  event tracking needed, since a prop change already re-renders normally.
+- Any combination of the above chained on one class (`sm:dark:bg-blue-8`,
+  `hover:focus:opacity-100`) requires every named condition to hold at once
+  — chain order never matters (`dark:sm:` and `sm:dark:` are equivalent).
+
+`group-hover:`/`peer-hover:` and friends are NOT implemented on native —
+doing so needs a React Context bridge (propagating an ancestor's hover/
+press/focus state down to descendants, since there's no `.group`/`.peer`
+selector relationship to lean on) that doesn't exist today. If you need
+group/peer-style coordination on native right now, lift the shared state
+into a parent component yourself and pass it down as an explicit prop.
 
 ## Dark mode
 
@@ -264,8 +297,8 @@ On web, `setDynamicToken` writes the real CSS custom property to the DOM —
 every element using it repaints instantly via the browser's own CSS engine,
 no React re-render involved. On native, the className is substituted with
 the token's current value before every resolve, and an element referencing
-a token re-renders/repaints on its own when that specific token changes
-(same `key`-remount mechanism `dark:` and `sm:`/`md:`/... already use — see
+a token re-renders/repaints on its own when that token changes (same
+subscription mechanism `dark:` and `sm:`/`md:`/... already use — see
 `jsxRuntimeCore.ts`'s own doc comments). An unregistered token name falls
 through to the same native invalid-value warning above.
 

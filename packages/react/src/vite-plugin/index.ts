@@ -42,6 +42,15 @@ export interface KbachPluginOptions {
 
 const DEFAULT_SCAN_DIRS = ['src', 'app', 'pages', 'components'];
 
+// A bulk change (git checkout/branch switch/rebase touching many files)
+// fires one add/unlink/handleHotUpdate event per file in quick succession —
+// without batching, each one independently re-walks every active token
+// (generateCSS) and does a full kbach.css read+diff+write (writeKbachToFile),
+// so N changed files means N full recomputations instead of one. Exported so
+// tests can advance fake timers by exactly this amount rather than
+// duplicating the constant.
+export const CSS_SYNC_DEBOUNCE_MS = 50;
+
 // Normalizes a file path to forward slashes (and lowercase on Windows,
 // whose filesystem is case-insensitive) so `fileTokens`'s keys are
 // consistent regardless of which of two different path styles produced
@@ -228,6 +237,22 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
     if (changed && server) server.watcher.emit('change', mainCSSFile());
   }
 
+  // Coalesces same-tick/near-simultaneous events into a single
+  // syncMainCSSFile call, trailing-edge — each new event pushes the sync
+  // out rather than running immediately, so a burst settles to exactly one
+  // recompute+write after CSS_SYNC_DEBOUNCE_MS of quiet, not one per file.
+  // fileTokens/fileTags are still updated synchronously per event (cheap,
+  // and needed so a later event in the same burst sees prior events'
+  // results) — only the expensive generateCSS+write is deferred.
+  let syncTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleSync(server?: Parameters<typeof syncMainCSSFile>[0]): void {
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => {
+      syncTimer = null;
+      syncMainCSSFile(server);
+    }, CSS_SYNC_DEBOUNCE_MS);
+  }
+
   function initialScan(): void {
     for (const dir of includeDirs) {
       scanDir(join(root, dir), processFile);
@@ -282,7 +307,7 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
             fileTags.delete(normPath(file));
           }
         }
-        syncMainCSSFile(server);
+        scheduleSync(server);
       };
       server.watcher.on('add', (file) => onAddOrUnlink(file, false));
       server.watcher.on('unlink', (file) => onAddOrUnlink(file, true));
@@ -297,7 +322,7 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
         fileTokens.delete(normPath(file));
         fileTags.delete(normPath(file));
       }
-      syncMainCSSFile(server);
+      scheduleSync(server);
     },
   };
 }

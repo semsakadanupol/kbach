@@ -20,8 +20,8 @@ import type { LayoutChangeEvent, PressableStateCallbackType } from 'react-native
 import type { StyleObject } from './nativeBridge';
 import { getGlobalDarkMode, subscribeGlobalDarkMode } from './darkModeStore';
 import { getDynamicToken, subscribeDynamicTokens, getDynamicTokensVersion } from './dynamicTokens';
-import { getTheme } from './theme';
 import { parsePercentRelativeCalc, resolvePercentRelativeCalc, type PercentRelativeCalc } from './layoutCalc';
+import { splitRespectingBrackets } from './jsEngine/parser';
 
 export { Fragment };
 export type { JSX } from 'react';
@@ -85,6 +85,89 @@ function stripPercentRelativeCalcTokens(classStrRaw: string): string {
     .join(' ');
 }
 
+// hover:/focus:/disabled: — unlike dark:/active:/responsive, resolveStyle
+// (the Rust engine and its JS-fallback port alike) has no parameter slot
+// for these at all: its FFI signature (classString, themeJson, colorScheme,
+// pressed, width) is fixed, and widening it would mean regenerating the JNI
+// TurboModule spec AND rebuilding the committed Android .so binary — see
+// README.md's "PREBUILT BINARY" section for why that's a separately
+// fragile process this deliberately avoids touching. Instead, all three are
+// resolved entirely HERE, above resolveStyle: each qualifying token is
+// rewritten (its hover:/focus:/disabled: name stripped from the modifier
+// chain) when that state currently holds, or dropped entirely when it
+// doesn't — so resolveStyle only ever sees classes built from modifiers it
+// already understands, the same "rewrite before it reaches resolveStyle"
+// approach `substituteDynamicTokens` already uses for `var(--x)`.
+const STATE_MODIFIER_NAMES = new Set(['hover', 'focus', 'disabled']);
+
+interface ElementStates {
+  hover: boolean;
+  focus: boolean;
+  disabled: boolean;
+}
+
+// Cheap pre-check, same shape/purpose as PERCENT_RELATIVE_CALC_HINT_RE —
+// gates the more expensive per-token splitRespectingBrackets work below.
+// `(^|\s|:)` — a modifier can be preceded by the start of a token, a space
+// (start of a NEW token), OR another modifier's own trailing ":" (chained,
+// e.g. "sm:dark:bg-red-6" or "hover:focus:bg-red-6") — not just `(^|\s)`,
+// which only catches a modifier written FIRST in its chain and silently
+// misses it whenever something else precedes it. Confirmed as a real,
+// reproducible gap (not a hypothetical): `/(^|\s)dark:/.test("sm:dark:bg-
+// red-6")` is `false`, meaning that element would never get wrapped in
+// ReactiveElement and its color would silently freeze on a dark-mode
+// toggle — exactly the historical symptom this whole file's reactivity
+// mechanism exists to prevent, just triggered by chain ORDER instead of a
+// missing subscription. Applies to every one of this file's own modifier-
+// presence regexes below, not just the state ones.
+const STATE_MODIFIER_HINT_RE = /(^|\s|:)(hover|focus|disabled):/;
+
+/** Strips every name in `namesToStrip` from an already-split `[...modifiers, utility]` array (see `splitRespectingBrackets`), leaving the utility part and every other modifier untouched. Takes the pre-split parts rather than re-splitting the token itself — `substituteStateModifiers` (the only caller) already has them from its own presence check, and re-parsing the same token twice per call is wasted work on every render. */
+function stripModifiers(parts: string[], namesToStrip: Set<string>): string {
+  const utility = parts[parts.length - 1] ?? '';
+  const modifiers = parts.slice(0, -1).filter((m) => !namesToStrip.has(m));
+  return [...modifiers, utility].join(':');
+}
+
+/**
+ * For each whitespace-separated token in `classStrRaw`: if it uses one or
+ * more of hover:/focus:/disabled:, it's kept (with those specific modifier
+ * names stripped from its chain) only when EVERY state it names currently
+ * holds — dropped entirely otherwise, since RN's flat style object has no
+ * cascade to let an unapplied rule simply lose a specificity fight the way
+ * CSS would. A token using none of the three passes through unchanged.
+ *
+ * Token ORDER is preserved (never reordered, only filtered) — this matters
+ * because `resolveStyle` merges same-property declarations last-token-wins,
+ * by the order they appear in the string it receives (same rule dark:/sm:/
+ * active: already live under; this doesn't introduce a new merge rule, it's
+ * the first time hover:/focus: get to participate in it, since they were
+ * simply inert before this file supported them at all). Writing the base
+ * class before its state variant — `"bg-red-6 hover:bg-blue-6"`, the
+ * conventional order — resolves correctly once hovered (hover's color
+ * comes second, so it wins); writing it the other way around inverts that.
+ * This is the existing convention every other modifier here already
+ * depends on, not a hover/focus-specific quirk.
+ */
+function substituteStateModifiers(classStrRaw: string, states: ElementStates): string {
+  if (!STATE_MODIFIER_HINT_RE.test(classStrRaw)) return classStrRaw;
+  const kept: string[] = [];
+  for (const token of classStrRaw.split(/\s+/)) {
+    if (!token) continue;
+    const parts = splitRespectingBrackets(token);
+    const modifiers = parts.slice(0, -1);
+    const required = modifiers.filter((m) => STATE_MODIFIER_NAMES.has(m));
+    if (required.length === 0) {
+      kept.push(token);
+      continue;
+    }
+    if (required.every((m) => states[m as keyof ElementStates])) {
+      kept.push(stripModifiers(parts, STATE_MODIFIER_NAMES));
+    }
+  }
+  return kept.join(' ');
+}
+
 function makeElement(
   isStaticChildren: boolean,
   type: unknown,
@@ -102,6 +185,17 @@ function makeElement(
  * those specific tokens are stripped out before `resolveStyle` ever sees
  * them (see `stripPercentRelativeCalcTokens`), so there's nothing to
  * collide with regardless, this is just where the computed value lands.
+ *
+ * `states` (hover/focus/disabled) defaults to `{ hover: false, focus:
+ * false, disabled: false }` when omitted — every caller still passes a
+ * real value for `disabled` (read straight off the element's own `disabled`
+ * prop, already reactive via ordinary prop flow with no extra wrapping
+ * needed), but `hover`/`focus` are only ever tracked by `ReactiveElement`,
+ * so the plain (non-reactive) call site below has no live value for them
+ * and correctly treats a `hover:`/`focus:`-qualified class as never-active
+ * rather than always-active — see `processElement`'s own routing check for
+ * why an element using either one is never routed through the plain path
+ * to begin with.
  */
 function resolvedStyleFor(
   resolveStyle: ResolveStyleFn,
@@ -109,8 +203,10 @@ function resolvedStyleFor(
   userStyle: unknown,
   pressed: boolean,
   layoutOverrides?: Record<string, number | string>,
+  states: ElementStates = { hover: false, focus: false, disabled: false },
 ): unknown {
-  const cleaned = stripPercentRelativeCalcTokens(substituteDynamicTokens(classStrRaw));
+  const stateResolved = substituteStateModifiers(classStrRaw, states);
+  const cleaned = stripPercentRelativeCalcTokens(substituteDynamicTokens(stateResolved));
   const resolved = resolveStyle(cleaned, pressed) as Record<string, unknown>;
   if (layoutOverrides) {
     Object.assign(resolved, layoutOverrides);
@@ -124,85 +220,13 @@ function resolvedStyleFor(
   return [resolved, userStyle];
 }
 
-const DARK_MODIFIER_RE = /(^|\s)dark:/;
-const BREAKPOINT_MODIFIER_RE = /(^|\s)(sm|md|lg|xl|2xl):/;
-// Same set as BREAKPOINT_MODIFIER_RE, used to enumerate which specific
-// breakpoint(s) a className references (see breakpointKeySuffix).
-const BREAKPOINT_MODIFIER_MATCH_RE = /(?:^|\s)(sm|md|lg|xl|2xl):/g;
-
-/**
- * A `dark:`-bearing element needs a key suffix that changes whenever the
- * global dark-mode state does — confirmed by hand against a real Expo Go
- * app: React Native's own reconciler doesn't reliably repaint an
- * ALREADY-MOUNTED host component (View/Text/Pressable) just because its
- * `style` prop holds new VALUES; forcing a remount via a changed `key` is
- * what actually made the new colors show. Scoped to elements whose
- * className literally contains "dark:" (a cheap regex test) rather than
- * applied unconditionally, so an element with no mode-dependent styling
- * never remounts for no reason.
- */
-function darkModeKeySuffix(classStrRaw: string): string {
-  return DARK_MODIFIER_RE.test(classStrRaw) ? `:kb-dark-${getGlobalDarkMode()}` : '';
-}
-
-/**
- * `sm:`/`md:`/`lg:`/`xl:`/`2xl:` have the identical "already-mounted host
- * component doesn't repaint on a new style VALUE" issue dark: has (same "a
- * live JS parameter, no React state, no built-in re-render-triggers-repaint
- * guarantee" shape — see nativeBridge.ts's own width parameter doc
- * comment), confirmed by the same ReactiveElement design fixing it there.
- * Reduces the live `width` to just the breakpoint(s) this particular
- * className actually references (rather than the raw pixel width) so a
- * resize/rotation that doesn't cross any breakpoint THIS element cares
- * about never triggers a remount — e.g. an `md:` element ignores an `sm`
- * crossing entirely.
- */
-function breakpointKeySuffix(classStrRaw: string, width: number): string {
-  const matches = classStrRaw.match(BREAKPOINT_MODIFIER_MATCH_RE);
-  if (!matches) {
-    return '';
-  }
-  const screens = getTheme().screens;
-  const present = Array.from(new Set(matches.map((m) => m.trim().slice(0, -1))));
-  const state = present.map((name) => (screens[name] !== undefined && width >= screens[name] ? '1' : '0')).join('');
-  return `:kb-bp-${state}`;
-}
-
-/**
- * Same "already-mounted host component doesn't repaint on a new style
- * VALUE" issue dark:/breakpoints have, for `var(--token)` references —
- * `substituteDynamicTokens` already makes `resolveStyle` see the CURRENT
- * value on every call, but nothing forces a REPAINT of an existing element
- * when only the token changed and no ancestor re-rendered. Reduces to just
- * the current values of the SPECIFIC token(s) this className references
- * (not the store's global version counter) so a different, unrelated
- * token's change never remounts an element that doesn't use it.
- */
-function dynamicTokenKeySuffix(classStrRaw: string): string {
-  const matches = classStrRaw.match(DYNAMIC_TOKEN_MATCH_RE);
-  if (!matches) return '';
-  const values = matches.map((m) => getDynamicToken(m.slice('var(--'.length, -1)) ?? '');
-  return `:kb-dt-${values.join('|')}`;
-}
-
-/**
- * `measuredBasis` is component-LOCAL state (see `ReactiveElement`), so
- * unlike the other three key-suffix helpers this doesn't read any external
- * store — it's still needed for the same underlying reason: a plain
- * `setState` update alone hasn't been reliable at repainting an
- * ALREADY-MOUNTED host component on native either (same class of issue
- * `darkModeKeySuffix` documents at length), so the computed VALUE itself
- * (not just "did it change") goes into the key, same shape as the other
- * three.
- */
-function percentCalcKeySuffix(percentCalcs: PercentRelativeCalc[], measuredBasis: { width: number; height: number } | null): string {
-  if (percentCalcs.length === 0) return '';
-  const values = percentCalcs.map((calc) => {
-    const basis = measuredBasis?.[calc.property];
-    return basis === undefined ? 'pending' : resolvePercentRelativeCalc(basis, calc);
-  });
-  return `:kb-pc-${values.join('|')}`;
-}
+// See STATE_MODIFIER_HINT_RE's own doc comment above for why these all use
+// `(^|\s|:)`, not just `(^|\s)` — a modifier chained after another one
+// (e.g. "sm:dark:", "hover:focus:") is otherwise silently missed.
+const DARK_MODIFIER_RE = /(^|\s|:)dark:/;
+const BREAKPOINT_MODIFIER_RE = /(^|\s|:)(sm|md|lg|xl|2xl):/;
+const HOVER_MODIFIER_RE = /(^|\s|:)hover:/;
+const FOCUS_MODIFIER_RE = /(^|\s|:)focus:/;
 
 interface ReactiveProps {
   hostType: unknown;
@@ -235,13 +259,26 @@ interface ReactiveProps {
  * (both via `useSyncExternalStore`), and `useWindowDimensions()` itself —
  * a REAL React component can call hooks, so this one re-renders on every
  * dark-mode, dynamic-token, or dimension change independent of what any
- * ancestor does, recomputing the resolved style and the forced-remount key
- * (darkModeKeySuffix + breakpointKeySuffix + dynamicTokenKeySuffix +
- * percentCalcKeySuffix below) fresh each time. All three store
- * subscriptions are made unconditionally regardless of which
+ * ancestor does, recomputing `finalStyle` fresh each time and passing it
+ * down as an ordinary prop on the SAME host element instance (same `key`
+ * as ever — see `elementKey` below). That's deliberately no different from
+ * how any other prop-driven style update works in React Native (e.g. an
+ * `Animated`/`Reanimated` value, or a `useState`-backed style toggled from
+ * a button press) — ordinary reconciliation re-applies a changed `style`
+ * prop to an already-mounted host component without remounting it, and
+ * there's nothing dark-mode/breakpoint/token-specific that would make this
+ * one case different. (An earlier version of this file forced a full
+ * remount on every one of these changes via a synthetic `key` suffix, on
+ * the theory that RN's reconciler needed one to repaint at all — removed
+ * once it became clear the actual bug across all those "dark: still stale"
+ * commits was upstream, in the darkModeStore/dynamicTokens subscriptions
+ * themselves not firing at all in various builds, not in what happened
+ * once they did fire. See git blame around 2026-08 for the removal if
+ * that theory turns out to be wrong on a real device — the four key-suffix
+ * helpers this used to call are gone, not merely dead code.) All three
+ * store subscriptions are made unconditionally regardless of which
  * modifier(s)/token(s) the className actually uses — cheap, and keeps this
- * component's hook list fixed across renders; the key suffix helpers are
- * what scope the actual remount behavior.
+ * component's hook list fixed across renders.
  *
  * `w-[calc(...%...)]`/`h-[calc(...%...)]` (see layoutCalc.ts) work
  * differently from the other three: there's no external store to
@@ -271,13 +308,27 @@ function ReactiveElement({
 }: ReactiveProps): ReactElement {
   useSyncExternalStore(subscribeGlobalDarkMode, getGlobalDarkMode);
   useSyncExternalStore(subscribeDynamicTokens, getDynamicTokensVersion);
-  const { width } = useWindowDimensions();
+  // Only the subscription (re-render on resize/rotation) is needed here —
+  // the actual width value is read fresh by resolveStyle/resolvedStyleFor
+  // below via nativeBridge's own width parameter, not by this component.
+  useWindowDimensions();
 
   const [measuredBasis, setMeasuredBasis] = useState<{ width: number; height: number } | null>(null);
   const measure = useCallback((e: LayoutChangeEvent) => {
     const { width: w, height: h } = e.nativeEvent.layout;
     setMeasuredBasis((prev) => (prev && prev.width === w && prev.height === h ? prev : { width: w, height: h }));
   }, []);
+
+  // hover:/focus: — see `substituteStateModifiers`'s own doc comment for
+  // why these are tracked as plain local state here instead of threading
+  // through resolveStyle itself. Always called (rules of hooks — same
+  // "cheap, keeps this component's hook list fixed across renders"
+  // reasoning the three store subscriptions above already use), but the
+  // actual event-prop wiring below is scoped to elements whose className
+  // literally uses hover:/focus: respectively, same as every other
+  // conditional prop this component adds.
+  const [isHovered, setIsHovered] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
 
   const percentCalcs = extractPercentRelativeCalcs(classStrRaw);
   let layoutOverrides: Record<string, number | string> | undefined;
@@ -303,19 +354,55 @@ function ReactiveElement({
     };
   }
 
+  // `onHoverIn`/`onHoverOut` are Pressable-specific in RN's own type
+  // surface (pointer support on iOS/Android/macOS/Windows — no-op on a
+  // touch-only device with no pointer, same as real Tailwind's `hover:`
+  // already correctly resolving to nothing on a touch-only browser via
+  // `@media (hover: hover)` — RN just has no such media-query gate, so it
+  // literally never fires instead), but composing them onto ANY host type
+  // is harmless: RN components silently ignore props they don't destructure,
+  // there being no real DOM underneath to warn about an unrecognized
+  // attribute. Composed with the caller's own handlers, same as onLayout.
+  if (HOVER_MODIFIER_RE.test(classStrRaw)) {
+    const userOnHoverIn = hostRestWithLayout.onHoverIn as ((e: unknown) => void) | undefined;
+    const userOnHoverOut = hostRestWithLayout.onHoverOut as ((e: unknown) => void) | undefined;
+    hostRestWithLayout = {
+      ...hostRestWithLayout,
+      onHoverIn: (e: unknown) => {
+        setIsHovered(true);
+        userOnHoverIn?.(e);
+      },
+      onHoverOut: (e: unknown) => {
+        setIsHovered(false);
+        userOnHoverOut?.(e);
+      },
+    };
+  }
+  if (FOCUS_MODIFIER_RE.test(classStrRaw)) {
+    const userOnFocus = hostRestWithLayout.onFocus as ((e: unknown) => void) | undefined;
+    const userOnBlur = hostRestWithLayout.onBlur as ((e: unknown) => void) | undefined;
+    hostRestWithLayout = {
+      ...hostRestWithLayout,
+      onFocus: (e: unknown) => {
+        setIsFocused(true);
+        userOnFocus?.(e);
+      },
+      onBlur: (e: unknown) => {
+        setIsFocused(false);
+        userOnBlur?.(e);
+      },
+    };
+  }
+
+  const states: ElementStates = { hover: isHovered, focus: isFocused, disabled: hostRest.disabled === true };
+
   const finalStyle =
     hostType === Pressable
-      ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed, layoutOverrides)
-      : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false, layoutOverrides);
+      ? (state: PressableStateCallbackType) =>
+          resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed, layoutOverrides, states)
+      : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false, layoutOverrides, states);
 
-  const suffix =
-    darkModeKeySuffix(classStrRaw) +
-    breakpointKeySuffix(classStrRaw, width) +
-    dynamicTokenKeySuffix(classStrRaw) +
-    percentCalcKeySuffix(percentCalcs, measuredBasis);
-  const finalKey = suffix ? `${elementKey ?? ''}${suffix}` : elementKey;
-
-  return makeElement(isStaticChildren, hostType, { ...hostRestWithLayout, style: finalStyle }, finalKey);
+  return makeElement(isStaticChildren, hostType, { ...hostRestWithLayout, style: finalStyle }, elementKey);
 }
 
 function processElement(
@@ -340,6 +427,8 @@ function processElement(
   if (
     DARK_MODIFIER_RE.test(classStrRaw) ||
     BREAKPOINT_MODIFIER_RE.test(classStrRaw) ||
+    HOVER_MODIFIER_RE.test(classStrRaw) ||
+    FOCUS_MODIFIER_RE.test(classStrRaw) ||
     classStrRaw.includes('var(--') ||
     PERCENT_RELATIVE_CALC_HINT_RE.test(classStrRaw)
   ) {
@@ -350,13 +439,19 @@ function processElement(
     ) as ReactElement;
   }
 
+  // No hover:/focus: to track reactively, so `disabled` is read directly
+  // off the prop the caller already passed — see `resolvedStyleFor`'s own
+  // doc comment for why that alone is enough for it to react correctly to
+  // a later prop change, with no ReactiveElement wrapping needed.
+  const staticStates: ElementStates = { hover: false, focus: false, disabled: rest.disabled === true };
+
   // Pressable is the one component that knows press state at all — style
   // becomes a function so active: can react to it. Every other type keeps
   // the plain, static resolution it always had (pressed is always false).
   const finalStyle =
     type === Pressable
-      ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed)
-      : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false);
+      ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed, undefined, staticStates)
+      : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false, undefined, staticStates);
 
   return makeElement(isStaticChildren, type, { ...rest, style: finalStyle }, key);
 }

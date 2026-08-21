@@ -59,7 +59,7 @@ const NUMERIC_LENGTH_PROPS = new Set([
   'border-radius', 'border-width', 'font-size', 'z-index',
   'line-height', 'letter-spacing',
   'flex', 'flex-grow', 'flex-shrink', 'order', 'flex-basis',
-  'shadow-opacity', 'shadow-radius', 'elevation',
+  'shadow-opacity', 'shadow-radius', 'elevation', 'opacity',
   // Per-side border width + per-corner radius — see resolvers/border.ts's
   // new borderSideValue/borderAxisValue/resolveRadiusSide additions; RN's
   // style system wants plain numbers for these exactly like the generic

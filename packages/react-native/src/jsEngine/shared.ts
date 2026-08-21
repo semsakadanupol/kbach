@@ -74,6 +74,13 @@ export function resolveNegatableLength(theme: ThemeConfig, parsed: ParsedClass):
 
 /** Resolves a 0-100 percentage utility value to a 0-1 decimal string. Arbitrary values pass through as-is. */
 export function resolvePercent(parsed: ParsedClass): string | null {
+  // Real Tailwind has no negative opacity — same check Rust's
+  // resolve_percent makes. Without this, "-opacity-50" resolved to 0.5
+  // here (the "-" silently ignored) while the Rust/WASM engine correctly
+  // returned null for the same class — a real cross-engine divergence,
+  // not a hypothetical: found via review once resolveOpacityNative started
+  // actually calling this (previously unused on native).
+  if (parsed.negative) return null;
   const value = parsed.value;
   if (value === null) return null;
   if (parsed.isArbitrary) return value;

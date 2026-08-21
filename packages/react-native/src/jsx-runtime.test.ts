@@ -32,8 +32,8 @@ vi.mock('./nativeBridge', () => ({
 // can pass the same reference as `type`, same as nativeBridge.test.ts mocks
 // Appearance/NativeModules for the same "don't load the real RN package in
 // a plain Node/vitest environment" reason. Appearance is ALSO needed now —
-// jsxRuntimeCore.ts imports darkModeStore.ts (for the dark: key-suffix fix,
-// see its own doc comment), whose module-level code calls
+// jsxRuntimeCore.ts imports darkModeStore.ts (for ReactiveElement's dark-
+// mode reactivity, see its own doc comment), whose module-level code calls
 // Appearance.addChangeListener at import time.
 const MockPressable = () => null;
 // Mirrors RN's real useWindowDimensions() shape closely enough for the
@@ -316,6 +316,26 @@ describe('jsx-runtime (react-native)', () => {
       });
       expect(mockResolveStyle).toHaveBeenCalledTimes(3);
     });
+
+    it('reacts to dark mode even when dark: is chained SECOND on the same token (e.g. "md:dark:bg-blue-8")', async () => {
+      // Regression: the modifier-presence regexes used to only match a
+      // modifier written FIRST in its chain (preceded by start-of-string
+      // or a space) — "md:dark:bg-blue-8" has "dark:" preceded by "md:"
+      // (a colon, not whitespace), which the old `(^|\s)dark:` pattern
+      // silently failed to detect at all, meaning this exact element would
+      // never have been wrapped in ReactiveElement and its color would
+      // have frozen on a dark-mode toggle — chain ORDER triggering the
+      // same class of bug the whole reactivity mechanism exists to prevent.
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'md:dark:bg-blue-8' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        toggleGlobalDarkMode();
+      });
+      expect(mockResolveStyle).toHaveBeenCalledTimes(2);
+    });
   });
 
   // Cross-platform dynamic style values — the native counterpart to a real
@@ -394,10 +414,8 @@ describe('jsx-runtime (react-native)', () => {
       // dynamicTokens.ts's own doc comment on why), so the element's
       // useSyncExternalStore subscription fires and re-resolves even for a
       // token this className doesn't reference — but the resolved value
-      // must stay correct (dynamicTokenKeySuffix's per-className scoping,
-      // exercised at the unit level in jsxRuntimeCore, is what keeps this
-      // from also forcing a spurious remount; not independently observable
-      // through this mock, so not asserted here).
+      // must stay correct regardless, since substituteDynamicTokens
+      // re-reads each referenced token's CURRENT value fresh every time.
       const { setDynamicToken } = await import('./dynamicTokens');
       setDynamicToken('sidebar-width', '240px');
       const { jsx } = await import('./jsx-runtime');
@@ -480,6 +498,115 @@ describe('jsx-runtime (react-native)', () => {
       // resolveStyle path (unchanged from before this feature) — never
       // routes through ReactiveElement's layout machinery at all.
       expect(mockResolveStyle).toHaveBeenCalledWith('w-[calc(16px+8px)]', false);
+    });
+  });
+
+  // hover:/focus:/disabled: — resolved entirely above resolveStyle (see
+  // jsxRuntimeCore.ts's own doc comment on why), so these assert on the
+  // exact className mockResolveStyle received, confirming the modifier was
+  // stripped (state holds) or the whole token dropped (state doesn't).
+  describe('hover:/focus:/disabled: state modifiers', () => {
+    it('drops a hover: token until onHoverIn fires, and restores it on onHoverOut', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex hover:bg-red-6' }, undefined);
+      const renderer = mount(el);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex', false);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onHoverIn({});
+      });
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex bg-red-6', false);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onHoverOut({});
+      });
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex', false);
+    });
+
+    it('composes with a caller-provided onHoverIn/onHoverOut instead of replacing it', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const userOnHoverIn = vi.fn();
+      const el = jsx('View', { className: 'hover:bg-red-6', onHoverIn: userOnHoverIn }, undefined);
+      const renderer = mount(el);
+
+      const event = { fake: true };
+      act(() => {
+        renderer.root.findByType('View' as any).props.onHoverIn(event);
+      });
+      expect(userOnHoverIn).toHaveBeenCalledWith(event);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('bg-red-6', false);
+    });
+
+    it('drops a focus: token until onFocus fires, and restores it on onBlur', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex focus:ring-2' }, undefined);
+      const renderer = mount(el);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex', false);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onFocus({});
+      });
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex ring-2', false);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onBlur({});
+      });
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex', false);
+    });
+
+    it('requires BOTH states to hold for a chained hover:focus: token', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'hover:focus:bg-red-6' }, undefined);
+      const renderer = mount(el);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onHoverIn({});
+      });
+      // Hover alone isn't enough — focus hasn't fired yet.
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('', false);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onFocus({});
+      });
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('bg-red-6', false);
+    });
+
+    it('preserves source order for a base class plus its hover: variant on the same property', async () => {
+      // substituteStateModifiers only ever filters tokens, never reorders
+      // them — resolveStyle merges same-property declarations last-token-
+      // wins by string order (same rule dark:/sm:/active: already rely on),
+      // so writing the base class BEFORE its hover: variant (the
+      // conventional order) is what makes the hover color correctly win
+      // once hovered. This locks in that the ordering is preserved, not
+      // reshuffled, now that hover:/focus: can participate in it at all.
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'bg-red-6 hover:bg-blue-6' }, undefined);
+      const renderer = mount(el);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('bg-red-6', false);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onHoverIn({});
+      });
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('bg-red-6 bg-blue-6', false);
+    });
+
+    it('does not wrap in ReactiveElement for disabled: alone, and reacts via ordinary prop flow', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex disabled:opacity-50', disabled: false }, undefined);
+      const renderer = mount(el);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex', false);
+
+      act(() => {
+        renderer.update(jsx('View', { className: 'flex disabled:opacity-50', disabled: true }, undefined) as any);
+      });
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex opacity-50', false);
+    });
+
+    it('does not add any reactivity overhead for an element using neither hover: nor focus:', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex bg-blue-6' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
     });
   });
 });

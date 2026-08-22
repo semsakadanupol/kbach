@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'fs';
 import { join, dirname } from 'path';
+import { pathToFileURL } from 'url';
 import { createRequire } from 'module';
 import type { Plugin } from 'vite';
 import { writeKbachToFile, KBACH_START, KBACH_END } from './format';
@@ -114,29 +115,78 @@ function writeFileEnsuringDir(path: string, content: string): void {
   writeFileSync(path, content, 'utf-8');
 }
 
+function isEsmRequireFailure(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  // `ERR_REQUIRE_ESM` — older Node's classic "require() can't load a real
+  // ESM module" error. The `ReferenceError`/"ES module scope" message
+  // shape is newer Node's `require(esm)` support: it DOES attempt to run
+  // the file as ESM (since the nearest package.json says "type": "module"),
+  // which then throws on the file's own CJS-only `module`/`exports`
+  // globals not existing there — a different failure shape, same root
+  // cause (a `.js` file whose actual syntax doesn't match how this
+  // project's package.json says `.js` files should be interpreted).
+  return (err as NodeJS.ErrnoException).code === 'ERR_REQUIRE_ESM' || /is not defined in ES module scope/.test(err.message);
+}
+
+async function importConfigModule(path: string): Promise<KbachConfig | undefined> {
+  const mod = (await import(pathToFileURL(path).href)) as { default?: KbachConfig };
+  return (mod.default ?? mod) as KbachConfig;
+}
+
+function requireConfigModule(root: string, path: string): KbachConfig | undefined {
+  const mod = createRequire(root)(path) as { default?: KbachConfig };
+  return (mod.default ?? mod) as KbachConfig;
+}
+
 /**
- * Auto-discovers `kbach.config.js` at the project root — `undefined` if it
- * doesn't exist (the common case: most projects have no customization at
+ * Auto-discovers a `kbach.config.*` file at the project root — `undefined`
+ * if none exists (the common case: most projects have no customization at
  * all, so this is a silent, expected no-op, not a warning).
  *
- * Uses `require()` (a real project's `kbach.config.js` is plain CommonJS,
- * `module.exports = {...}`, matching every example in this package's own
- * README), built via `createRequire(root)` rather than
+ * Checks three filenames, in order, mirroring Node's own module-format
+ * conventions rather than assuming one: `kbach.config.cjs` (always
+ * CommonJS, `module.exports = {...}` — the one unambiguous choice
+ * regardless of the project's package.json) and `kbach.config.mjs`
+ * (always real ESM, `export default {...}`) are tried first, each loaded
+ * the one way that's guaranteed correct for that extension. Only the bare
+ * `kbach.config.js` — whose actual meaning depends on the nearest
+ * package.json's `"type"` field, exactly like every other `.js` file in
+ * the project — needs the fallback below: try `require()` first (correct
+ * for `"type": "commonjs"`/no `"type"` field, the more common case), and
+ * only on a failure that specifically indicates an ESM/CJS mismatch (see
+ * `isEsmRequireFailure`), retry via a real dynamic `import()` instead. A
+ * genuine syntax error in an otherwise-correctly-formatted config file is
+ * NOT caught here — it propagates as a real, actionable build failure,
+ * rather than being silently swallowed into a confusing second attempt.
+ *
+ * `require()` is built via `createRequire(root)` rather than
  * `createRequire(import.meta.url)` — this file is written as ESM source,
  * but tsup's CJS build output has no real `import.meta.url` (esbuild
  * leaves it `undefined` there), which would make `createRequire` throw for
  * anyone consuming this package's `require('@kbach/react/vite')` entry.
  * `root` works as `createRequire`'s base in either build: it's always an
- * absolute, already-`existsSync`-validated-by-caller directory, and
- * `require()` given `path` (itself already absolute) doesn't consult the
- * base for resolution anyway — the base only matters for a RELATIVE
- * specifier, which this never passes it.
+ * absolute, already-`existsSync`-validated directory, and `require()`
+ * given an already-absolute `path` doesn't consult the base for
+ * resolution anyway — the base only matters for a relative specifier,
+ * which this never passes it. `import()` needs a real `file://` URL, not
+ * a bare Windows path (`C:\...` isn't a valid ESM specifier) — hence
+ * `pathToFileURL`.
  */
-export function loadConfigFile(root: string): KbachConfig | undefined {
-  const path = join(root, 'kbach.config.js');
-  if (!existsSync(path)) return undefined;
-  const mod = createRequire(root)(path) as { default?: KbachConfig };
-  return (mod.default ?? mod) as KbachConfig;
+export async function loadConfigFile(root: string): Promise<KbachConfig | undefined> {
+  const cjsPath = join(root, 'kbach.config.cjs');
+  if (existsSync(cjsPath)) return requireConfigModule(root, cjsPath);
+
+  const mjsPath = join(root, 'kbach.config.mjs');
+  if (existsSync(mjsPath)) return importConfigModule(mjsPath);
+
+  const jsPath = join(root, 'kbach.config.js');
+  if (!existsSync(jsPath)) return undefined;
+  try {
+    return requireConfigModule(root, jsPath);
+  } catch (err) {
+    if (!isEsmRequireFailure(err)) throw err;
+    return importConfigModule(jsPath);
+  }
 }
 
 /**
@@ -144,10 +194,10 @@ export function loadConfigFile(root: string): KbachConfig | undefined {
  * always wins over kbach.config.js auto-discovery" precedence both
  * vite-plugin and postcss-plugin need identically.
  */
-export function resolveEffectiveTheme(root: string, options: { theme?: ThemeConfig; config?: KbachConfig }): ThemeConfig {
+export async function resolveEffectiveTheme(root: string, options: { theme?: ThemeConfig; config?: KbachConfig }): Promise<ThemeConfig> {
   if (options.theme) return options.theme;
   if (options.config) return resolveKbachConfig(options.config);
-  const discovered = loadConfigFile(root);
+  const discovered = await loadConfigFile(root);
   return discovered ? resolveKbachConfig(discovered) : defaultTheme;
 }
 
@@ -236,9 +286,9 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
     name: 'kbach',
     enforce: 'pre',
 
-    configResolved(resolved) {
+    async configResolved(resolved) {
       root = resolved.root;
-      theme = resolveEffectiveTheme(root, options);
+      theme = await resolveEffectiveTheme(root, options);
       engine = createKbachStaticCssEngine({ root, theme, themeJson: JSON.stringify(theme), includeDirs, safelist });
       mainCSSFilePath = findMainCSSFile(root, includeDirs, options.cssFile);
     },

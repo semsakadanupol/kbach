@@ -109,9 +109,9 @@ function spliceGeneratedCss(root: Root, generatedCss: string): void {
 export default function kbachPostcss(options: KbachPostcssPluginOptions = {}): PostcssPlugin {
   return {
     postcssPlugin: 'kbach',
-    Once(root, { result }) {
+    async Once(root, { result }) {
       const projectRoot = options.root ?? process.cwd();
-      const theme = resolveEffectiveTheme(projectRoot, options);
+      const theme = await resolveEffectiveTheme(projectRoot, options);
       const includeDirs = options.include ?? DEFAULT_SCAN_DIRS;
       const safelist = options.safelist ?? [];
 

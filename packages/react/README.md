@@ -24,11 +24,10 @@ export default defineConfig({
 });
 ```
 
-```css
-/* src/kbach.css */
-/* kbach:start */
-/* kbach:end */
-```
+That's it — the plugin finds or creates your `kbach.css` on its own,
+wherever your source actually lives (`src/`, `app/`, ...; see "Where does
+`kbach.css` go?" below if you want to know exactly where or control it).
+Import it once from your entry point and render normally:
 
 ```tsx
 // main.tsx
@@ -45,12 +44,25 @@ createRoot(document.getElementById('root')!).render(<App />);
 </div>
 ```
 
-That's the whole setup — the Vite plugin config plus a `kbach.css` with the
-two marker comments. No `initKbach()`/async step before your first render:
-`className` here is a plain string prop, resolved entirely by the CSS
-`@kbach/react/vite` already generated at build time, same as any other
-static stylesheet — nothing here calls into the WASM engine at render time,
-so there's nothing to await.
+No `initKbach()`/async step before your first render: `className` here is
+a plain string prop, resolved entirely by the CSS `@kbach/react/vite`
+already generated at build time, same as any other static stylesheet —
+nothing here calls into the WASM engine at render time, so there's nothing
+to await.
+
+### Where does `kbach.css` go?
+
+You don't need to think about this for the common case — skip to
+[React Router](#react-router)/[Next.js](#nextjs) if that's what brought you
+here. For everyone else: the plugin looks for a file already containing
+`/* kbach:start */`/`/* kbach:end */` markers under each of your `include`
+directories (`src`, `app`, `pages`, `components` by default) and the
+project root, in that order, and keeps using whichever one it finds. If
+none exists yet, it creates `<first-existing-include-dir>/kbach.css` for
+you, markers included — you never have to hand-author that file. Pass
+`cssFile` to `kbach()` only if you want to pin the location explicitly
+(a path outside every `include` dir, or more than one candidate present at
+once).
 
 `initKbach()` (still exported from `@kbach/react`) is only needed for two
 opt-in features that genuinely do call into the Rust/WASM engine at
@@ -88,34 +100,35 @@ createRoot(document.getElementById('root')!).render(<RouterProvider router={rout
 ```
 
 **Framework mode** (`npx create-react-router@latest` — file-based routing
-under `app/`, its own Vite plugin, SSR by default): two things differ from
-the Quick Start, both because this mode owns your project's structure and
-render lifecycle, not you:
+under `app/`, its own Vite plugin, SSR by default):
 
-1. Its convention is `app/`, not `src/` — pass `cssFile` so the plugin
-   writes to `app/kbach.css` instead of the (here, nonexistent) default:
-   ```ts
-   // vite.config.ts
-   import { reactRouter } from '@react-router/dev/vite';
-   import { kbach } from '@kbach/react/vite';
-   import { defineConfig } from 'vite';
+```ts
+// vite.config.ts
+import { reactRouter } from '@react-router/dev/vite';
+import { kbach } from '@kbach/react/vite';
+import { defineConfig } from 'vite';
 
-   export default defineConfig({
-     plugins: [kbach({ cssFile: 'app/kbach.css' }), reactRouter()],
-   });
-   ```
-2. **Don't call `createRoot` yourself in `app/root.tsx`** — the framework's
-   own generated client/server entry points already do this; `root.tsx`
-   only ever *exports* a `Layout`/default component. Adding your own
-   `createRoot(...).render(...)` at that file's top level runs during SSR
-   too, where `document` doesn't exist, and crashes the build immediately.
-   `app/root.tsx` needs only:
-   ```tsx
-   import './kbach.css';
-   export default function App() {
-     return <Outlet />;
-   }
-   ```
+export default defineConfig({
+  plugins: [kbach(), reactRouter()],
+});
+```
+
+Same `kbach()` call as everywhere else — its `app/`-vs-`src/` convention
+is exactly what auto-detection (above) exists for, so there's nothing
+React-Router-specific to configure. The one real gotcha is unrelated to
+Kbach at all: **don't call `createRoot` yourself in `app/root.tsx`** — the
+framework's own generated client/server entry points already do this;
+`root.tsx` only ever *exports* a `Layout`/default component. Adding your
+own `createRoot(...).render(...)` at that file's top level runs during SSR
+too, where `document` doesn't exist, and crashes the build immediately.
+`app/root.tsx` needs only:
+
+```tsx
+import './kbach.css';
+export default function App() {
+  return <Outlet />;
+}
+```
 
 Either mode: every route's own components use `className` exactly like any
 other component — routing has no effect on how Kbach resolves classes,

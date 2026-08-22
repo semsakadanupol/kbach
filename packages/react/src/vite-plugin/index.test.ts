@@ -212,21 +212,26 @@ describe('kbach() plugin — safelist option', () => {
 // framework using a different convention (React Router v7's framework
 // mode uses "app/", not "src/") failed outright at buildStart with an
 // ENOENT trying to write into a "src/" directory that simply didn't exist.
-describe('kbach() plugin — cssFile option', () => {
+// findMainCSSFile now auto-detects the right location with zero config —
+// see these tests for each tier of that detection, and its own doc
+// comment (vite-plugin/index.ts) for the full tier order.
+describe('kbach() plugin — CSS file auto-detection', () => {
   let dir: string;
 
   afterEach(() => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('writes to the configured cssFile path instead of the default src/kbach.css', () => {
+  it('finds an already-existing marked kbach.css under a non-"src" include dir with zero config', () => {
     dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
-    // Deliberately no "src/" directory anywhere — only "app/", matching a
-    // React Router v7 framework-mode (or similar) project layout.
+    // No "src/" anywhere — only "app/", matching React Router v7's
+    // framework mode, with the marker file already created there (the one
+    // manual step this plugin still expects).
     mkdirSync(join(dir, 'app'));
     writeFileSync(join(dir, 'app', 'root.tsx'), '<div className="flex" />', 'utf-8');
+    writeFileSync(join(dir, 'app', 'kbach.css'), '/* kbach:start */\n/* kbach:end */', 'utf-8');
 
-    const plugin = kbach({ cssFile: 'app/kbach.css' });
+    const plugin = kbach();
     (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
     expect(() => (plugin.buildStart as () => void)()).not.toThrow();
 
@@ -234,7 +239,49 @@ describe('kbach() plugin — cssFile option', () => {
     expect(css).toContain('display: flex');
   });
 
-  it('still defaults to src/kbach.css when cssFile is omitted', () => {
+  it('falls back to the first include dir that already exists when no marked file is found yet', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    // "app/" exists but has no kbach.css at all yet (a real first-time-setup
+    // case) — still no "src/" anywhere.
+    mkdirSync(join(dir, 'app'));
+    writeFileSync(join(dir, 'app', 'root.tsx'), '<div className="flex" />', 'utf-8');
+
+    const plugin = kbach();
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    expect(() => (plugin.buildStart as () => void)()).not.toThrow();
+
+    const css = readFileSync(join(dir, 'app', 'kbach.css'), 'utf-8');
+    expect(css).toContain('display: flex');
+  });
+
+  it('never crashes even in a genuinely empty project — creates the fallback directory itself', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    // Nothing exists yet at all — not even "src/".
+    const plugin = kbach();
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    expect(() => (plugin.buildStart as () => void)()).not.toThrow();
+
+    const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).toContain('kbach:start');
+  });
+
+  it('an explicit cssFile always wins over auto-detection', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'app'));
+    writeFileSync(join(dir, 'app', 'root.tsx'), '<div className="flex" />', 'utf-8');
+    // A marked file exists under "app/" — auto-detection would normally
+    // pick it — but an explicit cssFile should override that entirely.
+    writeFileSync(join(dir, 'app', 'kbach.css'), '/* kbach:start */\n/* kbach:end */', 'utf-8');
+
+    const plugin = kbach({ cssFile: 'custom/styles.css' });
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    const css = readFileSync(join(dir, 'custom', 'styles.css'), 'utf-8');
+    expect(css).toContain('display: flex');
+  });
+
+  it('still defaults to src/kbach.css for a normal project layout', () => {
     dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
     mkdirSync(join(dir, 'src'));
     writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="flex" />', 'utf-8');

@@ -1,8 +1,8 @@
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { createRequire } from 'module';
 import type { Plugin } from 'vite';
-import { writeKbachToFile } from './format';
+import { writeKbachToFile, KBACH_START, KBACH_END } from './format';
 import { buildClassTokens, buildClassNameHintsDts } from './classNameHints';
 import { defaultTheme } from '../theme';
 import type { ThemeConfig } from '../theme';
@@ -38,15 +38,64 @@ export interface KbachPluginOptions {
   safelist?: string[];
   /**
    * Path to the `kbach:start`/`kbach:end` marker file, relative to Vite's
-   * resolved root. Defaults to `"src/kbach.css"` — override this for any
-   * project whose source root isn't `src/`: React Router v7's framework
-   * mode (`app/kbach.css`), a Pages-Router-style Next.js app using this
-   * plugin directly (`styles/kbach.css`), or any other convention. Getting
-   * this wrong fails loudly at build start (`ENOENT` writing the file's
-   * parent directory) rather than silently generating nothing, but it's
-   * still worth setting explicitly if your project doesn't use `src/`.
+   * resolved root. Not needed for the common case — `kbach()` auto-detects
+   * it (see `findMainCSSFile`'s own doc comment) by finding wherever you
+   * actually put the two marker comments, regardless of whether your
+   * project's source root is `src/`, `app/` (React Router v7's framework
+   * mode), or anything else in `include`. Set this explicitly only to
+   * disambiguate a genuinely unusual layout (a marker file outside every
+   * `include` directory, or more than one candidate present at once).
    */
   cssFile?: string;
+}
+
+/**
+ * Finds where to read/write the `kbach:start`/`kbach:end` marker file,
+ * with no configuration required for the common case:
+ *
+ * 1. An explicit `cssFile` always wins (the one supported escape hatch).
+ * 2. Otherwise, look for a `kbach.css` already containing BOTH markers in
+ *    each `include` directory (in order) and the project root itself —
+ *    wherever you actually created it is where this plugin keeps using it,
+ *    regardless of which framework convention (`src/`, `app/`, ...) that
+ *    is. This is what makes React Router v7's framework mode (`app/
+ *    kbach.css`) and a plain Vite app (`src/kbach.css`) both "just work"
+ *    with the exact same `kbach()` call — no per-framework option needed.
+ * 3. No marked file exists yet (first run in a fresh project) — pick the
+ *    first `include` directory that already exists as a real directory on
+ *    disk, so the file this plugin is about to CREATE lands somewhere that
+ *    won't need its own parent directory made up out of nothing.
+ * 4. Nothing in `include` exists yet either (a genuinely empty project,
+ *    scaffolded before its first source file) — fall back to the first
+ *    configured `include` entry regardless; `writeMainCSSFile` (below)
+ *    creates its parent directory unconditionally, so this never crashes
+ *    even here.
+ */
+export function findMainCSSFile(root: string, includeDirs: string[], explicitCssFile?: string): string {
+  if (explicitCssFile) return join(root, explicitCssFile);
+
+  const searchDirs = [...includeDirs, '.'];
+  for (const dir of searchDirs) {
+    const candidate = join(root, dir, 'kbach.css');
+    if (!existsSync(candidate)) continue;
+    try {
+      const content = readFileSync(candidate, 'utf-8');
+      if (content.includes(KBACH_START) && content.includes(KBACH_END)) return candidate;
+    } catch {
+      // Unreadable — not a valid candidate, keep looking.
+    }
+  }
+
+  for (const dir of includeDirs) {
+    const full = join(root, dir);
+    try {
+      if (statSync(full).isDirectory()) return join(full, 'kbach.css');
+    } catch {
+      // Doesn't exist — not this one.
+    }
+  }
+
+  return join(root, includeDirs[0] ?? 'src', 'kbach.css');
 }
 
 export const DEFAULT_SCAN_DIRS = ['src', 'app', 'pages', 'components'];
@@ -106,11 +155,12 @@ export function resolveEffectiveTheme(root: string, options: { theme?: ThemeConf
  * Build-time static CSS generation for Vite — scans source files for
  * Kbach class strings, resolves them through the same Rust engine the
  * runtime uses (via the Node-target WASM build, see wasmNode.ts), and
- * writes a real kbach.css. Simplified vs old-kbach's version: expects a
- * marker file to already exist at a fixed conventional path — `src/
- * kbach.css` by default, override via `cssFile` for any other source root
- * (create it with `/* kbach:start *\/` / `/* kbach:end *\/` markers)
- * rather than scanning the whole project for a file named kbach.css.
+ * writes a real kbach.css. Auto-detects WHERE that file is (or should be
+ * created) via `findMainCSSFile` — no per-framework config needed for
+ * `src/`, `app/` (React Router v7's framework mode), or any other
+ * `include` convention; create a file with `/* kbach:start *\/` / `/*
+ * kbach:end *\/` markers wherever your project's source actually lives
+ * and this plugin finds it there.
  *
  * The actual scanning/resolution/generation logic lives in
  * `staticCss/engine.ts`, shared with `postcss-plugin/index.ts` (Next.js/
@@ -129,9 +179,16 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
   let root = process.cwd();
   let theme = defaultTheme;
   let engine: KbachStaticCssEngine = createKbachStaticCssEngine({ root, theme, themeJson: JSON.stringify(theme), includeDirs, safelist });
+  // Resolved once in configResolved (see findMainCSSFile) and reused for
+  // the rest of this plugin instance's lifetime — a mid-session filesystem
+  // scan on every single write would be wasteful, and re-detecting after
+  // the first write could theoretically land on a DIFFERENT file if a
+  // second marked candidate showed up mid-session, which would be far more
+  // surprising than just committing to whatever was found first.
+  let mainCSSFilePath = join(root, 'src', 'kbach.css');
 
   function mainCSSFile(): string {
-    return join(root, options.cssFile ?? 'src/kbach.css');
+    return mainCSSFilePath;
   }
 
   // Lives in a dot-prefixed project-root folder, not next to real source —
@@ -155,7 +212,7 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
   }
 
   function syncMainCSSFile(server?: { watcher: { emit(event: string, ...args: unknown[]): unknown } }): void {
-    const changed = writeKbachToFile(mainCSSFile(), engine.generateCSS(), readSourceFile, (p, c) => writeFileSync(p, c, 'utf-8'));
+    const changed = writeKbachToFile(mainCSSFile(), engine.generateCSS(), readSourceFile, writeFileEnsuringDir);
     if (changed && server) server.watcher.emit('change', mainCSSFile());
   }
 
@@ -183,6 +240,7 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
       root = resolved.root;
       theme = resolveEffectiveTheme(root, options);
       engine = createKbachStaticCssEngine({ root, theme, themeJson: JSON.stringify(theme), includeDirs, safelist });
+      mainCSSFilePath = findMainCSSFile(root, includeDirs, options.cssFile);
     },
 
     buildStart() {
@@ -192,7 +250,7 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
       engine.scanProjectCssSelectorsOnce();
       engine.initialScan();
       engine.processSafelist();
-      writeKbachToFile(mainCSSFile(), engine.generateCSS(), readSourceFile, (p, c) => writeFileSync(p, c, 'utf-8'));
+      writeKbachToFile(mainCSSFile(), engine.generateCSS(), readSourceFile, writeFileEnsuringDir);
       writeClassNameHints();
     },
 

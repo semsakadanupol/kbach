@@ -5,8 +5,10 @@ import { mergeResponsiveMediaBlocks } from './mediaMerge';
 import { prettifyCSS } from './prettify';
 import { buildResetCSS } from '../reset';
 
-const KBACH_START = '/* kbach:start */';
-const KBACH_END = '/* kbach:end */';
+// Exported so vite-plugin/index.ts's auto-detection (findMainCSSFile) can
+// recognize an existing marked file without duplicating these literals.
+export const KBACH_START = '/* kbach:start */';
+export const KBACH_END = '/* kbach:end */';
 
 /**
  * Assembles the kbach.css body from every currently-referenced token's

@@ -199,18 +199,31 @@ imports anything from `@kbach/react`'s runtime:
 This default (`darkMode: 'media'`) can't be overridden by an in-app toggle —
 `@media (prefers-color-scheme)` only ever reflects the real OS setting. To
 add a manual light/dark switcher, opt into `darkMode: 'class'` or
-`'attribute'` (writes `.dark`/`data-theme` onto `<html>` instead) via
-`kbach.config.js` or the plugin's `config`/`theme` option:
+`'attribute'` (writes `.dark`/`data-theme` onto `<html>` instead) — this
+needs setting in **two places**, since they solve two different problems:
+
+1. **Build-time**, via `kbach.config.js` or the plugin's `config`/`theme`
+   option — controls which selector the generated CSS for `dark:` classes
+   compiles to (`[data-theme="dark"] .dark\:bg-neutral-12` vs
+   `.dark .dark\:bg-neutral-12` vs a plain `@media` query).
+2. **Runtime**, via `applyKbachConfig()` — controls what `useTheme()`'s
+   `toggle()`/`setMode()` actually write to the DOM. This is a *separate*
+   module from the build step above (it has to be: the plugin runs in
+   Node during your build, this runs in the browser) — setting only the
+   plugin option compiles the right CSS but leaves the toggle a silent
+   no-op, since the runtime still thinks the strategy is the `'media'`
+   default and has nothing to write to the DOM for it.
 
 ```js
-// kbach.config.js
+// kbach.config.js — build-time, read by the Vite/PostCSS plugin
 export default { darkMode: 'attribute' };
 ```
 
-Then:
-
 ```tsx
-import { useTheme } from '@kbach/react';
+// app entry (e.g. root.tsx / main.tsx) — runtime, same value as above
+import { applyKbachConfig, useTheme } from '@kbach/react';
+
+applyKbachConfig({ darkMode: 'attribute' }); // call once, before first render
 
 function ThemeToggle() {
   const { mode, isDark, setMode, toggle } = useTheme();
@@ -222,8 +235,9 @@ Works anywhere, no provider needed. `<ThemeProvider defaultMode="dark">` is
 optional, for seeding a startup default. Outside React (plain functions,
 event handlers), use `getGlobalDarkMode()`/`toggleGlobalDarkMode()` instead.
 Note: `useTheme()`/`toggleGlobalDarkMode()` still track `isDark` correctly
-under the default `'media'` strategy too — they just won't visibly affect
-`dark:` classes unless you've switched to `'class'`/`'attribute'`.
+under the default `'media'` strategy too (and even without ever calling
+`applyKbachConfig()`) — they just won't visibly affect `dark:` classes
+unless the runtime has also been told about `'class'`/`'attribute'`.
 
 ## Theming
 

@@ -188,6 +188,27 @@ live at your project root (e.g. a monorepo app).
 
 ## Dark mode
 
+By default, `dark:` classes follow the OS `prefers-color-scheme` setting via
+plain CSS — zero config, zero JS required, works even if your app never
+imports anything from `@kbach/react`'s runtime:
+
+```tsx
+<div className="bg-white dark:bg-neutral-12">...</div>
+```
+
+This default (`darkMode: 'media'`) can't be overridden by an in-app toggle —
+`@media (prefers-color-scheme)` only ever reflects the real OS setting. To
+add a manual light/dark switcher, opt into `darkMode: 'class'` or
+`'attribute'` (writes `.dark`/`data-theme` onto `<html>` instead) via
+`kbach.config.js` or the plugin's `config`/`theme` option:
+
+```js
+// kbach.config.js
+export default { darkMode: 'attribute' };
+```
+
+Then:
+
 ```tsx
 import { useTheme } from '@kbach/react';
 
@@ -200,6 +221,9 @@ function ThemeToggle() {
 Works anywhere, no provider needed. `<ThemeProvider defaultMode="dark">` is
 optional, for seeding a startup default. Outside React (plain functions,
 event handlers), use `getGlobalDarkMode()`/`toggleGlobalDarkMode()` instead.
+Note: `useTheme()`/`toggleGlobalDarkMode()` still track `isDark` correctly
+under the default `'media'` strategy too — they just won't visibly affect
+`dark:` classes unless you've switched to `'class'`/`'attribute'`.
 
 ## Theming
 

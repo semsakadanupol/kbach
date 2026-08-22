@@ -20,7 +20,7 @@ import type { LayoutChangeEvent, PressableStateCallbackType } from 'react-native
 import type { StyleObject } from './nativeBridge';
 import { getGlobalDarkMode, subscribeGlobalDarkMode } from './darkModeStore';
 import { getDynamicToken, subscribeDynamicTokens, getDynamicTokensVersion } from './dynamicTokens';
-import { parsePercentRelativeCalc, resolvePercentRelativeCalc, type PercentRelativeCalc } from './layoutCalc';
+import { parsePercentRelativeExpr, type PercentRelativeExpr } from './layoutCalc';
 import { splitRespectingBrackets } from './jsEngine/parser';
 
 export { Fragment };
@@ -61,17 +61,18 @@ function substituteDynamicTokens(classStrRaw: string): string {
 }
 
 // Cheap pre-check before bothering to split+parse every token — matches
-// the SHAPE parsePercentRelativeCalc actually accepts (w-[calc(...%...)]/
-// h-[calc(...%...)]) closely enough to gate the more expensive per-token
-// work in processElement's dispatch, without duplicating that function's
-// own parsing logic.
-const PERCENT_RELATIVE_CALC_HINT_RE = /[wh]-\[calc\([^)]*%[^)]*\)\]/;
+// the SHAPE parsePercentRelativeExpr actually accepts (w-[calc(...%...)]/
+// h-[calc(...%...)], and now also w-[min(...%...)]/max(...)/clamp(...))
+// closely enough to gate the more expensive per-token work in
+// processElement's dispatch, without duplicating that function's own
+// parsing logic.
+const PERCENT_RELATIVE_CALC_HINT_RE = /[wh]-\[(calc|min|max|clamp)\([^)]*%[^)]*\)\]/;
 
-/** Every `w-[calc(...)]`/`h-[calc(...)]` token in `classStrRaw` that resolves via `parsePercentRelativeCalc` — usually 0, at most 2 (one per property). */
-function extractPercentRelativeCalcs(classStrRaw: string): PercentRelativeCalc[] {
-  const found: PercentRelativeCalc[] = [];
+/** Every `w-[calc(...)]`/`h-[calc(...)]`/`w-[min(...)]`/`max(...)`/`clamp(...)` token in `classStrRaw` that resolves via `parsePercentRelativeExpr` — usually 0, at most 2 (one per property). */
+function extractPercentRelativeCalcs(classStrRaw: string): PercentRelativeExpr[] {
+  const found: PercentRelativeExpr[] = [];
   for (const token of classStrRaw.split(/\s+/)) {
-    const parsed = parsePercentRelativeCalc(token);
+    const parsed = parsePercentRelativeExpr(token);
     if (parsed) found.push(parsed);
   }
   return found;
@@ -81,7 +82,7 @@ function extractPercentRelativeCalcs(classStrRaw: string): PercentRelativeCalc[]
 function stripPercentRelativeCalcTokens(classStrRaw: string): string {
   return classStrRaw
     .split(/\s+/)
-    .filter((token) => token && parsePercentRelativeCalc(token) === null)
+    .filter((token) => token && parsePercentRelativeExpr(token) === null)
     .join(' ');
 }
 
@@ -280,9 +281,11 @@ interface ReactiveProps {
  * modifier(s)/token(s) the className actually uses — cheap, and keeps this
  * component's hook list fixed across renders.
  *
- * `w-[calc(...%...)]`/`h-[calc(...%...)]` (see layoutCalc.ts) work
- * differently from the other three: there's no external store to
- * subscribe to at all — the "current value" IS this element's own layout,
+ * `w-[calc(...%...)]`/`h-[calc(...%...)]` — and now `min()`/`max()`/
+ * `clamp()` with at least one percentage argument too (see layoutCalc.ts's
+ * `parsePercentRelativeExpr`) — work differently from the other three:
+ * there's no external store to subscribe to at all — the "current value"
+ * IS this element's own layout,
  * which nothing knows ahead of time. `measuredBasis` (component-local
  * state, not a global store) tracks it: the FIRST render sets the
  * property to a plain `'100%'` — a real RN percentage RN's own layout
@@ -337,7 +340,7 @@ function ReactiveElement({
     layoutOverrides = {};
     for (const calc of percentCalcs) {
       const basis = measuredBasis?.[calc.property];
-      layoutOverrides[calc.property] = basis === undefined ? '100%' : resolvePercentRelativeCalc(basis, calc);
+      layoutOverrides[calc.property] = basis === undefined ? '100%' : calc.resolve(basis);
     }
     // Compose with the caller's own onLayout (if any) rather than silently
     // replacing it — this is the one place ReactiveElement adds a prop

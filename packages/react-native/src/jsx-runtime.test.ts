@@ -501,6 +501,63 @@ describe('jsx-runtime (react-native)', () => {
     });
   });
 
+  // Regression coverage for a real gap: min()/max()/clamp() with a
+  // percentage argument (e.g. `min(50%,20rem)` — "half the parent, capped
+  // at a fixed size", a genuinely common real-world use case) used to get
+  // silently dropped with a warning, since only calc() got the
+  // onLayout-measurement treatment. Same measure-then-snap mechanism as the
+  // calc() block above, via layoutCalc.ts's parsePercentRelativeExpr.
+  describe('percentage-relative min()/max()/clamp() (measure-then-snap via onLayout)', () => {
+    it('strips the min(...%...) token before calling resolveStyle, and renders 100% first', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'bg-blue-6 w-[min(50%,20rem)]' }, undefined);
+      const renderer = mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledWith('bg-blue-6', false);
+      const style = renderer.root.findByType('View' as any).props.style;
+      expect(style.width).toBe('100%');
+    });
+
+    it('computes min(percent, constant) once onLayout reports the measured size', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[min(50%,20rem)]' }, undefined);
+      const renderer = mount(el);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 1000, height: 100 } } });
+      });
+      // 50% of 1000 = 500, vs a fixed 320 (20rem) — min is 320.
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(320);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 500, height: 100 } } });
+      });
+      // 50% of 500 = 250, below the 320 cap — min is 250.
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(250);
+    });
+
+    it('computes clamp(min, preferred%, max) once onLayout reports the measured size', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[clamp(16rem,50%,32rem)]' }, undefined);
+      const renderer = mount(el);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 400, height: 100 } } });
+      });
+      // 50% of 400 = 200, below the 256px (16rem) floor — clamps up to 256.
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(256);
+    });
+
+    it('does not add any reactivity overhead for a min()/max() with no percentage argument', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[min(10px,20px)]' }, undefined);
+      mount(el);
+      // No percentage operand — resolves through the normal resolveStyle
+      // path (reduceConstantMath), never routes through ReactiveElement's
+      // layout machinery at all.
+      expect(mockResolveStyle).toHaveBeenCalledWith('w-[min(10px,20px)]', false);
+    });
+  });
+
   // hover:/focus:/disabled: — resolved entirely above resolveStyle (see
   // jsxRuntimeCore.ts's own doc comment on why), so these assert on the
   // exact className mockResolveStyle received, confirming the modifier was

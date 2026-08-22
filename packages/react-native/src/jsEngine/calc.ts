@@ -47,8 +47,8 @@ function stripCall(raw: string, name: string): string | null {
   return afterName.slice(1, -1);
 }
 
-/** Splits on top-level commas only — a comma inside a nested `(...)` doesn't count as an argument separator. */
-function splitTopLevelCommas(s: string): string[] {
+/** Splits on top-level commas only — a comma inside a nested `(...)` doesn't count as an argument separator. Exported for `layoutCalc.ts`'s percentage-relative `min()`/`max()`/`clamp()` support, which needs the exact same argument-splitting this file already does. */
+export function splitTopLevelCommas(s: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;

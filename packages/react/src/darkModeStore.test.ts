@@ -33,18 +33,28 @@ describe('darkModeStore', () => {
     expect(getGlobalDarkMode()).toBe(true);
   });
 
-  it('applies the resolved dark state to documentElement via data-theme (the default strategy)', async () => {
+  it('applies the resolved dark state to documentElement via data-theme (the "attribute" strategy)', async () => {
     mockMatchMedia(true);
+    vi.doMock('./theme', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./theme')>();
+      return { ...actual, getTheme: () => ({ ...actual.defaultTheme, darkMode: 'attribute' }) };
+    });
     await freshStore();
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    vi.doUnmock('./theme');
   });
 
-  it('setGlobalThemeMode persists the explicit choice and re-applies the DOM', async () => {
+  it('setGlobalThemeMode persists the explicit choice and re-applies the DOM (the "attribute" strategy)', async () => {
     mockMatchMedia(false);
+    vi.doMock('./theme', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./theme')>();
+      return { ...actual, getTheme: () => ({ ...actual.defaultTheme, darkMode: 'attribute' }) };
+    });
     const { setGlobalThemeMode } = await freshStore();
     setGlobalThemeMode('dark');
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     expect(window.localStorage.getItem('kbach-theme')).toBe('dark');
+    vi.doUnmock('./theme');
   });
 
   it('a fresh module import picks up a previously persisted explicit choice over the system preference', async () => {

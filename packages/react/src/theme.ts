@@ -91,7 +91,19 @@ export const defaultTheme: ThemeConfig = {
     serif: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
     mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
   },
-  darkMode: 'attribute',
+  // Matches real Tailwind's own default (`darkMode: 'media'`): pure
+  // `@media (prefers-color-scheme: dark)`, works with zero JS — a project
+  // using only static `className` strings gets working `dark:` classes
+  // out of the box, with no runtime import required to write `data-theme`/
+  // `.dark` onto `<html>` (see darkModeStore.ts's `applyToDom`). The
+  // tradeoff: `'media'` can't be overridden by a manual light/dark toggle —
+  // `useTheme()`/`toggleGlobalDarkMode()` still track `isDark` correctly
+  // for JS consumers, but flipping it has no visible effect on `dark:`
+  // classes, since the browser's media query only ever reflects the real
+  // OS setting. Opt into `darkMode: 'class'` or `'attribute'` explicitly
+  // (via `kbach.config.js` or the `config`/`theme` plugin option) as soon
+  // as an app wants a real in-app toggle.
+  darkMode: 'media',
   // Empty by default, matching real Tailwind's own defaults (no forced
   // centering/padding) — see `ContainerConfig`'s own doc comment.
   container: {},

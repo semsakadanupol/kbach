@@ -14,7 +14,7 @@ export type { KbachConfig } from './config';
 export { useTheme } from './useTheme';
 export type { ThemeState } from './useTheme';
 export { ThemeProvider } from './ThemeProvider';
-export type { ThemeProviderProps } from './ThemeProvider';
+export type { ThemeProviderProps, ThemeStorageAdapter } from './ThemeProvider';
 export {
   getGlobalDarkMode,
   getGlobalThemeMode,

@@ -173,8 +173,26 @@ optional, for seeding a startup default. Outside React, use
 `getGlobalDarkMode()`/`toggleGlobalDarkMode()` instead.
 
 Follows the OS setting live until overridden, and isn't persisted across
-app launches (no built-in storage dependency). To persist, read your own
-storage at startup and call `setGlobalThemeMode()` before your first render.
+app launches by default (no forced storage dependency). To persist, pass
+any async key-value store exposing `getItem`/`setItem` as `<ThemeProvider
+persist>` — `@react-native-async-storage/async-storage`'s default export
+already matches this shape exactly:
+
+```tsx
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ThemeProvider } from '@kbach/react-native';
+
+<ThemeProvider persist={AsyncStorage}>
+  <App />
+</ThemeProvider>;
+```
+
+The persisted mode (if any) is read once on mount and wins over
+`defaultMode`; every later explicit choice is written back automatically.
+`false` by default — this package still never imports a storage library
+itself, so nothing changes for apps that don't opt in. Prefer wiring your
+own storage manually instead? `setGlobalThemeMode()` before your first
+render still works exactly as before.
 
 ## Reading colors as values
 
@@ -222,12 +240,15 @@ way — no such unit exists on native at all. It already works fine on web
 (real CSS); on native the declaration is dropped and a `console.warn`
 explains why (dev builds only).
 
-**Percentage-relative width/height** (`calc(100%-3rem)`, `calc(50%+16px)`)
-IS supported, differently: since native has no way to know "100% of what"
-ahead of time, this measures the element's own real layout instead —
+**Percentage-relative width/height** (`calc(100%-3rem)`, `calc(50%+16px)`,
+`min(50%,20rem)`, `max(1rem,5%)`, `clamp(16rem,50%,32rem)`) IS supported,
+differently: since native has no way to know "100% of what" ahead of time,
+this measures the element's own real layout instead —
 
 ```tsx
 <View className="w-[calc(100%_-_3rem)]" />
+<View className="w-[min(50%,20rem)]" />        // half the parent, capped at a fixed size
+<View className="w-[clamp(16rem,50%,32rem)]" />
 ```
 
 Renders once at a plain `100%` (a real RN percentage, resolved correctly by
@@ -236,9 +257,14 @@ event, then immediately corrects to the actual computed number once
 measured — a genuine one-frame measure-then-snap, not instant math like the
 constant-only case above, and it keeps re-measuring on every layout (screen
 rotation, parent resize, ...) rather than freezing after the first value.
-Scoped to exactly one percentage term plus one constant term on `width`/
-`height` only — `calc(50%-50%)`, other properties, or anything with `*`/`/`
-falls through to the same drop-and-warn behavior as before.
+Scoped narrowly, same "reduce fully or bail" philosophy as the constant-only
+case: `calc()` takes exactly one percentage term plus one constant term;
+`min()`/`max()` take two or more comma-separated arguments, each EITHER a
+plain percentage or a constant px/rem expression (not both mixed in one
+argument — `min(50%-1rem,20rem)` is out of scope); `clamp()` takes exactly
+three. `width`/`height` only in every case — other properties, or anything
+that doesn't reduce fully, falls through to the same drop-and-warn behavior
+as before.
 
 **Arbitrary values can't contain literal spaces** — this is a pre-existing
 rule (real Tailwind has the same one), not specific to `calc()`: a space

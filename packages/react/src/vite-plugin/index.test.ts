@@ -207,6 +207,47 @@ describe('kbach() plugin — safelist option', () => {
   });
 });
 
+// Regression coverage for a real bug: mainCSSFile() was hardcoded to
+// "src/kbach.css" regardless of the project's actual source root, so any
+// framework using a different convention (React Router v7's framework
+// mode uses "app/", not "src/") failed outright at buildStart with an
+// ENOENT trying to write into a "src/" directory that simply didn't exist.
+describe('kbach() plugin — cssFile option', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('writes to the configured cssFile path instead of the default src/kbach.css', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    // Deliberately no "src/" directory anywhere — only "app/", matching a
+    // React Router v7 framework-mode (or similar) project layout.
+    mkdirSync(join(dir, 'app'));
+    writeFileSync(join(dir, 'app', 'root.tsx'), '<div className="flex" />', 'utf-8');
+
+    const plugin = kbach({ cssFile: 'app/kbach.css' });
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    expect(() => (plugin.buildStart as () => void)()).not.toThrow();
+
+    const css = readFileSync(join(dir, 'app', 'kbach.css'), 'utf-8');
+    expect(css).toContain('display: flex');
+  });
+
+  it('still defaults to src/kbach.css when cssFile is omitted', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="flex" />', 'utf-8');
+
+    const plugin = kbach();
+    (plugin.configResolved as (r: { root: string }) => void)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).toContain('display: flex');
+  });
+});
+
 // configureServer wires up 'add'/'unlink' watcher events — separate from
 // handleHotUpdate above, which Vite only fires for edits (type === "update")
 // to an already-existing file, never for a file being created or deleted.

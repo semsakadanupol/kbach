@@ -62,11 +62,14 @@ first render, same as before.
 
 ## React Router
 
-Nothing beyond the Quick Start above — React Router is a client-side
-routing library with no build-tool coupling of its own, so it layers on
-top of the exact same Vite + `kbach.css` setup with zero extra
-configuration, whether you're on the framework mode (`createBrowserRouter`)
-or the classic `<BrowserRouter>` component form:
+React Router is a client-side routing library with no build-tool coupling
+of its own, so it layers on top of the exact same Vite + `kbach.css` setup
+either way — but which "either way" depends on which of React Router's two
+genuinely different modes you're using.
+
+**Library mode** (you call `createRoot` yourself — `createBrowserRouter` +
+`<RouterProvider>`, or the classic `<BrowserRouter>` component): needs
+nothing beyond the Quick Start above.
 
 ```tsx
 // main.tsx
@@ -84,10 +87,40 @@ const router = createBrowserRouter([
 createRoot(document.getElementById('root')!).render(<RouterProvider router={router} />);
 ```
 
-Every route's own components use `className` exactly like any other
-component — routing has no effect on how Kbach resolves classes, since
-resolution already happened at build time, before routing even enters the
-picture.
+**Framework mode** (`npx create-react-router@latest` — file-based routing
+under `app/`, its own Vite plugin, SSR by default): two things differ from
+the Quick Start, both because this mode owns your project's structure and
+render lifecycle, not you:
+
+1. Its convention is `app/`, not `src/` — pass `cssFile` so the plugin
+   writes to `app/kbach.css` instead of the (here, nonexistent) default:
+   ```ts
+   // vite.config.ts
+   import { reactRouter } from '@react-router/dev/vite';
+   import { kbach } from '@kbach/react/vite';
+   import { defineConfig } from 'vite';
+
+   export default defineConfig({
+     plugins: [kbach({ cssFile: 'app/kbach.css' }), reactRouter()],
+   });
+   ```
+2. **Don't call `createRoot` yourself in `app/root.tsx`** — the framework's
+   own generated client/server entry points already do this; `root.tsx`
+   only ever *exports* a `Layout`/default component. Adding your own
+   `createRoot(...).render(...)` at that file's top level runs during SSR
+   too, where `document` doesn't exist, and crashes the build immediately.
+   `app/root.tsx` needs only:
+   ```tsx
+   import './kbach.css';
+   export default function App() {
+     return <Outlet />;
+   }
+   ```
+
+Either mode: every route's own components use `className` exactly like any
+other component — routing has no effect on how Kbach resolves classes,
+since resolution already happened at build time, before routing even
+enters the picture.
 
 ## Next.js
 

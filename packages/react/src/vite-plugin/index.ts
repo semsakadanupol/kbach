@@ -36,6 +36,17 @@ export interface KbachPluginOptions {
    * purpose as Tailwind's `safelist`.
    */
   safelist?: string[];
+  /**
+   * Path to the `kbach:start`/`kbach:end` marker file, relative to Vite's
+   * resolved root. Defaults to `"src/kbach.css"` — override this for any
+   * project whose source root isn't `src/`: React Router v7's framework
+   * mode (`app/kbach.css`), a Pages-Router-style Next.js app using this
+   * plugin directly (`styles/kbach.css`), or any other convention. Getting
+   * this wrong fails loudly at build start (`ENOENT` writing the file's
+   * parent directory) rather than silently generating nothing, but it's
+   * still worth setting explicitly if your project doesn't use `src/`.
+   */
+  cssFile?: string;
 }
 
 export const DEFAULT_SCAN_DIRS = ['src', 'app', 'pages', 'components'];
@@ -95,10 +106,11 @@ export function resolveEffectiveTheme(root: string, options: { theme?: ThemeConf
  * Build-time static CSS generation for Vite — scans source files for
  * Kbach class strings, resolves them through the same Rust engine the
  * runtime uses (via the Node-target WASM build, see wasmNode.ts), and
- * writes a real kbach.css. Simplified vs old-kbach's version: expects
- * `src/kbach.css` to exist at a fixed conventional path (create it with
- * `/* kbach:start *\/` / `/* kbach:end *\/` markers) rather than scanning
- * the whole project for a file named kbach.css.
+ * writes a real kbach.css. Simplified vs old-kbach's version: expects a
+ * marker file to already exist at a fixed conventional path — `src/
+ * kbach.css` by default, override via `cssFile` for any other source root
+ * (create it with `/* kbach:start *\/` / `/* kbach:end *\/` markers)
+ * rather than scanning the whole project for a file named kbach.css.
  *
  * The actual scanning/resolution/generation logic lives in
  * `staticCss/engine.ts`, shared with `postcss-plugin/index.ts` (Next.js/
@@ -119,7 +131,7 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
   let engine: KbachStaticCssEngine = createKbachStaticCssEngine({ root, theme, themeJson: JSON.stringify(theme), includeDirs, safelist });
 
   function mainCSSFile(): string {
-    return join(root, 'src', 'kbach.css');
+    return join(root, options.cssFile ?? 'src/kbach.css');
   }
 
   // Lives in a dot-prefixed project-root folder, not next to real source —

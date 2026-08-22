@@ -1,3 +1,11 @@
+// Uses hooks (useEffect) — Next.js App Router requires this directive on
+// any module a Server Component might import that touches hooks/browser
+// APIs, or the build fails outright ("You're importing a component that
+// needs useEffect... marked with 'use client'"). Inert everywhere else
+// (Vite, CRA, Next.js Pages Router) — just an unrecognized-but-harmless
+// string literal to every bundler except React Server Components' own.
+'use client';
+
 import { useEffect, useRef, type ReactNode } from 'react';
 import { seedDefaultMode, type ThemeMode } from './darkModeStore';
 

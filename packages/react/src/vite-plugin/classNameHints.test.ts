@@ -86,12 +86,19 @@ describe('buildClassNameHintsDts', () => {
 
   // The real proof, not just string matching: does the generated .d.ts
   // actually compile against a genuine HTMLAttributes/SVGAttributes usage?
-  // Placed under packages/react/src (not a bare temp dir) so `react`
-  // resolves via this package's own node_modules — same manual check
-  // (declaration-merging into HTMLAttributes<T>) already proven to compile
-  // during Phase 15 planning, now automated.
+  // Placed as a SIBLING of packages/react/src (not a bare OS temp dir, and
+  // deliberately NOT inside src/ itself) so `react` still resolves via this
+  // package's own node_modules (the same node_modules-resolution walk-up
+  // works identically one level up) — same manual check (declaration-
+  // merging into HTMLAttributes<T>) already proven to compile during
+  // Phase 15 planning, now automated. Must stay OUTSIDE src/: tsup's own
+  // DTS bundler globs everything under src/, so this directory's transient
+  // existence during the test raced with a concurrent `build` run once
+  // turbo scheduled `test`/`build` for this package at the same time,
+  // intermittently failing the build with a stray "file not found" once
+  // this test's own `finally` cleanup deleted it mid-bundle.
   it('compiles against real @types/react HTMLAttributes/SVGAttributes usage', () => {
-    const dir = join(thisDir, '..', '__hints_compile_check__');
+    const dir = join(thisDir, '..', '..', '__hints_compile_check__');
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir);
     try {

@@ -1,6 +1,6 @@
 {
   "name": "@kbach/react",
-  "version": "1.0.0-beta.5",
+  "version": "1.0.0-beta.6",
   "description": "A utility-first styling engine for React, powered by a real Rust/WASM core — Tailwind CSS v4 feature parity with Kbach's own color palette.",
   "keywords": ["css", "react", "tailwind", "utility-first", "wasm", "styling"],
   "license": "MIT",
@@ -46,6 +46,12 @@
       "source": "./src/vite-plugin/index.ts",
       "import": "./dist/vite-plugin.mjs",
       "require": "./dist/vite-plugin.js"
+    },
+    "./postcss": {
+      "types": "./dist/postcss-plugin.d.ts",
+      "source": "./src/postcss-plugin/index.ts",
+      "import": "./dist/postcss-plugin.mjs",
+      "require": "./dist/postcss-plugin.js"
     }
   },
   "scripts": {
@@ -61,16 +67,21 @@
   "devDependencies": {
     "@types/react": "^19.2.0",
     "jsdom": "^30.0.1",
+    "postcss": "^8.4.0",
     "tsup": "^8.0.0",
     "typescript": "^6.0.0",
     "vite": "^5.4.21",
     "vitest": "^1.0.0"
   },
   "peerDependencies": {
+    "postcss": "^8.0.0",
     "react": ">=18.0.0",
     "vite": ">=4.0.0"
   },
   "peerDependenciesMeta": {
+    "postcss": {
+      "optional": true
+    },
     "vite": {
       "optional": true
     }

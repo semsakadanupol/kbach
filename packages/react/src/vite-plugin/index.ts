@@ -1,16 +1,14 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { createRequire } from 'module';
 import type { Plugin } from 'vite';
-import { generateCssForToken, type RuleEntry } from './wasmNode';
-import { extractClassStrings, scanUsedTags, scanDir } from './scan';
-import { formatKbachCSS, writeKbachToFile } from './format';
-import { scanProjectCssSelectors, warnIfUnknownClass } from './unknownClassWarnings';
+import { writeKbachToFile } from './format';
 import { buildClassTokens, buildClassNameHintsDts } from './classNameHints';
 import { defaultTheme } from '../theme';
 import type { ThemeConfig } from '../theme';
 import { resolveKbachConfig } from '../config';
 import type { KbachConfig } from '../config';
+import { createKbachStaticCssEngine, readSourceFile, type KbachStaticCssEngine } from '../staticCss/engine';
 
 export interface KbachPluginOptions {
   /** Defaults to the same defaultTheme the runtime uses — pass your own to keep both in sync. */
@@ -40,7 +38,7 @@ export interface KbachPluginOptions {
   safelist?: string[];
 }
 
-const DEFAULT_SCAN_DIRS = ['src', 'app', 'pages', 'components'];
+export const DEFAULT_SCAN_DIRS = ['src', 'app', 'pages', 'components'];
 
 // A bulk change (git checkout/branch switch/rebase touching many files)
 // fires one add/unlink/handleHotUpdate event per file in quick succession —
@@ -50,42 +48,6 @@ const DEFAULT_SCAN_DIRS = ['src', 'app', 'pages', 'components'];
 // tests can advance fake timers by exactly this amount rather than
 // duplicating the constant.
 export const CSS_SYNC_DEBOUNCE_MS = 50;
-
-// Normalizes a file path to forward slashes (and lowercase on Windows,
-// whose filesystem is case-insensitive) so `fileTokens`'s keys are
-// consistent regardless of which of two different path styles produced
-// them: `scanDir`'s initial scan uses Node's `path.join`, which emits
-// OS-native separators — backslashes on Windows — while Vite's own
-// `handleHotUpdate`/`watcher` events always report forward-slash absolute
-// paths, on every OS, by Vite's own convention. Without this, a hot-edited
-// file gets a SECOND, different Map entry instead of replacing its
-// original one — its old tokens are never pruned, so `kbach.css` slowly
-// accumulates every class the file has EVER contained, live, forever, and
-// no rebuild fixes it short of restarting the dev server. (Confirmed by
-// hand: this is exactly why a shadow color that had already been edited
-// out of the source kept reappearing in the generated CSS.) Only used for
-// the Map key — the display path passed to `warnIfUnknownClass` is left
-// as-is, since raw-cased/native-separator paths read better in a warning.
-function normPath(p: string): string {
-  const fwd = p.replace(/\\/g, '/');
-  return process.platform === 'win32' ? fwd.toLowerCase() : fwd;
-}
-
-// Safelist entries live under a key no real file path can ever normalize to
-// (a NUL-prefixed string), so they participate in the "active = union of
-// every fileTokens entry" logic automatically, with zero special-casing
-// elsewhere — same permanence as a file that's always present, never
-// edited/deleted, so the add/unlink/edit handlers (which only ever touch
-// keys derived from real file paths) can never prune it.
-const SAFELIST_KEY = '\0kbach-safelist';
-
-function readFile(path: string): string {
-  return readFileSync(path, 'utf-8');
-}
-
-function writeFile(path: string, content: string): void {
-  writeFileSync(path, content, 'utf-8');
-}
 
 function writeFileEnsuringDir(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -110,11 +72,23 @@ function writeFileEnsuringDir(path: string, content: string): void {
  * base for resolution anyway — the base only matters for a RELATIVE
  * specifier, which this never passes it.
  */
-function loadConfigFile(root: string): KbachConfig | undefined {
+export function loadConfigFile(root: string): KbachConfig | undefined {
   const path = join(root, 'kbach.config.js');
   if (!existsSync(path)) return undefined;
   const mod = createRequire(root)(path) as { default?: KbachConfig };
   return (mod.default ?? mod) as KbachConfig;
+}
+
+/**
+ * Resolves the theme to use, applying the same "explicit theme/config
+ * always wins over kbach.config.js auto-discovery" precedence both
+ * vite-plugin and postcss-plugin need identically.
+ */
+export function resolveEffectiveTheme(root: string, options: { theme?: ThemeConfig; config?: KbachConfig }): ThemeConfig {
+  if (options.theme) return options.theme;
+  if (options.config) return resolveKbachConfig(options.config);
+  const discovered = loadConfigFile(root);
+  return discovered ? resolveKbachConfig(discovered) : defaultTheme;
 }
 
 /**
@@ -125,84 +99,24 @@ function loadConfigFile(root: string): KbachConfig | undefined {
  * `src/kbach.css` to exist at a fixed conventional path (create it with
  * `/* kbach:start *\/` / `/* kbach:end *\/` markers) rather than scanning
  * the whole project for a file named kbach.css.
+ *
+ * The actual scanning/resolution/generation logic lives in
+ * `staticCss/engine.ts`, shared with `postcss-plugin/index.ts` (Next.js/
+ * webpack/Turbopack) — this file is now just the Vite-specific wiring:
+ * plugin lifecycle hooks, the dev-server watcher, and the debounced
+ * file-write.
  */
 export function kbach(options: KbachPluginOptions = {}): Plugin {
-  // Placeholder, good enough for anything that (incorrectly) ran before
-  // configResolved — real resolution (including auto-discovery) happens
-  // there instead, once Vite's actual project root is known; `process.cwd()`
-  // is only a rough guess until then, same as `root` below always was.
-  let theme = options.theme ?? (options.config ? resolveKbachConfig(options.config) : defaultTheme);
-  let themeJson = JSON.stringify(theme);
   const includeDirs = options.include ?? DEFAULT_SCAN_DIRS;
   const safelist = options.safelist ?? [];
 
+  // Placeholders, good enough for anything that (incorrectly) ran before
+  // configResolved — real resolution happens there instead, once Vite's
+  // actual project root is known; `process.cwd()` is only a rough guess
+  // until then.
   let root = process.cwd();
-
-  // fileTokens: file path (or SAFELIST_KEY) -> tokens that entry contributes.
-  // tokenRules: token -> resolved rules (cached, never regenerated unless new).
-  const fileTokens = new Map<string, Set<string>>();
-  const tokenRules = new Map<string, RuleEntry[]>();
-
-  // fileTags: file path -> HTML tags that file's JSX renders — drives the
-  // base reset's tag-based pruning (see reset.ts's buildResetCSS). Same
-  // per-file-Map shape as fileTokens/normPath keying, for the same reason:
-  // a file's contribution needs to be independently replaceable/removable
-  // on hot-update or delete without touching any other file's entries.
-  const fileTags = new Map<string, Set<string>>();
-
-  // Populated once at buildStart (before the JS/TSX scan, so the unknown-
-  // class check has the full picture) — see unknownClassWarnings.ts.
-  let projectCssClasses = new Set<string>();
-  const warnedTokens = new Set<string>();
-
-  function resolveToken(tok: string): RuleEntry[] {
-    if (!tokenRules.has(tok)) {
-      tokenRules.set(tok, generateCssForToken(tok, themeJson).rules);
-    }
-    return tokenRules.get(tok)!;
-  }
-
-  function processFile(filePath: string, code: string): void {
-    const tokens = new Set<string>();
-    for (const tok of extractClassStrings(code)) {
-      tokens.add(tok);
-      const rules = resolveToken(tok);
-      if (process.env.NODE_ENV !== 'production') {
-        warnIfUnknownClass(tok, filePath, code, rules.length > 0, projectCssClasses, warnedTokens);
-      }
-    }
-    fileTokens.set(normPath(filePath), tokens);
-    fileTags.set(normPath(filePath), scanUsedTags(code));
-  }
-
-  function processSafelist(): void {
-    if (safelist.length === 0) return;
-    const tokens = new Set(safelist);
-    for (const tok of tokens) resolveToken(tok);
-    fileTokens.set(SAFELIST_KEY, tokens);
-  }
-
-  function activeTokens(): Set<string> {
-    const active = new Set<string>();
-    for (const tokens of fileTokens.values()) for (const t of tokens) active.add(t);
-    return active;
-  }
-
-  function activeTags(): Set<string> {
-    const active = new Set<string>();
-    for (const tags of fileTags.values()) for (const t of tags) active.add(t);
-    return active;
-  }
-
-  function generateCSS(): string {
-    const active = activeTokens();
-    const view = new Map<string, RuleEntry[]>();
-    for (const tok of active) {
-      const rules = tokenRules.get(tok);
-      if (rules) view.set(tok, rules);
-    }
-    return formatKbachCSS(view, theme, activeTags());
-  }
+  let theme = defaultTheme;
+  let engine: KbachStaticCssEngine = createKbachStaticCssEngine({ root, theme, themeJson: JSON.stringify(theme), includeDirs, safelist });
 
   function mainCSSFile(): string {
     return join(root, 'src', 'kbach.css');
@@ -229,11 +143,7 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
   }
 
   function syncMainCSSFile(server?: { watcher: { emit(event: string, ...args: unknown[]): unknown } }): void {
-    const active = activeTokens();
-    for (const tok of tokenRules.keys()) {
-      if (!active.has(tok)) tokenRules.delete(tok);
-    }
-    const changed = writeKbachToFile(mainCSSFile(), generateCSS(), readFile, writeFile);
+    const changed = writeKbachToFile(mainCSSFile(), engine.generateCSS(), readSourceFile, (p, c) => writeFileSync(p, c, 'utf-8'));
     if (changed && server) server.watcher.emit('change', mainCSSFile());
   }
 
@@ -241,9 +151,9 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
   // syncMainCSSFile call, trailing-edge — each new event pushes the sync
   // out rather than running immediately, so a burst settles to exactly one
   // recompute+write after CSS_SYNC_DEBOUNCE_MS of quiet, not one per file.
-  // fileTokens/fileTags are still updated synchronously per event (cheap,
-  // and needed so a later event in the same burst sees prior events'
-  // results) — only the expensive generateCSS+write is deferred.
+  // The engine's own per-file Maps are still updated synchronously per
+  // event (cheap, and needed so a later event in the same burst sees prior
+  // events' results) — only the expensive generateCSS+write is deferred.
   let syncTimer: ReturnType<typeof setTimeout> | null = null;
   function scheduleSync(server?: Parameters<typeof syncMainCSSFile>[0]): void {
     if (syncTimer) clearTimeout(syncTimer);
@@ -253,39 +163,24 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
     }, CSS_SYNC_DEBOUNCE_MS);
   }
 
-  function initialScan(): void {
-    for (const dir of includeDirs) {
-      scanDir(join(root, dir), processFile);
-    }
-  }
-
   return {
     name: 'kbach',
     enforce: 'pre',
 
     configResolved(resolved) {
       root = resolved.root;
-      // Only when the caller specified NEITHER `theme` NOR `config` —
-      // either one is an explicit choice that always wins over
-      // auto-discovery, same as `config`'s own doc comment already
-      // promises relative to `theme`.
-      if (!options.theme && !options.config) {
-        const discovered = loadConfigFile(root);
-        if (discovered) {
-          theme = resolveKbachConfig(discovered);
-          themeJson = JSON.stringify(theme);
-        }
-      }
+      theme = resolveEffectiveTheme(root, options);
+      engine = createKbachStaticCssEngine({ root, theme, themeJson: JSON.stringify(theme), includeDirs, safelist });
     },
 
     buildStart() {
       // Index project stylesheets BEFORE scanning JS/TSX — the unknown-
       // utility check needs the full picture of what's already styled
       // elsewhere, not a partial one.
-      projectCssClasses = scanProjectCssSelectors(root, includeDirs);
-      initialScan();
-      processSafelist();
-      writeKbachToFile(mainCSSFile(), generateCSS(), readFile, writeFile);
+      engine.scanProjectCssSelectorsOnce();
+      engine.initialScan();
+      engine.processSafelist();
+      writeKbachToFile(mainCSSFile(), engine.generateCSS(), readSourceFile, (p, c) => writeFileSync(p, c, 'utf-8'));
       writeClassNameHints();
     },
 
@@ -297,14 +192,12 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
         if (file.includes('node_modules')) return;
         if (!/\.(tsx?|jsx?)$/.test(file)) return;
         if (isUnlink) {
-          fileTokens.delete(normPath(file));
-          fileTags.delete(normPath(file));
+          engine.removeFile(file);
         } else {
           try {
-            processFile(file, readFile(file));
+            engine.processFile(file, readSourceFile(file));
           } catch {
-            fileTokens.delete(normPath(file));
-            fileTags.delete(normPath(file));
+            engine.removeFile(file);
           }
         }
         scheduleSync(server);
@@ -317,10 +210,9 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
       if (file.includes('node_modules')) return;
       if (!/\.(tsx?|jsx?)$/.test(file)) return;
       try {
-        processFile(file, readFile(file));
+        engine.processFile(file, readSourceFile(file));
       } catch {
-        fileTokens.delete(normPath(file));
-        fileTags.delete(normPath(file));
+        engine.removeFile(file);
       }
       scheduleSync(server);
     },

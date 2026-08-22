@@ -10,6 +10,7 @@ export default defineConfig({
     'jsx-runtime': 'src/jsx-runtime.tsx',
     'jsx-dev-runtime': 'src/jsx-dev-runtime.tsx',
     'vite-plugin': 'src/vite-plugin/index.ts',
+    'postcss-plugin': 'src/postcss-plugin/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,
@@ -18,7 +19,7 @@ export default defineConfig({
   // builds) resolves its .wasm file relative to its own import.meta.url /
   // __dirname — bundling it in would break that relative lookup. Left as a
   // real dependency both consumers (this build and downstream apps)
-  // resolve through node_modules. "vite" is a peer dep only the
-  // vite-plugin entry actually imports (as a type-only import).
-  external: ['@kbach/core-engine', '@kbach/core-engine/node', 'vite'],
+  // resolve through node_modules. "vite"/"postcss" are peer deps only the
+  // vite-plugin/postcss-plugin entries actually import.
+  external: ['@kbach/core-engine', '@kbach/core-engine/node', 'vite', 'postcss'],
 });

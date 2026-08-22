@@ -1,3 +1,7 @@
+// See ThemeProvider.tsx's own doc comment on this directive — this file
+// calls useTheme() internally, so it's a hook too.
+'use client';
+
 import { getTheme } from './theme';
 import type { ColorEntry, ThemeConfig } from './theme';
 import { useTheme } from './useTheme';

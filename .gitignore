@@ -4,6 +4,10 @@ coverage/
 .turbo/
 *.tsbuildinfo
 
+# apps/next-sandbox (Next.js build output + its auto-generated type-hints file)
+.next/
+next-env.d.ts
+
 # Rust
 target/
 dist-node/

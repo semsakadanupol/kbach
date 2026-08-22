@@ -1,3 +1,7 @@
+// See ThemeProvider.tsx's own doc comment on this directive — same reason,
+// this file calls hooks too.
+'use client';
+
 import { useMemo, useSyncExternalStore } from 'react';
 import {
   getGlobalDarkMode,

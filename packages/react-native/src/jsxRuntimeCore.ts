@@ -13,7 +13,7 @@
  * tsup/esbuild build already flattened away).
  */
 import { jsx as _jsx, jsxs as _jsxs } from 'react/jsx-runtime';
-import { Fragment, useCallback, useState, useSyncExternalStore } from 'react';
+import { Fragment, useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import { Pressable, useWindowDimensions } from 'react-native';
 import type { ReactElement } from 'react';
 import type { LayoutChangeEvent, PressableStateCallbackType } from 'react-native';
@@ -296,9 +296,16 @@ interface ReactiveProps {
  * measure-then-snap (briefly renders at `100%` before correcting) — there
  * is no way to know "100% of the parent" without asking RN to lay
  * something out first, same reason resolve_style.rs's constant-only
- * reducer can't handle this case at all. Re-measures on every layout
- * (rotation, parent resize, ...) rather than only once, so it keeps
- * tracking correctly rather than freezing after the first correct value.
+ * reducer can't handle this case at all. Re-probes on a genuine window-size
+ * change (rotation, split-screen, ...) — NOT on every `onLayout` call: once
+ * the computed pixel value is applied, that's itself a real layout change
+ * from the `'100%'` probe render, so RN fires `onLayout` again reporting
+ * it; treating that as a fresh basis would feed the already-corrected size
+ * back into `resolvePercentRelativeCalc` as if it were 100% of the parent,
+ * compounding smaller (or, for a percentage coefficient of exactly 100,
+ * drifting without bound) on every subsequent render instead of settling
+ * once. See `measure`'s own doc comment below for the guard that prevents
+ * this.
  */
 function ReactiveElement({
   hostType,
@@ -311,15 +318,49 @@ function ReactiveElement({
 }: ReactiveProps): ReactElement {
   useSyncExternalStore(subscribeGlobalDarkMode, getGlobalDarkMode);
   useSyncExternalStore(subscribeDynamicTokens, getDynamicTokensVersion);
-  // Only the subscription (re-render on resize/rotation) is needed here —
-  // the actual width value is read fresh by resolveStyle/resolvedStyleFor
-  // below via nativeBridge's own width parameter, not by this component.
-  useWindowDimensions();
+  // The actual width value (not just the subscription) is needed now — see
+  // the windowSize-reset logic below — whereas every OTHER consumer of
+  // resolveStyle/resolvedStyleFor still reads width fresh via nativeBridge's
+  // own width parameter, not from here.
+  const windowSize = useWindowDimensions();
 
   const [measuredBasis, setMeasuredBasis] = useState<{ width: number; height: number } | null>(null);
+  // Detects a genuine external resize (rotation, split-screen, ...) during
+  // render and resets measuredBasis to null so the next render re-probes at
+  // '100%' — the ONLY trustworthy way to learn the parent's current size,
+  // same reasoning the mount-time probe below already relies on. Comparing
+  // a ref against the current windowSize (React's own documented pattern
+  // for "adjust state when a prop/value changes without an extra effect
+  // frame") rather than a useEffect: this must take effect before the
+  // stale `measure` guard below gets a chance to ignore the next onLayout,
+  // and an effect would commit the stale layoutOverrides for one extra
+  // frame first.
+  const lastWindowSizeRef = useRef(windowSize);
+  if (lastWindowSizeRef.current.width !== windowSize.width || lastWindowSizeRef.current.height !== windowSize.height) {
+    lastWindowSizeRef.current = windowSize;
+    if (measuredBasis !== null) {
+      setMeasuredBasis(null);
+    }
+  }
   const measure = useCallback((e: LayoutChangeEvent) => {
+    // Only the FIRST onLayout after each reset (mount, or the windowSize
+    // reset above) is a real measurement of the parent — every SUBSEQUENT
+    // onLayout for this same element is self-caused: applying the computed
+    // absolute pixel value below is itself a genuine layout change from the
+    // '100%' probe render, so RN fires onLayout again reporting that new
+    // (already-correct) size. The naive version of this callback used to
+    // accept that as a new basis and recompute `calc.resolve()` against it
+    // — e.g. a 390px parent probes to 342 (100%-3rem), which itself then
+    // gets treated as the new "100%" and recomputed to 294, then 246, then
+    // 198, ... visibly shrinking every frame instead of settling once (see
+    // jsx-runtime.test.ts's regression test for this exact scenario, and
+    // never converges at all for a percentCoefficient of exactly 100).
+    // Ignoring every onLayout past the first means an explicit pixel width
+    // genuinely won't react to a parent resize that ISN'T accompanied by a
+    // window-dimension change (e.g. a sibling toggling visibility) — a real,
+    // narrower scope than before, but correctness beats that lost coverage.
     const { width: w, height: h } = e.nativeEvent.layout;
-    setMeasuredBasis((prev) => (prev && prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+    setMeasuredBasis((prev) => (prev === null ? { width: w, height: h } : prev));
   }, []);
 
   // hover:/focus: — see `substituteStateModifiers`'s own doc comment for

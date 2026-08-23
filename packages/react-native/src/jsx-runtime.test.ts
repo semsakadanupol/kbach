@@ -458,7 +458,7 @@ describe('jsx-runtime (react-native)', () => {
       expect(renderer.root.findByType('View' as any).props.style.width).toBe(342);
     });
 
-    it('re-measures on a subsequent layout change (e.g. rotation)', async () => {
+    it('re-measures on a genuine window-size change (e.g. rotation), gated by useWindowDimensions', async () => {
       const { jsx } = await import('./jsx-runtime');
       const el = jsx('View', { className: 'w-[calc(100%_-_3rem)]' }, undefined);
       const renderer = mount(el);
@@ -468,11 +468,53 @@ describe('jsx-runtime (react-native)', () => {
       });
       expect(renderer.root.findByType('View' as any).props.style.width).toBe(342);
 
+      // A real rotation changes the window size FIRST (RN's own
+      // useWindowDimensions), which is what resets measuredBasis and makes
+      // the component re-probe at '100%' again — only then does the
+      // resulting onLayout report the new parent size. Simulating "rotation"
+      // via a second onLayout call ALONE (the old version of this test) was
+      // actually exercising the compounding-shrink bug fixed above, not a
+      // real rotation — see the regression test right below this one.
+      act(() => {
+        setMockWidth(900);
+      });
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe('100%');
+
       act(() => {
         renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 800, height: 100 } } });
       });
       // 800 - 48 = 752
       expect(renderer.root.findByType('View' as any).props.style.width).toBe(752);
+    });
+
+    it('does NOT compound a self-caused onLayout (applying the computed width) into a shrinking loop', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[calc(100%_-_3rem)]' }, undefined);
+      const renderer = mount(el);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 100 } } });
+      });
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(342);
+
+      // Applying width:342 is itself a real layout change from the '100%'
+      // probe render, so real RN fires onLayout AGAIN reporting 342 — with
+      // no window-size change in between. The buggy version of `measure`
+      // treated this as a new basis and recomputed 342-48=294, which would
+      // then itself trigger yet another onLayout reporting 294, and so on.
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 342, height: 100 } } });
+      });
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(342);
+
+      // Even a spurious onLayout with some OTHER value (not what we last
+      // applied — e.g. a rounding-driven native measurement) must still be
+      // ignored absent a real window-size change; only useWindowDimensions
+      // changing is a legitimate trigger to re-measure.
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 341, height: 100 } } });
+      });
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(342);
     });
 
     it('composes with a caller-provided onLayout handler instead of replacing it', async () => {
@@ -528,6 +570,19 @@ describe('jsx-runtime (react-native)', () => {
       // 50% of 1000 = 500, vs a fixed 320 (20rem) — min is 320.
       expect(renderer.root.findByType('View' as any).props.style.width).toBe(320);
 
+      // A further onLayout with no real window-size change in between is
+      // self-caused (applying 320 is itself a layout change from the '100%'
+      // probe render) and must be ignored — see the calc() block's own
+      // "does NOT compound" regression test above for why.
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 320, height: 100 } } });
+      });
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(320);
+
+      // A genuine window-size change resets and re-probes, same as calc().
+      act(() => {
+        setMockWidth(900);
+      });
       act(() => {
         renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 500, height: 100 } } });
       });

@@ -125,6 +125,51 @@ pub(crate) fn resolve_negatable_length(theme: &ThemeConfig, parsed: &ParsedClass
     Some(format!("-{px}px"))
 }
 
+/// `w-1/2`/`h-2/3`/`top-1/2`-style fractions -> a percentage. Shared by
+/// `spacing.rs`'s `resolve_size` (width/height-family) and `layout.rs`'s
+/// `resolve_negatable_size` (inset-family, below) — real Tailwind's own
+/// `top`/`right`/`bottom`/`left`/`inset` scale is the same fraction scale as
+/// `width`/`height`'s, just also negatable. No parser changes needed: "/"
+/// isn't a bracket character, so `top-1/2` already parses as a plain
+/// (non-arbitrary) value — `is_safe_arbitrary_value` is never consulted, and
+/// `css.rs::escape_selector` already backslash-escapes "/" like any other
+/// special character.
+pub(crate) fn fraction_percent(value: &str) -> Option<String> {
+    let (num_str, den_str) = value.split_once('/')?;
+    let num: f64 = num_str.parse().ok()?;
+    let den: f64 = den_str.parse().ok()?;
+    if den == 0.0 {
+        return None;
+    }
+    let pct = num / den * 100.0;
+    let formatted = format!("{pct:.6}");
+    let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+    Some(format!("{trimmed}%"))
+}
+
+/// `resolve_negatable_length`, but ALSO checking `fraction_percent` first —
+/// used by `top`/`right`/`bottom`/`left`/`inset`/`inset-x`/`inset-y`, the one
+/// negatable family that (unlike margin, `resolve_negatable_length`'s other
+/// caller) real Tailwind also gives a percentage-fraction scale: `top-1/2`,
+/// `-inset-1/3`, etc. — the exact "half-way, negatable" pattern
+/// `absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2` centering
+/// relies on. A bare `value.parse::<f64>()` in `spacing_px` can't parse
+/// `"1/2"` at all (the `/` makes it an invalid float), so without this check
+/// these utilities silently failed to resolve — a real gap, not a documented
+/// exclusion. Checked before falling back to `resolve_negatable_length`'s
+/// ordinary spacing-scale/formula/`full`/`auto` resolution, same precedence
+/// pattern `resolve_size`'s own named/fraction checks already use.
+pub(crate) fn resolve_negatable_size(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<String> {
+    if !parsed.is_arbitrary {
+        if let Some(value) = parsed.value.as_deref() {
+            if let Some(pct) = fraction_percent(value) {
+                return Some(if parsed.negative { format!("-{pct}") } else { pct });
+            }
+        }
+    }
+    resolve_negatable_length(theme, parsed)
+}
+
 /// Resolves a 0-100 percentage utility value (opacity, bg-opacity,
 /// text-opacity) to a 0-1 decimal string. Arbitrary values are passed
 /// through as-is (already whatever decimal/unit the user wrote).

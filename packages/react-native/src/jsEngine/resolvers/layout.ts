@@ -1,5 +1,5 @@
 /** Port of `resolvers/layout.rs`'s `resolve` and `resolve_flex` (native uses `resolve_flex(parsed, web=false)`). */
-import { decl, resolveNegatableLength, type Declaration } from '../shared';
+import { decl, resolveNegatableSize, type Declaration } from '../shared';
 import type { ParsedClass } from '../parser';
 import type { ThemeConfig } from '../../theme';
 
@@ -151,43 +151,44 @@ export function resolve(parsed: ParsedClass, theme: ThemeConfig): Declaration[] 
     case 'shrink':
       return [decl('flex-shrink', parsed.value ?? '1')];
     // top/right/bottom/left/inset support real Tailwind's negative-value
-    // convention ("-top-4") — see resolveNegatableLength's own doc comment.
+    // convention ("-top-4") AND its percentage-fraction scale ("top-1/2",
+    // "-inset-1/3") — see resolveNegatableSize's own doc comment.
     case 'top': {
-      const v = resolveNegatableLength(theme, parsed);
+      const v = resolveNegatableSize(theme, parsed);
       return v === null ? null : [decl('top', v)];
     }
     case 'right': {
-      const v = resolveNegatableLength(theme, parsed);
+      const v = resolveNegatableSize(theme, parsed);
       return v === null ? null : [decl('right', v)];
     }
     case 'bottom': {
-      const v = resolveNegatableLength(theme, parsed);
+      const v = resolveNegatableSize(theme, parsed);
       return v === null ? null : [decl('bottom', v)];
     }
     case 'left': {
-      const v = resolveNegatableLength(theme, parsed);
+      const v = resolveNegatableSize(theme, parsed);
       return v === null ? null : [decl('left', v)];
     }
     case 'inset': {
-      const v = resolveNegatableLength(theme, parsed);
+      const v = resolveNegatableSize(theme, parsed);
       return v === null ? null : [decl('inset', v)];
     }
     case 'inset-x': {
-      const v = resolveNegatableLength(theme, parsed);
+      const v = resolveNegatableSize(theme, parsed);
       return v === null ? null : [decl('left', v), decl('right', v)];
     }
     case 'inset-y': {
-      const v = resolveNegatableLength(theme, parsed);
+      const v = resolveNegatableSize(theme, parsed);
       return v === null ? null : [decl('top', v), decl('bottom', v)];
     }
     // Logical inset — just a different CSS property name, same reasoning
     // as Rust's layout.rs (no direction-tracking logic needed here).
     case 'start': {
-      const v = resolveNegatableLength(theme, parsed);
+      const v = resolveNegatableSize(theme, parsed);
       return v === null ? null : [decl('inset-inline-start', v)];
     }
     case 'end': {
-      const v = resolveNegatableLength(theme, parsed);
+      const v = resolveNegatableSize(theme, parsed);
       return v === null ? null : [decl('inset-inline-end', v)];
     }
     // "aspect-" is a registered VALUE_PREFIXES entry (parser.ts), so

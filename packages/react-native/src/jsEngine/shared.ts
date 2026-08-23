@@ -72,6 +72,50 @@ export function resolveNegatableLength(theme: ThemeConfig, parsed: ParsedClass):
   return `-${px}px`;
 }
 
+/**
+ * `w-1/2`/`h-2/3`/`top-1/2`-style fractions -> a percentage. Shared by
+ * `resolvers/spacing.ts`'s `resolveSize` (width/height-family) and
+ * `resolveNegatableSize` (inset-family, below) — real Tailwind's own
+ * `top`/`right`/`bottom`/`left`/`inset` scale is the same fraction scale as
+ * `width`/`height`'s, just also negatable.
+ */
+export function fractionPercent(value: string): string | null {
+  const slashIdx = value.indexOf('/');
+  if (slashIdx === -1) return null;
+  const numStr = value.slice(0, slashIdx);
+  const denStr = value.slice(slashIdx + 1);
+  const num = Number(numStr);
+  const den = Number(denStr);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || numStr.trim() === '' || denStr.trim() === '') return null;
+  if (den === 0) return null;
+  const pct = (num / den) * 100;
+  const formatted = pct.toFixed(6);
+  const trimmed = formatted.replace(/0+$/, '').replace(/\.$/, '');
+  return `${trimmed}%`;
+}
+
+/**
+ * `resolveNegatableLength`, but ALSO checking `fractionPercent` first — used
+ * by `top`/`right`/`bottom`/`left`/`inset`/`inset-x`/`inset-y`/`start`/`end`,
+ * the one negatable family that (unlike margin, `resolveNegatableLength`'s
+ * other caller) real Tailwind also gives a percentage-fraction scale:
+ * `top-1/2`, `-inset-1/3`, etc. — the exact "half-way, negatable" pattern
+ * `absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2` centering
+ * relies on. `spacingPx`'s bare `Number("1/2")` is `NaN`, so without this
+ * check these utilities silently failed to resolve — a real gap, not a
+ * documented exclusion. Checked before falling back to
+ * `resolveNegatableLength`'s ordinary spacing-scale/formula/full/auto
+ * resolution, same precedence pattern `resolveSize`'s own named/fraction
+ * checks already use.
+ */
+export function resolveNegatableSize(theme: ThemeConfig, parsed: ParsedClass): string | null {
+  if (!parsed.isArbitrary && parsed.value !== null) {
+    const pct = fractionPercent(parsed.value);
+    if (pct !== null) return parsed.negative ? `-${pct}` : pct;
+  }
+  return resolveNegatableLength(theme, parsed);
+}
+
 /** Resolves a 0-100 percentage utility value to a 0-1 decimal string. Arbitrary values pass through as-is. */
 export function resolvePercent(parsed: ParsedClass): string | null {
   // Real Tailwind has no negative opacity — same check Rust's

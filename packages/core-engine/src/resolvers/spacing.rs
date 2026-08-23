@@ -1,4 +1,4 @@
-use super::{decl, resolve_length, resolve_negatable_length, Declaration};
+use super::{decl, fraction_percent, resolve_length, resolve_negatable_length, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
 
@@ -33,26 +33,6 @@ fn named_size(key: &str) -> Option<&'static str> {
         "9xl" => "96rem",
         _ => return None,
     })
-}
-
-/// `w-1/2`/`h-2/3`-style fractions -> a percentage, real Tailwind's own
-/// `width`/`height` feature (never applied to padding/margin/gap, so this
-/// lives here rather than in the shared `resolve_length`). No parser
-/// changes needed: "/" isn't a bracket character, so `w-1/2` already parses
-/// as a plain (non-arbitrary) value — `is_safe_arbitrary_value` is never
-/// consulted, and `css.rs::escape_selector` already backslash-escapes "/"
-/// like any other special character.
-fn fraction_percent(value: &str) -> Option<String> {
-    let (num_str, den_str) = value.split_once('/')?;
-    let num: f64 = num_str.parse().ok()?;
-    let den: f64 = den_str.parse().ok()?;
-    if den == 0.0 {
-        return None;
-    }
-    let pct = num / den * 100.0;
-    let formatted = format!("{pct:.6}");
-    let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
-    Some(format!("{trimmed}%"))
 }
 
 /// CSS's own sizing keywords — distinct from the theme's spacing-scale

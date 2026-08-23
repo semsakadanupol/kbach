@@ -248,6 +248,16 @@ describe('resolveStyleJs', () => {
     expect(styleY.bottom).toBe(16);
   });
 
+  it('resolves top/right/bottom/left/inset percentage fractions, positive and negative', () => {
+    const t = theme();
+    expect(resolveStyleJs('top-1/2', t, 'light', false, W).top).toBe('50%');
+    expect(resolveStyleJs('left-1/2', t, 'light', false, W).left).toBe('50%');
+    expect(resolveStyleJs('right-1/3', t, 'light', false, W).right).toBe('33.333333%');
+    expect(resolveStyleJs('bottom-1/2', t, 'light', false, W).bottom).toBe('50%');
+    expect(resolveStyleJs('inset-1/2', t, 'light', false, W).inset).toBe('50%');
+    expect(resolveStyleJs('-top-1/2', t, 'light', false, W).top).toBe('-50%');
+  });
+
   it('resolves logical start/end inset', () => {
     // "inset-inline-start"/"inset-inline-end" aren't in NUMERIC_LENGTH_PROPS
     // (neither engine strips "px" for them) — stays a string, same as Rust.

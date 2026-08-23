@@ -1,4 +1,4 @@
-use super::{decl, resolve_negatable_length, Declaration};
+use super::{decl, resolve_negatable_size, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
 
@@ -178,25 +178,26 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "grow" => Some(vec![decl("flex-grow", parsed.value.as_deref().unwrap_or("1"))]),
         "shrink" => Some(vec![decl("flex-shrink", parsed.value.as_deref().unwrap_or("1"))]),
         // top/right/bottom/left/inset support real Tailwind's negative-value
-        // convention ("-top-4") — see resolve_negatable_length's own doc comment.
-        "top" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("top", &v)]),
-        "right" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("right", &v)]),
-        "bottom" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("bottom", &v)]),
-        "left" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("left", &v)]),
-        "inset" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("inset", &v)]),
+        // convention ("-top-4") AND its percentage-fraction scale ("top-1/2",
+        // "-inset-1/3") — see resolve_negatable_size's own doc comment.
+        "top" => resolve_negatable_size(theme, parsed).map(|v| vec![decl("top", &v)]),
+        "right" => resolve_negatable_size(theme, parsed).map(|v| vec![decl("right", &v)]),
+        "bottom" => resolve_negatable_size(theme, parsed).map(|v| vec![decl("bottom", &v)]),
+        "left" => resolve_negatable_size(theme, parsed).map(|v| vec![decl("left", &v)]),
+        "inset" => resolve_negatable_size(theme, parsed).map(|v| vec![decl("inset", &v)]),
         "inset-x" => {
-            let v = resolve_negatable_length(theme, parsed)?;
+            let v = resolve_negatable_size(theme, parsed)?;
             Some(vec![decl("left", &v), decl("right", &v)])
         }
         "inset-y" => {
-            let v = resolve_negatable_length(theme, parsed)?;
+            let v = resolve_negatable_size(theme, parsed)?;
             Some(vec![decl("top", &v), decl("bottom", &v)])
         }
         // Logical inset — just a different CSS property NAME (the browser
         // resolves which physical side based on `dir`/`writing-mode`, not
         // this engine), so no direction-tracking logic is needed here.
-        "start" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("inset-inline-start", &v)]),
-        "end" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("inset-inline-end", &v)]),
+        "start" => resolve_negatable_size(theme, parsed).map(|v| vec![decl("inset-inline-start", &v)]),
+        "end" => resolve_negatable_size(theme, parsed).map(|v| vec![decl("inset-inline-end", &v)]),
         // "aspect-" is a registered VALUE_PREFIXES entry, so "aspect-square"/
         // "aspect-video" arrive here as utility="aspect" + a value, disambiguated
         // the same way every other "prefix-then-keyword" utility is.
@@ -396,6 +397,19 @@ mod tests {
     fn resolves_inset_from_spacing_scale() {
         let t = theme();
         assert_eq!(resolve(&parse_class("top-4"), &t), Some(vec![decl("top", "16px")]));
+    }
+
+    #[test]
+    fn resolves_inset_percentage_fractions_positive_and_negative() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("top-1/2"), &t), Some(vec![decl("top", "50%")]));
+        assert_eq!(resolve(&parse_class("left-1/2"), &t), Some(vec![decl("left", "50%")]));
+        assert_eq!(resolve(&parse_class("right-1/3"), &t), Some(vec![decl("right", "33.333333%")]));
+        assert_eq!(resolve(&parse_class("bottom-1/2"), &t), Some(vec![decl("bottom", "50%")]));
+        assert_eq!(resolve(&parse_class("inset-1/2"), &t), Some(vec![decl("inset", "50%")]));
+        assert_eq!(resolve(&parse_class("-top-1/2"), &t), Some(vec![decl("top", "-50%")]));
+        assert_eq!(resolve(&parse_class("start-1/2"), &t), Some(vec![decl("inset-inline-start", "50%")]));
+        assert_eq!(resolve(&parse_class("end-1/2"), &t), Some(vec![decl("inset-inline-end", "50%")]));
     }
 
     #[test]

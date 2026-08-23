@@ -1,5 +1,5 @@
 /** Port of `resolvers/spacing.rs`'s `resolve` (named_size, fraction_percent, resolve_size). */
-import { decl, resolveLength, resolveNegatableLength, type Declaration } from '../shared';
+import { decl, fractionPercent, resolveLength, resolveNegatableLength, type Declaration } from '../shared';
 import type { ParsedClass } from '../parser';
 import type { ThemeConfig } from '../../theme';
 
@@ -20,22 +20,6 @@ function namedSize(key: string): string | null {
     case '9xl': return '96rem';
     default: return null;
   }
-}
-
-/** `w-1/2`/`h-2/3`-style fractions -> a percentage. */
-function fractionPercent(value: string): string | null {
-  const slashIdx = value.indexOf('/');
-  if (slashIdx === -1) return null;
-  const numStr = value.slice(0, slashIdx);
-  const denStr = value.slice(slashIdx + 1);
-  const num = Number(numStr);
-  const den = Number(denStr);
-  if (!Number.isFinite(num) || !Number.isFinite(den) || numStr.trim() === '' || denStr.trim() === '') return null;
-  if (den === 0) return null;
-  const pct = (num / den) * 100;
-  const formatted = pct.toFixed(6);
-  const trimmed = formatted.replace(/0+$/, '').replace(/\.$/, '');
-  return `${trimmed}%`;
 }
 
 /** CSS's own sizing keywords — distinct from the theme's spacing-scale numbers/named container sizes. */

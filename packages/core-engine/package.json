@@ -1,6 +1,6 @@
 {
   "name": "@kbach/core-engine",
-  "version": "1.0.0-beta.6",
+  "version": "1.0.0-beta.7",
   "description": "Rust/WASM utility-class resolution engine powering @kbach/react and @kbach/react-native.",
   "keywords": ["css", "wasm", "rust", "tailwind", "utility-first", "styling"],
   "license": "MIT",

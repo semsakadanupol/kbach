@@ -67,7 +67,34 @@ const NUMERIC_LENGTH_PROPS = new Set([
   'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
   'border-top-left-radius', 'border-top-right-radius', 'border-bottom-right-radius', 'border-bottom-left-radius',
   'outline-width', 'outline-offset',
+  // The transform ops whose RN value is a plain JS number — translate takes
+  // a length (px/percentage, same as top/left/etc. above) and scale takes a
+  // bare decimal factor (parsed by the same "raw value" fallback branch
+  // below). transform-op-rotate*/transform-op-skew* stay OUT of this set on
+  // purpose, since RN wants those as literal "45deg"-shaped strings, not
+  // numbers. See the transform-ops accumulator below for how these markers
+  // get collected into the final array.
+  'transform-op-translate-x', 'transform-op-translate-y',
+  'transform-op-scale-x', 'transform-op-scale-y',
 ]);
+
+/** Marker property name (`resolvers/transform.ts`'s output) -> the RN transform-op key it accumulates into. */
+const TRANSFORM_OP_KEYS: ReadonlyMap<string, string> = new Map([
+  ['transform-op-translate-x', 'translateX'],
+  ['transform-op-translate-y', 'translateY'],
+  ['transform-op-rotate', 'rotate'],
+  ['transform-op-rotate-x', 'rotateX'],
+  ['transform-op-rotate-y', 'rotateY'],
+  ['transform-op-rotate-z', 'rotateZ'],
+  ['transform-op-skew-x', 'skewX'],
+  ['transform-op-skew-y', 'skewY'],
+  ['transform-op-scale-x', 'scaleX'],
+  ['transform-op-scale-y', 'scaleY'],
+]);
+
+/** Fixed emission order for the assembled `transform` array, independent of source class order — same as TRANSFORM_OP_ORDER in resolve_style.rs. */
+const TRANSFORM_OP_ORDER: readonly string[] =
+  ['translateX', 'translateY', 'rotate', 'rotateX', 'rotateY', 'rotateZ', 'skewX', 'skewY', 'scaleX', 'scaleY'];
 
 /** A bare percentage string ("50%", "-33.3%") — see resolve_style.rs's `is_plain_percentage` for why this must be "nothing but a percentage", not just "contains one" (a calc() string can contain a % and still be invalid). */
 function isPlainPercentage(value: string): boolean {
@@ -144,6 +171,19 @@ export function resolveStyleJsWithWarnings(
   const style: StyleObject = {};
   const warnings: string[] = [];
   let shadowOffset: { width?: number; height?: number } | null = null;
+  // Accumulates transform-op-* markers into RN's ordered `transform` array
+  // at the end — RN's style system has no cascade for this the way CSS
+  // custom properties do, so unlike every other declaration here (applied
+  // to `style` immediately, last write wins by plain key collision)
+  // transform ops need to be collected first and assembled in
+  // TRANSFORM_OP_ORDER once the whole class string has been processed.
+  // Still "last write wins" per op, and still fully source-order-sensitive
+  // overall: transform-op-none (from the transform-none utility) clears
+  // this accumulator the moment it's encountered, so
+  // "scale-150 transform-none" ends up with no transform at all while
+  // "transform-none scale-150" keeps the scale — same left-to-right "later
+  // class wins" convention as everywhere else in this engine.
+  const transformOps = new Map<string, string | number>();
 
   for (const token of classString.split(/\s+/).filter(Boolean)) {
     const parsed = parseClass(token);
@@ -167,6 +207,17 @@ export function resolveStyleJsWithWarnings(
         shadowOffset[d.property === 'shadow-offset-x' ? 'width' : 'height'] = n;
         continue;
       }
+      if (d.property === 'transform-op-none') {
+        transformOps.clear();
+        continue;
+      }
+      const opKey = TRANSFORM_OP_KEYS.get(d.property);
+      if (opKey !== undefined) {
+        const { value, warning } = rnStyleValue(d.property, d.value);
+        if (warning !== null) warnings.push(warning);
+        if (value !== null) transformOps.set(opKey, value);
+        continue;
+      }
       const { value, warning } = rnStyleValue(d.property, d.value);
       if (warning !== null) warnings.push(warning);
       if (value !== null) style[kebabToCamel(d.property)] = value;
@@ -175,6 +226,12 @@ export function resolveStyleJsWithWarnings(
 
   if (shadowOffset !== null) {
     style.shadowOffset = { width: shadowOffset.width ?? 0, height: shadowOffset.height ?? 0 };
+  }
+
+  if (transformOps.size > 0) {
+    style.transform = TRANSFORM_OP_ORDER.filter((key) => transformOps.has(key)).map((key) => ({
+      [key]: transformOps.get(key)!,
+    }));
   }
 
   return { style, warnings };

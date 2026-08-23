@@ -228,6 +228,82 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
     }
 }
 
+/// Native (React Native) subset of the transform family — unlike `resolve`
+/// above (web-only, CSS-custom-property composition), RN's `transform` style
+/// is a plain ordered array of single-key objects (`[{ translateX: 16 },
+/// { rotate: '45deg' }]`) with no cascade to compose against, so each
+/// utility here emits one synthetic `"transform-op-*"` marker declaration
+/// instead — `resolve_style.rs`'s own accumulator collects whichever of
+/// these appear on an element (last write per op wins, same "write base
+/// classes before overrides" convention as everywhere else in this engine)
+/// and assembles the final ordered `transform` array from them.
+/// `transform-op-none` is a sentinel `resolve_style.rs` clears the whole
+/// accumulator on, mirroring `transform-none`'s CSS meaning.
+///
+/// Deliberately narrower than `resolve`'s full web vocabulary: `translate-z`/
+/// `scale-z` (RN's transform array has no `translateZ`/`scaleZ` op — it only
+/// goes as far as `rotateZ`), `perspective`/`perspective-origin`/`origin`
+/// (transform-origin; no stable, version-independent RN equivalent), and
+/// `transform-gpu`/`transform-cpu` (no CPU/GPU compositing distinction in
+/// RN's style system) all stay web-only — same "explicitly deferred, not
+/// silently broken" category as grid/filters elsewhere in the native
+/// dispatcher (see `resolvers::mod`'s own doc comment). `backface-visible`/
+/// `backface-hidden` DO resolve here even though they're not part of the
+/// array — RN has a plain, direct `backfaceVisibility` style prop for them,
+/// no accumulator needed.
+pub fn native_resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
+    match parsed.utility.as_str() {
+        "transform-none" => Some(vec![decl("transform-op-none", "1")]),
+        "backface-visible" => Some(vec![decl("backface-visibility", "visible")]),
+        "backface-hidden" => Some(vec![decl("backface-visibility", "hidden")]),
+        "translate-x" => {
+            let v = resolve_negatable_length(theme, parsed)?;
+            Some(vec![decl("transform-op-translate-x", &v)])
+        }
+        "translate-y" => {
+            let v = resolve_negatable_length(theme, parsed)?;
+            Some(vec![decl("transform-op-translate-y", &v)])
+        }
+        "scale" => {
+            let n = scale_factor(parsed)?;
+            Some(vec![decl("transform-op-scale-x", &format!("{n}")), decl("transform-op-scale-y", &format!("{n}"))])
+        }
+        "scale-x" => {
+            let n = scale_factor(parsed)?;
+            Some(vec![decl("transform-op-scale-x", &format!("{n}"))])
+        }
+        "scale-y" => {
+            let n = scale_factor(parsed)?;
+            Some(vec![decl("transform-op-scale-y", &format!("{n}"))])
+        }
+        "rotate" => {
+            let deg = angle(parsed)?;
+            Some(vec![decl("transform-op-rotate", &deg)])
+        }
+        "rotate-x" => {
+            let deg = angle(parsed)?;
+            Some(vec![decl("transform-op-rotate-x", &deg)])
+        }
+        "rotate-y" => {
+            let deg = angle(parsed)?;
+            Some(vec![decl("transform-op-rotate-y", &deg)])
+        }
+        "rotate-z" => {
+            let deg = angle(parsed)?;
+            Some(vec![decl("transform-op-rotate-z", &deg)])
+        }
+        "skew-x" => {
+            let deg = angle(parsed)?;
+            Some(vec![decl("transform-op-skew-x", &deg)])
+        }
+        "skew-y" => {
+            let deg = angle(parsed)?;
+            Some(vec![decl("transform-op-skew-y", &deg)])
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,5 +477,41 @@ mod tests {
     fn returns_none_for_unknown_transform_utility() {
         let t = theme();
         assert_eq!(resolve(&parse_class("not-a-transform-utility"), &t), None);
+    }
+
+    #[test]
+    fn native_resolves_translate_scale_rotate_and_skew_as_bare_op_markers() {
+        let t = theme();
+        assert_eq!(native_resolve(&parse_class("translate-x-4"), &t), Some(vec![decl("transform-op-translate-x", "16px")]));
+        assert_eq!(native_resolve(&parse_class("-translate-y-4"), &t), Some(vec![decl("transform-op-translate-y", "-16px")]));
+        assert_eq!(
+            native_resolve(&parse_class("scale-150"), &t),
+            Some(vec![decl("transform-op-scale-x", "1.5"), decl("transform-op-scale-y", "1.5")]),
+        );
+        assert_eq!(native_resolve(&parse_class("scale-x-75"), &t), Some(vec![decl("transform-op-scale-x", "0.75")]));
+        assert_eq!(native_resolve(&parse_class("rotate-45"), &t), Some(vec![decl("transform-op-rotate", "45deg")]));
+        assert_eq!(native_resolve(&parse_class("rotate-x-45"), &t), Some(vec![decl("transform-op-rotate-x", "45deg")]));
+        assert_eq!(native_resolve(&parse_class("rotate-z-90"), &t), Some(vec![decl("transform-op-rotate-z", "90deg")]));
+        assert_eq!(native_resolve(&parse_class("skew-x-12"), &t), Some(vec![decl("transform-op-skew-x", "12deg")]));
+    }
+
+    #[test]
+    fn native_resolves_transform_none_sentinel_and_backface_visibility() {
+        let t = theme();
+        assert_eq!(native_resolve(&parse_class("transform-none"), &t), Some(vec![decl("transform-op-none", "1")]));
+        assert_eq!(native_resolve(&parse_class("backface-hidden"), &t), Some(vec![decl("backface-visibility", "hidden")]));
+        assert_eq!(native_resolve(&parse_class("backface-visible"), &t), Some(vec![decl("backface-visibility", "visible")]));
+    }
+
+    #[test]
+    fn native_resolve_excludes_z_axis_perspective_origin_and_gpu_cpu_hints() {
+        let t = theme();
+        assert_eq!(native_resolve(&parse_class("translate-z-4"), &t), None);
+        assert_eq!(native_resolve(&parse_class("scale-z-150"), &t), None);
+        assert_eq!(native_resolve(&parse_class("perspective-normal"), &t), None);
+        assert_eq!(native_resolve(&parse_class("perspective-origin-top-left"), &t), None);
+        assert_eq!(native_resolve(&parse_class("origin-top-left"), &t), None);
+        assert_eq!(native_resolve(&parse_class("transform-gpu"), &t), None);
+        assert_eq!(native_resolve(&parse_class("transform-cpu"), &t), None);
     }
 }

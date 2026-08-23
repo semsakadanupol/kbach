@@ -220,10 +220,16 @@ pub fn resolve_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<
 /// entirely — React Native's Yoga layout engine is flexbox-only with no
 /// CSS Grid equivalent at all, so unlike every other web-only exclusion
 /// above there's no numeric/string fallback to even consider; grid
-/// utilities simply don't exist on native. `transform::resolve` is also
-/// excluded — see that module's doc comment for why its CSS-custom-
-/// property composition technique has no RN equivalent (RN's array-based
-/// `transform` style has no cascade to compose against). `filters::resolve`
+/// utilities simply don't exist on native. `transform::resolve` (the web,
+/// CSS-custom-property-composition version) is excluded, but
+/// `transform::native_resolve` — a distinct, narrower function built for
+/// RN's array-based `transform` style, which has no cascade to compose
+/// against the way CSS custom properties do — IS included below, covering
+/// translate-x/y, scale/scale-x/scale-y, rotate/rotate-x/rotate-y/rotate-z,
+/// skew-x/skew-y, transform-none, and backface-visible/backface-hidden; see
+/// that function's own doc comment for exactly what stays web-only within
+/// the transform family (translate-z/scale-z, perspective/perspective-origin/
+/// origin, transform-gpu/transform-cpu). `filters::resolve`
 /// is excluded too — RN has no `filter`/`backdrop-filter` concept at all,
 /// not even a partial one. `background::resolve` is excluded for the same
 /// reason again — RN's `<View>` has plain `backgroundColor` only, no
@@ -298,6 +304,7 @@ pub fn resolve_utility_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Opti
         .or_else(|| resolve_typography_native(parsed, theme))
         .or_else(|| resolve_opacity_native(parsed))
         .or_else(|| effects::native_shadow_declarations(parsed))
+        .or_else(|| transform::native_resolve(parsed, theme))
 }
 
 /// RN's `opacity` style is a plain 0-1 number — see this function's own
@@ -570,11 +577,24 @@ mod native_dispatcher_tests {
     }
 
     #[test]
-    fn does_not_resolve_transform_utilities_on_native() {
+    fn resolves_the_native_transform_subset_as_bare_op_markers() {
         let t = theme();
-        assert_eq!(resolve_utility_native(&parse_class("scale-150"), &t), None);
-        assert_eq!(resolve_utility_native(&parse_class("rotate-45"), &t), None);
-        assert_eq!(resolve_utility_native(&parse_class("translate-x-4"), &t), None);
+        assert_eq!(
+            resolve_utility_native(&parse_class("scale-150"), &t),
+            Some(vec![decl("transform-op-scale-x", "1.5"), decl("transform-op-scale-y", "1.5")]),
+        );
+        assert_eq!(resolve_utility_native(&parse_class("rotate-45"), &t), Some(vec![decl("transform-op-rotate", "45deg")]));
+        assert_eq!(resolve_utility_native(&parse_class("translate-x-4"), &t), Some(vec![decl("transform-op-translate-x", "16px")]));
+    }
+
+    #[test]
+    fn does_not_resolve_the_web_only_transform_family_members_on_native() {
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("translate-z-4"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("scale-z-150"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("perspective-normal"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("origin-top-left"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("transform-gpu"), &t), None);
     }
 
     #[test]

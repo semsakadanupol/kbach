@@ -30,9 +30,14 @@ Rebuild the Android app afterward so Gradle picks up the native module.
 Works out of the box — no prebuild, no dev client, nothing to configure.
 Expo Go can't load third-party native code, so this falls back to a pure-JS
 engine automatically. Covers layout, spacing, border/radius, plain colors,
-font-weight, text-transform/decoration, line-height, letter-spacing, and
-shadows. Doesn't cover grid, transforms, filters, gradients, or DOM-only
-typography — same scope native itself excludes.
+font-weight, text-transform/decoration, line-height, letter-spacing,
+shadows, and transforms (`translate-x`/`translate-y`, `scale`/`scale-x`/
+`scale-y`, `rotate`/`rotate-x`/`rotate-y`/`rotate-z`, `skew-x`/`skew-y`,
+`transform-none`, `backface-visible`/`backface-hidden`). Doesn't cover grid,
+filters, gradients, DOM-only typography, or the rest of the transform family
+(`translate-z`/`scale-z`, `perspective`/`perspective-origin`/`origin`,
+`transform-gpu`/`transform-cpu` — no RN equivalent for any of these) — same
+scope native itself excludes.
 
 ### Expo (dev client / prebuild)
 

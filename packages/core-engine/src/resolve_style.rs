@@ -132,6 +132,16 @@ const NUMERIC_LENGTH_PROPS: &[&str] = &[
     "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
     "border-top-left-radius", "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius",
     "outline-width", "outline-offset",
+    // The transform ops whose RN value is a plain JS number — translate
+    // takes a length (px/percentage, same as `top`/`left`/etc. above) and
+    // scale takes a bare decimal factor (parsed by the same "raw value"
+    // fallback branch below). `transform-op-rotate*`/`transform-op-skew*`
+    // stay OUT of this list on purpose, since RN wants those as literal
+    // `"45deg"`-shaped strings, not numbers. See `resolve_style_with_warnings`'s
+    // own transform-accumulator comment for how these markers get collected
+    // into the final array.
+    "transform-op-translate-x", "transform-op-translate-y",
+    "transform-op-scale-x", "transform-op-scale-y",
 ];
 
 /// A bare percentage string (`"50%"`, `"-33.3%"`) — real Tailwind fraction
@@ -237,6 +247,30 @@ pub fn resolve_style_json(class_string: &str, theme_json: &str, color_scheme: &s
 /// function rather than changing `resolve_style`'s own return type so its
 /// many existing call sites/tests (which only ever care about the style
 /// object) don't all need updating for a concern most of them never hit.
+/// Marker property name (`transform::native_resolve`'s output) -> the RN
+/// transform-op key it accumulates into. Order here is irrelevant (lookup
+/// only); `TRANSFORM_OP_ORDER` below is what fixes the final array's shape.
+const TRANSFORM_OP_KEYS: &[(&str, &str)] = &[
+    ("transform-op-translate-x", "translateX"),
+    ("transform-op-translate-y", "translateY"),
+    ("transform-op-rotate", "rotate"),
+    ("transform-op-rotate-x", "rotateX"),
+    ("transform-op-rotate-y", "rotateY"),
+    ("transform-op-rotate-z", "rotateZ"),
+    ("transform-op-skew-x", "skewX"),
+    ("transform-op-skew-y", "skewY"),
+    ("transform-op-scale-x", "scaleX"),
+    ("transform-op-scale-y", "scaleY"),
+];
+
+/// Fixed emission order for the assembled `transform` array — independent
+/// of the order the source classes were written in (only WHICH ops are
+/// present, and their latest value, depends on that; see the accumulator
+/// loop below), same "one canonical function order regardless of class
+/// order" property `TRANSFORM_COMPOSE_CPU`/`_GPU` already guarantee on web.
+const TRANSFORM_OP_ORDER: &[&str] =
+    &["translateX", "translateY", "rotate", "rotateX", "rotateY", "rotateZ", "skewX", "skewY", "scaleX", "scaleY"];
+
 pub fn resolve_style_with_warnings(
     class_string: &str,
     theme: &ThemeConfig,
@@ -246,6 +280,21 @@ pub fn resolve_style_with_warnings(
 ) -> (Map<String, Value>, Vec<String>) {
     let mut style = Map::new();
     let mut warnings = Vec::new();
+    // Accumulates `transform-op-*` markers (`transform::native_resolve`)
+    // into RN's ordered `transform` array at the end — RN's style system has
+    // no cascade for this the way CSS custom properties do, so unlike every
+    // other declaration here (inserted into `style` immediately, last write
+    // wins by plain key collision) transform ops need to be collected first
+    // and assembled in `TRANSFORM_OP_ORDER` once the whole class string has
+    // been processed. Still "last write wins" per op (a later `scale-x-*`
+    // on the same element overwrites an earlier one via the `insert` below)
+    // and still fully source-order-sensitive overall: `transform-op-none`
+    // (from the `transform-none` utility) clears this accumulator the
+    // moment it's encountered, so `"scale-150 transform-none"` ends up with
+    // no transform at all while `"transform-none scale-150"` keeps the
+    // scale — same left-to-right "later class wins" convention as
+    // everywhere else in this engine.
+    let mut transform_ops: Map<String, Value> = Map::new();
 
     for token in class_string.split_whitespace() {
         let parsed = parse_class(token);
@@ -291,6 +340,20 @@ pub fn resolve_style_with_warnings(
                 }
                 continue;
             }
+            if d.property == "transform-op-none" {
+                transform_ops.clear();
+                continue;
+            }
+            if let Some((_, op_key)) = TRANSFORM_OP_KEYS.iter().find(|(prop, _)| *prop == d.property) {
+                let (value, warning) = rn_style_value(&d.property, &d.value);
+                if let Some(warning) = warning {
+                    warnings.push(warning);
+                }
+                if let Some(value) = value {
+                    transform_ops.insert(op_key.to_string(), value);
+                }
+                continue;
+            }
             let (value, warning) = rn_style_value(&d.property, &d.value);
             if let Some(warning) = warning {
                 warnings.push(warning);
@@ -299,6 +362,20 @@ pub fn resolve_style_with_warnings(
                 style.insert(kebab_to_camel(&d.property), value);
             }
         }
+    }
+
+    if !transform_ops.is_empty() {
+        let ops: Vec<Value> = TRANSFORM_OP_ORDER
+            .iter()
+            .filter_map(|key| {
+                transform_ops.get(*key).map(|value| {
+                    let mut op = Map::new();
+                    op.insert((*key).to_string(), value.clone());
+                    Value::Object(op)
+                })
+            })
+            .collect();
+        style.insert("transform".to_string(), Value::Array(ops));
     }
 
     (style, warnings)
@@ -528,6 +605,50 @@ mod tests {
     }
 
     #[test]
+    fn assembles_stacked_transform_utilities_into_one_ordered_rn_array() {
+        // Written out of canonical order on purpose (scale before rotate
+        // before translate) — the assembled array must still come out in
+        // TRANSFORM_OP_ORDER, not source order.
+        let style = resolve_style("scale-x-75 rotate-45 translate-x-4", &theme(), "light", false, W);
+        let transform = style.get("transform").unwrap().as_array().unwrap();
+        assert_eq!(
+            transform,
+            &vec![
+                serde_json::json!({ "translateX": 16.0 }),
+                serde_json::json!({ "rotate": "45deg" }),
+                serde_json::json!({ "scaleX": 0.75 }),
+            ],
+        );
+    }
+
+    #[test]
+    fn a_later_utility_overwrites_an_earlier_one_on_the_same_transform_op() {
+        let style = resolve_style("scale-x-75 scale-x-50", &theme(), "light", false, W);
+        let transform = style.get("transform").unwrap().as_array().unwrap();
+        assert_eq!(transform, &vec![serde_json::json!({ "scaleX": 0.5 })]);
+    }
+
+    #[test]
+    fn transform_none_clears_any_transform_ops_written_before_it_but_not_after() {
+        let cleared = resolve_style("scale-150 transform-none", &theme(), "light", false, W);
+        assert!(cleared.get("transform").is_none());
+
+        let kept = resolve_style("transform-none scale-150", &theme(), "light", false, W);
+        let transform = kept.get("transform").unwrap().as_array().unwrap();
+        assert_eq!(
+            transform,
+            &vec![serde_json::json!({ "scaleX": 1.5 }), serde_json::json!({ "scaleY": 1.5 })],
+        );
+    }
+
+    #[test]
+    fn backface_visibility_resolves_as_a_plain_string_not_a_transform_op() {
+        let style = resolve_style("backface-hidden", &theme(), "light", false, W);
+        assert_eq!(style.get("backfaceVisibility").unwrap(), "hidden");
+        assert!(style.get("transform").is_none());
+    }
+
+    #[test]
     fn resolve_style_json_round_trips_through_a_json_string() {
         let json = resolve_style_json(
             "flex bg-blue-6",
@@ -651,11 +772,14 @@ mod tests {
 
     #[test]
     fn does_not_warn_for_a_real_utility_thats_only_unsupported_on_native() {
-        // grid-cols-3/scale-150/blur are real Kbach utilities (real Tailwind
-        // ones too) that this engine simply doesn't resolve on native yet —
-        // an intentional platform gap, not a typo. Mirrors
-        // resolveUtilityNative's own existing "resolves nothing" tests.
-        let (style, warnings) = resolve_style_with_warnings("grid-cols-3 scale-150 blur", &theme(), "light", false, W);
+        // grid-cols-3/translate-z-4/blur are real Kbach utilities (real
+        // Tailwind ones too, translate-z aside) that this engine simply
+        // doesn't resolve on native yet — an intentional platform gap, not a
+        // typo. Mirrors resolveUtilityNative's own existing "resolves
+        // nothing" tests. (scale-150/rotate-45/translate-x-4 used to be in
+        // this list too, before native transform support — see
+        // transform::native_resolve.)
+        let (style, warnings) = resolve_style_with_warnings("grid-cols-3 translate-z-4 blur", &theme(), "light", false, W);
         assert!(style.is_empty());
         assert!(warnings.is_empty(), "expected no warnings, got: {warnings:?}");
     }

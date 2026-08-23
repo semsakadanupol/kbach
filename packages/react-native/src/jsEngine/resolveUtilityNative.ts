@@ -1,12 +1,16 @@
 /**
  * Port of `resolvers/mod.rs`'s `resolve_utility_native` — the exact,
  * authoritative dispatch surface for what resolves on React Native.
- * Deliberately NOT the full web engine: grid, transforms, filters,
- * backgrounds/gradients, DOM-typography completeness, and
- * interactivity/scroll utilities are excluded here, same as the Rust
- * engine's native dispatcher — see that function's own extensive doc
- * comment for the full reasoning behind each exclusion. Keep this in sync
- * by diffing against `resolve_utility_native` whenever it changes.
+ * Deliberately NOT the full web engine: grid, filters, backgrounds/
+ * gradients, DOM-typography completeness, and interactivity/scroll
+ * utilities are excluded here, same as the Rust engine's native dispatcher
+ * — see that function's own extensive doc comment for the full reasoning
+ * behind each exclusion. Transforms are a partial exception: the web-only
+ * CSS-custom-property composition technique (`resolvers/transform.rs`'s
+ * `resolve`) is excluded, but its narrower RN-array-shaped sibling
+ * (`native_resolve`, ported to `./resolvers/transform.ts`'s `resolveNative`)
+ * IS included below. Keep this in sync by diffing against
+ * `resolve_utility_native` whenever it changes.
  */
 import { decl, resolvePercent, type Declaration } from './shared';
 import * as layout from './resolvers/layout';
@@ -15,6 +19,7 @@ import * as border from './resolvers/border';
 import * as color from './resolvers/color';
 import * as typography from './resolvers/typography';
 import { nativeShadowDeclarations } from './resolvers/effects';
+import { resolveNative as resolveTransformNative } from './resolvers/transform';
 import type { ParsedClass } from './parser';
 import type { ThemeConfig } from '../theme';
 
@@ -135,6 +140,7 @@ export function resolveUtilityNative(parsed: ParsedClass, theme: ThemeConfig): D
     resolveLeadingTrackingNative(parsed) ??
     resolveTypographyNative(parsed, theme) ??
     resolveOpacityNative(parsed) ??
-    nativeShadowDeclarations(parsed)
+    nativeShadowDeclarations(parsed) ??
+    resolveTransformNative(parsed, theme)
   );
 }

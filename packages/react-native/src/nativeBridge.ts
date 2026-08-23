@@ -4,12 +4,18 @@ import { getTheme, getThemeJson } from './theme';
 import { getGlobalDarkMode } from './darkModeStore';
 import { resolveStyleJsWithWarnings } from './jsEngine/resolveStyle';
 
-// A plain string/number style value, OR the one nested shape RN's own style
-// system has no flat equivalent for — `shadowOffset: {width, height}`,
-// which both the JNI engine (resolve_style.rs) and the JS engine
-// (jsEngine/resolveStyle.ts) assemble from two synthetic flat declarations
-// before returning. See jsEngine/resolveStyle.ts's own doc comment.
-export type StyleValue = string | number | { width: number; height: number };
+// A plain string/number style value, OR one of the two nested shapes RN's
+// own style system has no flat equivalent for: `shadowOffset: {width,
+// height}` and `transform: [{translateX: 16}, {rotate: '45deg'}, ...]` —
+// both assembled from synthetic flat marker declarations (shadow-offset-x/y,
+// transform-op-*) by both the JNI engine (resolve_style.rs) and the JS
+// engine (jsEngine/resolveStyle.ts) before returning. See those files' own
+// accumulator doc comments.
+export type StyleValue =
+  | string
+  | number
+  | { width: number; height: number }
+  | Array<Record<string, string | number>>;
 export interface StyleObject {
   [key: string]: StyleValue;
 }

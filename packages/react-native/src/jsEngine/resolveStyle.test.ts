@@ -268,10 +268,48 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('w-screen', theme(), 'light', false, W).width).toBeUndefined();
   });
 
-  it('does not resolve grid/transform/filter utilities on native', () => {
+  it('does not resolve grid/filter/web-only-transform utilities on native', () => {
     expect(resolveStyleJs('grid-cols-3', theme(), 'light', false, W)).toEqual({});
-    expect(resolveStyleJs('scale-150', theme(), 'light', false, W)).toEqual({});
+    // scale-150/rotate-45/translate-x-4 used to be in this list too, before
+    // native transform support — see the transform tests below.
+    expect(resolveStyleJs('translate-z-4', theme(), 'light', false, W)).toEqual({});
+    expect(resolveStyleJs('perspective-normal', theme(), 'light', false, W)).toEqual({});
     expect(resolveStyleJs('blur', theme(), 'light', false, W)).toEqual({});
+  });
+
+  it('assembles stacked transform utilities into one canonically-ordered RN array', () => {
+    // Written out of canonical order on purpose (scale before rotate before
+    // translate) — the assembled array must still come out ordered by
+    // TRANSFORM_OP_ORDER, not source order.
+    const style = resolveStyleJs('scale-x-75 rotate-45 translate-x-4', theme(), 'light', false, W);
+    expect(style.transform).toEqual([{ translateX: 16 }, { rotate: '45deg' }, { scaleX: 0.75 }]);
+  });
+
+  it('a later utility overwrites an earlier one on the same transform op', () => {
+    const style = resolveStyleJs('scale-x-75 scale-x-50', theme(), 'light', false, W);
+    expect(style.transform).toEqual([{ scaleX: 0.5 }]);
+  });
+
+  it('transform-none clears any transform ops written before it but not after', () => {
+    expect(resolveStyleJs('scale-150 transform-none', theme(), 'light', false, W).transform).toBeUndefined();
+    expect(resolveStyleJs('transform-none scale-150', theme(), 'light', false, W).transform).toEqual([
+      { scaleX: 1.5 },
+      { scaleY: 1.5 },
+    ]);
+  });
+
+  it('resolves backface visibility as a plain string, not a transform op', () => {
+    const style = resolveStyleJs('backface-hidden', theme(), 'light', false, W);
+    expect(style.backfaceVisibility).toBe('hidden');
+    expect(style.transform).toBeUndefined();
+  });
+
+  it('resolves negative translate and rotate-x/y/z via the leading-dash convention and per-axis rotate', () => {
+    expect(resolveStyleJs('-translate-x-4', theme(), 'light', false, W).transform).toEqual([{ translateX: -16 }]);
+    expect(resolveStyleJs('rotate-x-45', theme(), 'light', false, W).transform).toEqual([{ rotateX: '45deg' }]);
+    expect(resolveStyleJs('rotate-y-45', theme(), 'light', false, W).transform).toEqual([{ rotateY: '45deg' }]);
+    expect(resolveStyleJs('rotate-z-90', theme(), 'light', false, W).transform).toEqual([{ rotateZ: '90deg' }]);
+    expect(resolveStyleJs('skew-x-12', theme(), 'light', false, W).transform).toEqual([{ skewX: '12deg' }]);
   });
 
   it('resolves italic but not DOM-only typography-completeness utilities', () => {

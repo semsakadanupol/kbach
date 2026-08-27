@@ -52,6 +52,11 @@ const VALUE_PREFIXES: &[&str] = &[
     "min-w-", "max-w-", "w-",
     "min-h-", "max-h-", "h-",
     "size-", "basis-",
+    // Logical sizing (Tailwind v4.2's writing-mode-aware `inline-size`/
+    // `block-size` equivalents to `w`/`h`) — same longer-before-shorter
+    // ordering as the physical min-w-/max-w-/w- group above.
+    "min-inline-", "max-inline-", "inline-",
+    "min-block-", "max-block-", "block-",
     // Border-radius — corners (4-char: tl/tr/br/bl) and side-pairs (t/r/b/l)
     // both before the bare catchall, same longer-before-shorter rule.
     "rounded-tl-", "rounded-tr-", "rounded-br-", "rounded-bl-",
@@ -68,8 +73,12 @@ const VALUE_PREFIXES: &[&str] = &[
     // "outline-" — same longer-before-shorter rule.
     "ring-offset-", "ring-", "outline-offset-", "outline-", "shadow-", "opacity-",
     "duration-", "delay-", "ease-", "cursor-", "mix-blend-", "animate-",
-    // Typography
-    "leading-", "tracking-", "font-",
+    // Typography. "font-stretch-"/"font-features-" before the bare "font-"
+    // catchall — same longer-before-shorter rule as "bg-opacity-" before
+    // "bg-" — plus "tab-" (tab-size; no collision with "table-auto"/
+    // "table-fixed" below, which don't share "tab-" as a literal 4-char
+    // prefix: the 4th character of "table-" is "l", not "-").
+    "leading-", "tracking-", "font-stretch-", "font-features-", "font-", "tab-",
     // Layout: position/inset/z. "inset-x-"/"inset-y-" before bare "inset-".
     "z-", "inset-x-", "inset-y-", "inset-", "top-", "right-", "bottom-", "left-", "start-", "end-",
     // Divide / space-between. "divide-color-" (not a bare "divide-") so
@@ -146,6 +155,18 @@ const VALUE_PREFIXES: &[&str] = &[
     // "container" is a standalone literal).
     "object-", "overscroll-x-", "overscroll-y-", "overscroll-", "overflow-x-", "overflow-y-",
     "columns-", "break-after-", "break-before-", "break-inside-", "aspect-",
+    // Effects completeness: mask (resolvers::mask, web-only — no gradient
+    // sub-system, see that module's own doc comment for scope). "mask-
+    // position-"/"mask-size-" (arbitrary-only, same "bg-position-"/
+    // "bg-size-" shape/reasoning as the Backgrounds group above) before the
+    // bare "mask-" catchall — every other mask-* utility (clip/composite/
+    // mode/origin/repeat/size-keywords/position-keywords/type/none/
+    // arbitrary mask-image) dispatches by VALUE under that one bare prefix,
+    // the same "bg-"-catchall shape color.rs/background.rs already use.
+    "mask-position-", "mask-size-", "mask-",
+    // Interactivity completeness: zoom, scrollbar-thumb-/scrollbar-track-
+    // (full theme-color lookups, same shape as caret-/accent- in color.rs).
+    "zoom-", "scrollbar-thumb-", "scrollbar-track-",
 ];
 
 /// Sentinel utility name for Phase 25's arbitrary properties

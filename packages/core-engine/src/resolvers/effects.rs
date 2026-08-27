@@ -263,6 +263,11 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // here rather than folded into the arm above. The standard pairing
         // with `motion-reduce:` (respecting prefers-reduced-motion).
         "transition-none" => Some(vec![decl("transition-property", "none")]),
+        // transition-behavior — same standalone-literal shape as
+        // "transition-none" above, a completely different property despite
+        // the shared "transition-" spelling.
+        "transition-normal" => Some(vec![decl("transition-behavior", "normal")]),
+        "transition-discrete" => Some(vec![decl("transition-behavior", "allow-discrete")]),
         "duration" => {
             let value = parsed.value.as_deref()?;
             if parsed.is_arbitrary {
@@ -418,6 +423,16 @@ mod tests {
         assert_eq!(resolve(&parse_class("transition-opacity"), &t), Some(vec![decl("transition-property", "opacity")]));
         assert_eq!(resolve(&parse_class("transition-shadow"), &t), Some(vec![decl("transition-property", "box-shadow")]));
         assert_eq!(resolve(&parse_class("transition-transform"), &t), Some(vec![decl("transition-property", "transform")]));
+    }
+
+    #[test]
+    fn resolves_transition_behavior() {
+        let t = ThemeConfig::default();
+        assert_eq!(resolve(&parse_class("transition-normal"), &t), Some(vec![decl("transition-behavior", "normal")]));
+        assert_eq!(
+            resolve(&parse_class("transition-discrete"), &t),
+            Some(vec![decl("transition-behavior", "allow-discrete")]),
+        );
     }
 
     #[test]

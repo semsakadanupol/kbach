@@ -13,6 +13,7 @@ mod filters;
 mod grid;
 mod interactivity;
 mod layout;
+mod mask;
 mod scroll;
 mod spacing;
 mod transform;
@@ -219,6 +220,7 @@ pub fn resolve_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<
         .or_else(|| background::resolve(parsed, theme))
         .or_else(|| interactivity::resolve(parsed, theme))
         .or_else(|| scroll::resolve(parsed, theme))
+        .or_else(|| mask::resolve(parsed))
 }
 
 /// Native (React Native) dispatcher — layout, spacing, and border resolve

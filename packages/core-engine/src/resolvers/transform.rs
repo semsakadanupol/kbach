@@ -146,6 +146,20 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // the same element.
         "transform-gpu" => Some(vec![decl("transform", TRANSFORM_COMPOSE_GPU)]),
         "transform-cpu" => Some(vec![decl("transform", TRANSFORM_COMPOSE_CPU)]),
+        "transform-3d" => Some(vec![decl("transform-style", "preserve-3d")]),
+        "transform-flat" => Some(vec![decl("transform-style", "flat")]),
+        // `zoom-100` -> "100%"; arbitrary values (`zoom-[1.1]`) pass a bare
+        // unitless number through as-is, matching real Tailwind's own
+        // `zoom-[<value>]` — this CSS property accepts either a percentage
+        // or a bare number interchangeably.
+        "zoom" => {
+            let value = parsed.value.as_deref()?;
+            if parsed.is_arbitrary {
+                return Some(vec![decl("zoom", value)]);
+            }
+            let n: f64 = value.parse().ok()?;
+            Some(vec![decl("zoom", &format!("{n}%"))])
+        }
         "backface-visible" => Some(vec![decl("backface-visibility", "visible")]),
         "backface-hidden" => Some(vec![decl("backface-visibility", "hidden")]),
         "perspective-origin" => {
@@ -465,6 +479,15 @@ mod tests {
         let t = theme();
         assert_eq!(resolve(&parse_class("origin-top-left"), &t), Some(vec![decl("transform-origin", "top left")]));
         assert_eq!(resolve(&parse_class("origin-[10px_20px]"), &t), Some(vec![decl("transform-origin", "10px 20px")]));
+    }
+
+    #[test]
+    fn resolves_transform_style_and_zoom() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("transform-3d"), &t), Some(vec![decl("transform-style", "preserve-3d")]));
+        assert_eq!(resolve(&parse_class("transform-flat"), &t), Some(vec![decl("transform-style", "flat")]));
+        assert_eq!(resolve(&parse_class("zoom-75"), &t), Some(vec![decl("zoom", "75%")]));
+        assert_eq!(resolve(&parse_class("zoom-[1.1]"), &t), Some(vec![decl("zoom", "1.1")]));
     }
 
     #[test]

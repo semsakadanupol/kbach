@@ -193,6 +193,26 @@ pub(super) fn font_family_value(theme: &ThemeConfig, key: &str) -> Option<String
     }.to_string())
 }
 
+/// Real Tailwind's named `font-stretch` keyword scale — matches the CSS
+/// spec's own named percentages exactly (`condensed` == 75%, etc.), though
+/// this table only needs the keyword side: the numeric side is handled
+/// separately in `resolve`'s own "font-stretch" arm (a bare `<percentage>`
+/// value like `font-stretch-50%` is valid CSS as-is, no lookup needed).
+fn font_stretch_value(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "ultra-condensed" => "ultra-condensed",
+        "extra-condensed" => "extra-condensed",
+        "condensed" => "condensed",
+        "semi-condensed" => "semi-condensed",
+        "normal" => "normal",
+        "semi-expanded" => "semi-expanded",
+        "expanded" => "expanded",
+        "extra-expanded" => "extra-expanded",
+        "ultra-expanded" => "ultra-expanded",
+        _ => return None,
+    })
+}
+
 /// CSS function calls a `content-[...]` value might legitimately be,
 /// passed through verbatim rather than quoted as a literal string.
 const CONTENT_FUNCTION_PREFIXES: &[&str] = &["attr(", "counter(", "counters(", "var("];
@@ -340,6 +360,33 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
 
         "italic" => Some(vec![decl("font-style", "italic")]),
         "not-italic" => Some(vec![decl("font-style", "normal")]),
+
+        // Named keywords, a bare `<percentage>` (`font-stretch-50%` — valid
+        // CSS as-is, no lookup table needed), or arbitrary.
+        "font-stretch" => {
+            let value = parsed.value.as_deref()?;
+            if parsed.is_arbitrary {
+                return Some(vec![decl("font-stretch", value)]);
+            }
+            if let Some(v) = font_stretch_value(value) {
+                return Some(vec![decl("font-stretch", v)]);
+            }
+            let digits = value.strip_suffix('%')?;
+            digits.parse::<f64>().ok().map(|_| vec![decl("font-stretch", value)])
+        }
+        // Arbitrary-only (`font-features-['smcp']`/`font-features-['smcp','onum']`)
+        // — real Tailwind has no named `font-feature-settings` preset scale.
+        "font-features" if parsed.is_arbitrary => {
+            Some(vec![decl("font-feature-settings", parsed.value.as_deref()?)])
+        }
+        // Numeric scale (`tab-2`/`tab-8`, a bare integer) or arbitrary.
+        "tab" => {
+            let value = parsed.value.as_deref()?;
+            if parsed.is_arbitrary {
+                return Some(vec![decl("tab-size", value)]);
+            }
+            value.parse::<f64>().ok().map(|_| vec![decl("tab-size", value)])
+        }
 
         "decoration" => decoration_value(theme, parsed),
         "underline-offset" => {
@@ -644,6 +691,37 @@ mod tests {
         // FIRST) is what actually resolves "content-center", not this file.
         let t = theme();
         assert_eq!(resolve(&parse_class("content-center"), &t), None);
+    }
+
+    #[test]
+    fn resolves_font_stretch_named_percentage_and_arbitrary() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("font-stretch-condensed"), &t), Some(vec![decl("font-stretch", "condensed")]));
+        assert_eq!(
+            resolve(&parse_class("font-stretch-ultra-expanded"), &t),
+            Some(vec![decl("font-stretch", "ultra-expanded")]),
+        );
+        assert_eq!(resolve(&parse_class("font-stretch-50%"), &t), Some(vec![decl("font-stretch", "50%")]));
+        assert_eq!(resolve(&parse_class("font-stretch-[80%]"), &t), Some(vec![decl("font-stretch", "80%")]));
+        assert_eq!(resolve(&parse_class("font-stretch-not-a-value"), &t), None);
+    }
+
+    #[test]
+    fn resolves_font_features_arbitrary_only() {
+        let t = theme();
+        assert_eq!(
+            resolve(&parse_class("font-features-['smcp']"), &t),
+            Some(vec![decl("font-feature-settings", "'smcp'")]),
+        );
+    }
+
+    #[test]
+    fn resolves_tab_size_numeric_and_arbitrary() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("tab-2"), &t), Some(vec![decl("tab-size", "2")]));
+        assert_eq!(resolve(&parse_class("tab-8"), &t), Some(vec![decl("tab-size", "8")]));
+        assert_eq!(resolve(&parse_class("tab-[12px]"), &t), Some(vec![decl("tab-size", "12px")]));
+        assert_eq!(resolve(&parse_class("tab-banana"), &t), None);
     }
 
     #[test]

@@ -161,6 +161,20 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "table-fixed" => Some(vec![decl("table-layout", "fixed")]),
         "caption-top" => Some(vec![decl("caption-side", "top")]),
         "caption-bottom" => Some(vec![decl("caption-side", "bottom")]),
+        // scrollbar-width — real Tailwind's class names don't repeat "width"
+        // (mirrors "w-*" not being "width-*"). "scrollbar-thumb-*"/
+        // "scrollbar-track-*" (scrollbar-color) live in color.rs instead —
+        // genuine color-family lookups, same split as caret/accent above.
+        "scrollbar-auto" => Some(vec![decl("scrollbar-width", "auto")]),
+        "scrollbar-thin" => Some(vec![decl("scrollbar-width", "thin")]),
+        "scrollbar-none" => Some(vec![decl("scrollbar-width", "none")]),
+        "scrollbar-gutter-auto" => Some(vec![decl("scrollbar-gutter", "auto")]),
+        "scrollbar-gutter-stable" => Some(vec![decl("scrollbar-gutter", "stable")]),
+        "scrollbar-gutter-both" => Some(vec![decl("scrollbar-gutter", "stable both-edges")]),
+        "field-sizing-content" => Some(vec![decl("field-sizing", "content")]),
+        "field-sizing-fixed" => Some(vec![decl("field-sizing", "fixed")]),
+        "forced-color-adjust-auto" => Some(vec![decl("forced-color-adjust", "auto")]),
+        "forced-color-adjust-none" => Some(vec![decl("forced-color-adjust", "none")]),
         _ => None,
     }
 }
@@ -262,6 +276,28 @@ mod tests {
                 decl("--kb-border-spacing-x", "16px"),
                 decl("border-spacing", "var(--kb-border-spacing-x, 0) var(--kb-border-spacing-y, 0)"),
             ]),
+        );
+    }
+
+    #[test]
+    fn resolves_scrollbar_width_gutter_field_sizing_and_forced_color_adjust() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("scrollbar-thin"), &t), Some(vec![decl("scrollbar-width", "thin")]));
+        assert_eq!(resolve(&parse_class("scrollbar-none"), &t), Some(vec![decl("scrollbar-width", "none")]));
+        assert_eq!(resolve(&parse_class("scrollbar-gutter-stable"), &t), Some(vec![decl("scrollbar-gutter", "stable")]));
+        assert_eq!(
+            resolve(&parse_class("scrollbar-gutter-both"), &t),
+            Some(vec![decl("scrollbar-gutter", "stable both-edges")]),
+        );
+        assert_eq!(resolve(&parse_class("field-sizing-content"), &t), Some(vec![decl("field-sizing", "content")]));
+        assert_eq!(resolve(&parse_class("field-sizing-fixed"), &t), Some(vec![decl("field-sizing", "fixed")]));
+        assert_eq!(
+            resolve(&parse_class("forced-color-adjust-none"), &t),
+            Some(vec![decl("forced-color-adjust", "none")]),
+        );
+        assert_eq!(
+            resolve(&parse_class("forced-color-adjust-auto"), &t),
+            Some(vec![decl("forced-color-adjust", "auto")]),
         );
     }
 

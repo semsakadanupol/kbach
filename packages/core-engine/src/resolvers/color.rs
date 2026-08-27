@@ -207,6 +207,27 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         }
         "stroke" if parsed.value.as_deref() == Some("none") => Some(vec![decl("stroke", "none")]),
         "stroke" => color_value(theme, parsed).map(|v| vec![decl("stroke", &v)]),
+        // scrollbar-thumb-*/scrollbar-track-* (scrollbar-color) — composed
+        // via CSS variables, same "each utility sets its own slot, both
+        // re-declare the same shorthand referencing both" technique
+        // `interactivity.rs`'s `border-spacing`/`border-spacing-x`/
+        // `border-spacing-y` trio already uses, so setting only one side
+        // doesn't clobber whichever value (or the `auto` fallback) the
+        // other side already has.
+        "scrollbar-thumb" => {
+            let v = color_value(theme, parsed)?;
+            Some(vec![
+                decl("--kb-scrollbar-thumb", &v),
+                decl("scrollbar-color", "var(--kb-scrollbar-thumb, auto) var(--kb-scrollbar-track, auto)"),
+            ])
+        }
+        "scrollbar-track" => {
+            let v = color_value(theme, parsed)?;
+            Some(vec![
+                decl("--kb-scrollbar-track", &v),
+                decl("scrollbar-color", "var(--kb-scrollbar-thumb, auto) var(--kb-scrollbar-track, auto)"),
+            ])
+        }
         _ => None,
     }
 }
@@ -467,6 +488,25 @@ mod tests {
         assert_eq!(resolve(&parse_class("caret-blue-6"), &theme), Some(vec![decl("caret-color", "#2563eb")]));
         assert_eq!(resolve(&parse_class("accent-blue-6"), &theme), Some(vec![decl("accent-color", "#2563eb")]));
         assert_eq!(resolve(&parse_class("caret-[#f00]"), &theme), Some(vec![decl("caret-color", "#f00")]));
+    }
+
+    #[test]
+    fn resolves_scrollbar_thumb_and_track_as_composed_scrollbar_color() {
+        let theme = theme_with_colors();
+        assert_eq!(
+            resolve(&parse_class("scrollbar-thumb-blue-6"), &theme),
+            Some(vec![
+                decl("--kb-scrollbar-thumb", "#2563eb"),
+                decl("scrollbar-color", "var(--kb-scrollbar-thumb, auto) var(--kb-scrollbar-track, auto)"),
+            ]),
+        );
+        assert_eq!(
+            resolve(&parse_class("scrollbar-track-[#f3f4f6]"), &theme),
+            Some(vec![
+                decl("--kb-scrollbar-track", "#f3f4f6"),
+                decl("scrollbar-color", "var(--kb-scrollbar-thumb, auto) var(--kb-scrollbar-track, auto)"),
+            ]),
+        );
     }
 
     #[test]

@@ -92,6 +92,20 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "max-w" => resolve_size(theme, parsed).map(|v| vec![decl("max-width", &v)]),
         "min-h" => resolve_size(theme, parsed).map(|v| vec![decl("min-height", &v)]),
         "max-h" => resolve_size(theme, parsed).map(|v| vec![decl("max-height", &v)]),
+        // Logical sizing (Tailwind v4.2) — writing-mode-aware equivalents of
+        // w/h: "inline" tracks the text-flow axis (horizontal in the usual
+        // left-to-right/right-to-left modes), "block" tracks the
+        // perpendicular one. Reuses the exact same named/fraction/spacing-
+        // scale/arbitrary resolution as physical w/h/min-w/max-w/min-h/
+        // max-h — real Tailwind's own logical-sizing scale is identical to
+        // its physical one, just addressed by a different pair of CSS
+        // properties.
+        "inline" => resolve_size(theme, parsed).map(|v| vec![decl("inline-size", &v)]),
+        "block" => resolve_size(theme, parsed).map(|v| vec![decl("block-size", &v)]),
+        "min-inline" => resolve_size(theme, parsed).map(|v| vec![decl("min-inline-size", &v)]),
+        "max-inline" => resolve_size(theme, parsed).map(|v| vec![decl("max-inline-size", &v)]),
+        "min-block" => resolve_size(theme, parsed).map(|v| vec![decl("min-block-size", &v)]),
+        "max-block" => resolve_size(theme, parsed).map(|v| vec![decl("max-block-size", &v)]),
         // Combined width+height shorthand — reuses the exact same named/
         // fraction/spacing-scale/arbitrary resolution as bare "w"/"h".
         "size" => resolve_size(theme, parsed).map(|v| vec![decl("width", &v), decl("height", &v)]),
@@ -263,6 +277,17 @@ mod tests {
         assert_eq!(resolve(&parse_class("basis-1/2"), &t), Some(vec![decl("flex-basis", "50%")]));
         assert_eq!(resolve(&parse_class("basis-full"), &t), Some(vec![decl("flex-basis", "100%")]));
         assert_eq!(resolve(&parse_class("basis-auto"), &t), Some(vec![decl("flex-basis", "auto")]));
+    }
+
+    #[test]
+    fn resolves_logical_sizing_via_the_shared_width_height_scale() {
+        let t = theme();
+        assert_eq!(resolve(&parse_class("inline-4"), &t), Some(vec![decl("inline-size", "16px")]));
+        assert_eq!(resolve(&parse_class("block-4"), &t), Some(vec![decl("block-size", "16px")]));
+        assert_eq!(resolve(&parse_class("min-inline-full"), &t), Some(vec![decl("min-inline-size", "100%")]));
+        assert_eq!(resolve(&parse_class("max-inline-lg"), &t), Some(vec![decl("max-inline-size", "32rem")]));
+        assert_eq!(resolve(&parse_class("min-block-4"), &t), Some(vec![decl("min-block-size", "16px")]));
+        assert_eq!(resolve(&parse_class("max-block-1/2"), &t), Some(vec![decl("max-block-size", "50%")]));
     }
 
     #[test]

@@ -87,11 +87,35 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
     match parsed.utility.as_str() {
         "flex" if parsed.value.is_none() => Some(vec![decl("display", "flex")]),
         "grid" => Some(vec![decl("display", "grid")]),
-        "block" => Some(vec![decl("display", "block")]),
-        "inline-block" => Some(vec![decl("display", "inline-block")]),
-        "inline" => Some(vec![decl("display", "inline")]),
-        "inline-flex" => Some(vec![decl("display", "inline-flex")]),
-        "inline-grid" => Some(vec![decl("display", "inline-grid")]),
+        // Guarded the same way "flex" above already is — spacing.rs's new
+        // logical-sizing "block-*" family (`block-64`, `block-full`, ...)
+        // registered "block-" as a VALUE_PREFIXES entry, so "block-full"
+        // now arrives here as utility="block" + value="full", not as a
+        // standalone "block" literal with no value at all. Without this
+        // guard, EVERY "block-*" logical-sizing class would wrongly resolve
+        // to plain `display: block` here before spacing.rs ever got a
+        // chance to see it (this module runs first in `resolve_utility`'s
+        // `.or_else` chain) — the exact bug the "inline" arm right below
+        // already had to be fixed for, for the same underlying reason.
+        "block" if parsed.value.is_none() => Some(vec![decl("display", "block")]),
+        // "inline-block"/"inline-flex"/"inline-grid" now arrive here as
+        // utility="inline" + value="block"/"flex"/"grid" (bare "inline" has
+        // no value at all), not as their own standalone literal utility
+        // names — spacing.rs's own new logical-sizing "inline-*" family
+        // (`inline-4`, `inline-full`, ...) registered "inline-" as a
+        // VALUE_PREFIXES entry, which unconditionally strips that prefix
+        // from every "inline-something" token, this one included. Checked
+        // BEFORE `spacing::resolve` in `resolve_utility`'s `.or_else` chain
+        // (this module runs first), so any value that ISN'T one of these
+        // three display keywords falls through (`_ => None`) to spacing.rs's
+        // own "inline" arm, which resolves it as `inline-size` instead.
+        "inline" => match parsed.value.as_deref() {
+            None => Some(vec![decl("display", "inline")]),
+            Some("block") => Some(vec![decl("display", "inline-block")]),
+            Some("flex") => Some(vec![decl("display", "inline-flex")]),
+            Some("grid") => Some(vec![decl("display", "inline-grid")]),
+            _ => None,
+        },
         "contents" => Some(vec![decl("display", "contents")]),
         "flow-root" => Some(vec![decl("display", "flow-root")]),
         "hidden" => Some(vec![decl("display", "none")]),

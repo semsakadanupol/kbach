@@ -188,70 +188,64 @@ live at your project root (e.g. a monorepo app).
 
 ## Dark mode
 
-By default, `dark:` classes follow the OS `prefers-color-scheme` setting via
-plain CSS — zero config, zero JS required, works even if your app never
-imports anything from `@kbach/react`'s runtime:
+**Following the OS setting — zero setup.** `dark:` classes already work,
+via plain CSS, with nothing to configure:
 
 ```tsx
 <div className="bg-white dark:bg-neutral-12">...</div>
 ```
 
-This default (`darkMode: 'media'`) can't be overridden by an in-app toggle —
-`@media (prefers-color-scheme)` only ever reflects the real OS setting. To
-add a manual light/dark switcher, opt into `darkMode: 'class'` or
-`'attribute'` (writes `.dark`/`data-theme` onto `<html>` instead):
+**A manual light/dark toggle — one file, no other setup.** `@media
+(prefers-color-scheme)` (the default above) can't be flipped by a button —
+it only ever reflects the OS. For a real toggle, add one file:
 
 ```js
-// kbach.config.js — a plain object, auto-discovered by the plugin at your
-// project root, no import needed in vite.config.ts/postcss.config.js
+// kbach.config.js — at your project root
 export default { darkMode: 'attribute' };
 ```
 
-```ts
-// vite.config.ts — no `config`/`theme` option needed
-import { kbach } from '@kbach/react/vite';
-
-export default defineConfig({ plugins: [kbach(), react()] });
-```
+That's it. Don't pass anything to `kbach()`/`'@kbach/react/postcss'` and
+don't call anything at app startup — both sides pick this up on their own
+(the plugin auto-discovers the file; the runtime reads the strategy back
+out of the CSS the plugin already generated). Then just use `useTheme()`:
 
 ```tsx
-// app entry — no applyKbachConfig() call needed either
 import { useTheme } from '@kbach/react';
 
 function ThemeToggle() {
-  const { mode, isDark, setMode, toggle } = useTheme();
+  const { mode, toggle } = useTheme();
   return <button onClick={toggle}>{mode}</button>;
 }
 ```
 
-That's the whole setup — one file, no runtime call. The generated CSS
-carries the strategy it was built with (as a `--kb-dark-mode` custom
-property), and `useTheme()`'s store reads it back from the DOM at startup,
-so build-time and runtime always agree automatically.
+Works anywhere in the tree, no provider required. `<ThemeProvider
+defaultMode="dark">` is optional, only for seeding a startup default.
+Outside React, use `getGlobalDarkMode()`/`toggleGlobalDarkMode()` directly.
 
-If you're not using the static plugin at all (a pure runtime `kb()` setup,
-with no build step generating `dark:` CSS ahead of time), there's nothing
-for the runtime to auto-detect — call `applyKbachConfig({ darkMode: '...' })`
-yourself instead, once, before your first render:
+<details>
+<summary>Not using the static plugin, or need to set the strategy explicitly?</summary>
+
+There's nothing for the runtime to auto-detect if no build step ever
+generates `dark:` CSS (a pure runtime `kb()`-only setup) — call
+`applyKbachConfig()` yourself once, before your first render, instead:
 
 ```tsx
-import { applyKbachConfig, useTheme } from '@kbach/react';
+import { applyKbachConfig } from '@kbach/react';
 
 applyKbachConfig({ darkMode: 'attribute' });
 ```
 
-An explicit `applyKbachConfig()` call always overrides whatever was
-auto-detected, if you ever need one — e.g. switching strategy at runtime for
-some reason. Keep the value in one shared `kbach.config.js` and import it on
-both sides rather than typing the same literal twice, if you do reach for it.
+An explicit call like this always wins over whatever the CSS auto-detect
+found, if the two ever disagree. If you do reach for it alongside the
+plugin, import the same `kbach.config.js` rather than retyping the value —
+`import kbachConfig from '../kbach.config.js'; applyKbachConfig(kbachConfig);`.
 
-Works anywhere, no provider needed. `<ThemeProvider defaultMode="dark">` is
-optional, for seeding a startup default. Outside React (plain functions,
-event handlers), use `getGlobalDarkMode()`/`toggleGlobalDarkMode()` instead.
-Note: `useTheme()`/`toggleGlobalDarkMode()` still track `isDark` correctly
-under the default `'media'` strategy too (and even without any of the above)
-— they just won't visibly affect `dark:` classes unless the runtime has also
-learned about `'class'`/`'attribute'`, one way or another.
+`useTheme()`/`toggleGlobalDarkMode()` still track `isDark` correctly under
+the default `'media'` strategy too, with none of the above — they just
+won't visibly affect `dark:` classes until the runtime knows about
+`'class'`/`'attribute'` one way or another.
+
+</details>
 
 ## Theming
 

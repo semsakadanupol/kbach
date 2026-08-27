@@ -13,6 +13,17 @@ resolved to a `StyleSheet`-ready style object instead of injected CSS.
 npm install @kbach/react-native
 ```
 
+Then, pick the one section below that matches how you're actually running
+the app — each is a genuinely different setup, not layered options:
+
+- **React Native CLI** (`npx react-native ...`) → [React Native CLI](#react-native-cli)
+- **Expo, using Expo Go** (`npx expo start`, scanning the QR code in the Expo
+  Go app) → [Expo Go](#expo-go) — nothing to configure at all
+- **Expo, using a dev client or a bare/prebuilt project** (`npx expo run:android`,
+  or EAS Build) → [Expo (dev client / prebuild)](#expo-dev-client--prebuild)
+- **Expo Web** (`npx expo start --web`, or any `react-native-web` target) →
+  [Expo Web](#expo-web) — also nothing to configure
+
 ### React Native CLI
 
 ```js
@@ -163,6 +174,14 @@ group/peer-style coordination on native right now, lift the shared state
 into a parent component yourself and pass it down as an explicit prop.
 
 ## Dark mode
+
+**Zero setup, on every platform this package supports** — real native
+*and* Expo Web. Unlike [`@kbach/react`](https://www.npmjs.com/package/@kbach/react),
+there's no build-time CSS step here to keep in sync with the runtime:
+`dark:` is resolved fresh from a live parameter on native (no selectors at
+all to generate ahead of time), and Expo Web's default strategy is already
+`'attribute'` — a manual toggle just works, no config file, no
+`applyKbachConfig()` call:
 
 ```tsx
 import { useTheme } from '@kbach/react-native';

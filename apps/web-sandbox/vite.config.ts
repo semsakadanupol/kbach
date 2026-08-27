@@ -3,10 +3,9 @@ import react from '@vitejs/plugin-react';
 import { kbach } from '@kbach/react/vite';
 
 export default defineConfig({
-  // 'attribute' (writes data-theme to <html>) rather than the package's
-  // default 'media' — this sandbox dogfoods useTheme()'s manual toggle
-  // (see App.tsx's theme-provider-toggle/toggle-btn), which only has a
-  // visible effect under 'class'/'attribute'; 'media' ignores DOM state
-  // entirely and only ever follows the OS preference.
-  plugins: [kbach({ config: { darkMode: 'attribute' } }), react()],
+  // No `config`/`theme` option — kbach() auto-discovers kbach.config.js at
+  // this project's root on its own, the same file main.tsx's
+  // applyKbachConfig() call imports, so there's one value for both sides to
+  // agree on instead of the same literal hand-copied into two places.
+  plugins: [kbach(), react()],
 });

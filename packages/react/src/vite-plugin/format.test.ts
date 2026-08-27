@@ -40,10 +40,20 @@ describe('formatKbachCSS', () => {
     expect(css.match(/@media \(min-width: 640px\)/g)?.length).toBe(1);
   });
 
-  it('omits the :root block entirely when no theme values are actually used', () => {
+  it('still emits a :root block for --kb-dark-mode even with no color/spacing values to extract', () => {
+    // The :root block is no longer PURELY for var-extraction — it always
+    // carries --kb-dark-mode (see formatKbachCSS's own comment), so unlike
+    // before, it's never fully absent.
     const map = new Map([['flex', [{ rule: '.flex { display: flex }', order: 0 }]]]);
     const css = formatKbachCSS(map, theme());
-    expect(css).not.toContain(':root {');
+    expect(css).toContain(':root {');
+    expect(css).toContain('--kb-dark-mode: attribute;');
+  });
+
+  it('embeds the theme darkMode strategy as --kb-dark-mode, whatever it is', () => {
+    const map = new Map([['flex', [{ rule: '.flex { display: flex }', order: 0 }]]]);
+    const css = formatKbachCSS(map, { ...theme(), darkMode: 'media' });
+    expect(css).toContain('--kb-dark-mode: media;');
   });
 
   it('sorts rules by cascade order, not by token-discovery (Map insertion) order', () => {

@@ -125,3 +125,34 @@ export function getTheme(): ThemeConfig {
 export function getThemeJson(): string {
   return activeThemeJson;
 }
+
+const DARK_MODE_STRATEGIES: ReadonlySet<DarkModeStrategy> = new Set(['attribute', 'class', 'media']);
+
+/**
+ * Reads the `--kb-dark-mode` custom property `@kbach/react/vite`'s (and
+ * `/postcss`'s) generated `kbach.css` embeds on `:root` — see
+ * `vite-plugin/format.ts`'s `formatKbachCSS` for where it's written — and,
+ * if present and a recognized strategy, applies it to the active theme.
+ * This is what lets an app using ONLY the static-CSS plugin skip a manual
+ * `applyKbachConfig({darkMode: '...'})` call just to tell the RUNTIME
+ * which strategy the CSS it already loaded was built for: the CSS itself
+ * now carries the answer, read back from the one place both the build
+ * script (Node) and the browser genuinely share — the compiled output.
+ * Called once, by `darkModeStore.ts`, before it computes its own initial
+ * `isDark`/DOM state (so that very first write already uses the right
+ * strategy, not the `'media'` default).
+ *
+ * A no-op when: not in a browser (SSR/tests — `typeof document ===
+ * 'undefined'`), the property isn't present at all (no static plugin in
+ * use, or a kbach.css built before this marker existed), or its value
+ * isn't one of the three real strategies (defensive — stale/foreign CSS).
+ * An explicit `setTheme()`/`applyKbachConfig()` call, whenever it runs
+ * (before or after this), always wins — this is a smart DEFAULT sourced
+ * from the build output, not a lock app code can't override.
+ */
+export function detectDarkModeStrategyFromDom(): void {
+  if (typeof document === 'undefined') return;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--kb-dark-mode').trim() as DarkModeStrategy;
+  if (!DARK_MODE_STRATEGIES.has(raw) || raw === activeTheme.darkMode) return;
+  setTheme({ ...activeTheme, darkMode: raw });
+}

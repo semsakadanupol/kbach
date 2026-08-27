@@ -1,4 +1,4 @@
-import { getTheme } from './theme';
+import { getTheme, detectDarkModeStrategyFromDom } from './theme';
 
 /**
  * Port of old-kbach's dark-mode architecture (`packages/ui/src/core/
@@ -56,16 +56,26 @@ function resolveIsDark(m: ThemeMode): boolean {
  * already tracks the OS preference directly; this store still keeps
  * `isDark` accurate for JS consumers (`useTheme()`)
  * even though there's nothing to touch on the element itself.
+ *
+ * Always clears the OTHER two strategies' markers too, not just sets its
+ * own — the strategy can genuinely change mid-session now (an explicit
+ * `applyKbachConfig()` call overriding what `detectDarkModeStrategyFromDom`
+ * auto-applied at import time, or just a later config change), and without
+ * this a stale `data-theme`/`.dark` from whatever strategy was active
+ * BEFORE the switch would sit in the DOM unused rather than actually
+ * cleared, even though it no longer matches anything the current CSS
+ * selects on.
  */
 function applyToDom(dark: boolean): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   const strategy = getTheme().darkMode;
-  if (strategy === 'class') {
-    root.classList.toggle('dark', dark);
-    root.classList.toggle('light', !dark);
-  } else if (strategy === 'attribute') {
+  root.classList.toggle('dark', strategy === 'class' && dark);
+  root.classList.toggle('light', strategy === 'class' && !dark);
+  if (strategy === 'attribute') {
     root.setAttribute('data-theme', dark ? 'dark' : 'light');
+  } else {
+    root.removeAttribute('data-theme');
   }
 }
 
@@ -79,6 +89,13 @@ function applyToDom(dark: boolean): void {
 // `readPersistedMode`/`systemPrefersDark` both no-op (return null/false)
 // when `window`/`localStorage` don't exist, so this module still imports
 // cleanly on the server, and `applyToDom` is guarded the same way.
+// Runs BEFORE the first applyToDom() below, so that call already sees
+// whichever darkMode strategy the loaded kbach.css was actually built for
+// — see detectDarkModeStrategyFromDom's own doc comment. A no-op when
+// there's no static-plugin-generated CSS to read a strategy from (nothing
+// changes from before this existed).
+detectDarkModeStrategyFromDom();
+
 const persistedMode = readPersistedMode();
 const hadPersistedMode = persistedMode !== null;
 let mode: ThemeMode = persistedMode ?? 'system';

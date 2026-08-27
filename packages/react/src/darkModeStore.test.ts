@@ -24,6 +24,7 @@ describe('darkModeStore', () => {
     window.localStorage.clear();
     document.documentElement.removeAttribute('data-theme');
     document.documentElement.classList.remove('dark', 'light');
+    document.documentElement.style.removeProperty('--kb-dark-mode');
   });
 
   it('defaults to the system preference when nothing is persisted', async () => {
@@ -135,5 +136,53 @@ describe('darkModeStore', () => {
     const { seedDefaultMode, getGlobalThemeMode } = await freshStore();
     seedDefaultMode('dark');
     expect(getGlobalThemeMode()).toBe('light'); // untouched — the user's own choice wins
+  });
+
+  describe('auto-detecting the darkMode strategy from --kb-dark-mode (no applyKbachConfig() call)', () => {
+    it('reads a static-plugin-embedded "attribute" strategy and applies it to the very first DOM write, with NO explicit config call', async () => {
+      mockMatchMedia(true); // system dark
+      document.documentElement.style.setProperty('--kb-dark-mode', 'attribute');
+      // No vi.doMock('./theme', ...) override here, unlike the other
+      // strategy-specific tests above — this proves the DEFAULT theme's own
+      // darkMode field gets updated purely by reading the CSS custom
+      // property kbach.css embeds, not by an explicit setTheme()/
+      // applyKbachConfig() call anywhere in this test.
+      await freshStore();
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    });
+
+    it('reads a static-plugin-embedded "class" strategy too', async () => {
+      mockMatchMedia(true);
+      document.documentElement.style.setProperty('--kb-dark-mode', 'class');
+      await freshStore();
+      expect(document.documentElement.classList.contains('dark')).toBe(true);
+      expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+    });
+
+    it('is a no-op when --kb-dark-mode is not present at all (no static plugin, or a pre-marker build) — same default as before', async () => {
+      mockMatchMedia(true);
+      await freshStore();
+      expect(document.documentElement.getAttribute('data-theme')).toBeNull(); // still 'media' default, no DOM write
+    });
+
+    it('ignores an unrecognized --kb-dark-mode value defensively, rather than applying it', async () => {
+      mockMatchMedia(true);
+      document.documentElement.style.setProperty('--kb-dark-mode', 'not-a-real-strategy');
+      await freshStore();
+      expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+    });
+
+    it('an explicit applyKbachConfig() call still wins over the auto-detected value', async () => {
+      mockMatchMedia(false);
+      document.documentElement.style.setProperty('--kb-dark-mode', 'attribute');
+      const { setGlobalThemeMode } = await freshStore();
+      const { applyKbachConfig } = await import('./config');
+      // Auto-detected 'attribute' already applied at import time; an
+      // explicit later call switching to 'class' must still take effect.
+      applyKbachConfig({ darkMode: 'class' });
+      setGlobalThemeMode('dark');
+      expect(document.documentElement.classList.contains('dark')).toBe(true);
+      expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+    });
   });
 });

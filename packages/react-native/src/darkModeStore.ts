@@ -58,17 +58,21 @@ function resolveIsDark(m: ThemeMode): boolean {
  * (prefers-color-scheme: dark)` query already tracks the OS preference
  * directly, no DOM write needed) — `isDark` stays accurate for JS
  * consumers (`useTheme()`) either way. Mirrors @kbach/react's own
- * `applyToDom` exactly.
+ * `applyToDom` exactly — including always clearing the OTHER two
+ * strategies' markers too, not just setting its own, so a runtime strategy
+ * change (e.g. a later `applyKbachConfig()` call) never leaves a stale
+ * `data-theme`/`.dark` behind from whatever strategy was active before.
  */
 function applyToDom(dark: boolean): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   const strategy = getTheme().darkMode;
-  if (strategy === 'class') {
-    root.classList.toggle('dark', dark);
-    root.classList.toggle('light', !dark);
-  } else if (strategy === 'attribute') {
+  root.classList.toggle('dark', strategy === 'class' && dark);
+  root.classList.toggle('light', strategy === 'class' && !dark);
+  if (strategy === 'attribute') {
     root.setAttribute('data-theme', dark ? 'dark' : 'light');
+  } else {
+    root.removeAttribute('data-theme');
   }
 }
 

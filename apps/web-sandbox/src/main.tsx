@@ -1,15 +1,13 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { applyKbachConfig, initKbach, kb, setTheme, getTheme, disableRuntimeCSS } from '@kbach/react';
+import { initKbach, kb, setTheme, getTheme, disableRuntimeCSS } from '@kbach/react';
 import App from './App';
 import './kbach.css';
 
-// Must match vite.config.ts's kbach({ config: {...} }) exactly — that
-// option only drives build-time CSS generation, it never reaches this
-// runtime module. Without this, useTheme()'s own toggle (dogfooded in
-// App.tsx) would silently no-op: it reads THIS module's active theme,
-// which otherwise defaults to 'media' (no DOM write for a manual toggle).
-applyKbachConfig({ darkMode: 'attribute' });
+// No applyKbachConfig() call — kbach.css itself embeds the darkMode
+// strategy it was built with (see vite-plugin/format.ts's --kb-dark-mode),
+// and darkModeStore.ts auto-detects it from the DOM on its own. Dogfoods
+// this being genuinely optional, not just documented as such.
 
 // The static kbach.css (written by @kbach/react/vite, see vite.config.ts)
 // already provides these rules — disable runtime injection so nothing

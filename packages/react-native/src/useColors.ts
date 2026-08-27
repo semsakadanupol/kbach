@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { getTheme } from './theme';
 import type { ColorEntry, ThemeConfig } from './theme';
 import { useTheme } from './useTheme';
@@ -117,5 +118,10 @@ function makeColorsProxy(theme: ThemeConfig, isDark: boolean): ColorsAPI {
  */
 export function useColors(): ColorsAPI {
   const { isDark } = useTheme();
-  return makeColorsProxy(getTheme(), isDark);
+  const theme = getTheme();
+  // Memoized on (theme, isDark) — without this, every render (including
+  // ones unrelated to color/theme, e.g. a parent re-rendering for its own
+  // reasons) allocated a fresh Proxy + Map here for no reason, since the
+  // resolved colors are a pure function of these two inputs.
+  return useMemo(() => makeColorsProxy(theme, isDark), [theme, isDark]);
 }

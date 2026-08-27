@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { resolveKbachConfig, applyKbachConfig } from './config';
 import { defaultTheme, getTheme, setTheme } from './theme';
+import { setGlobalThemeMode, _resetForTests as _resetDarkModeForTests } from './darkModeStore';
 
 describe('resolveKbachConfig', () => {
   afterEach(() => {
@@ -119,11 +120,31 @@ describe('resolveKbachConfig', () => {
 describe('applyKbachConfig', () => {
   afterEach(() => {
     setTheme(defaultTheme);
+    _resetDarkModeForTests();
+    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.classList.remove('dark', 'light');
   });
 
   it('resolves the config AND calls setTheme() with the result', () => {
     const theme = applyKbachConfig({ extend: { colors: { brand: '#ff6b35' } } });
     expect(getTheme()).toBe(theme);
     expect(getTheme().colors.brand).toBe('#ff6b35');
+  });
+
+  it('re-syncs the DOM to the current dark state under the newly configured strategy', () => {
+    // Regression: reproduces a real bug found via a headless-browser check
+    // (system dark, darkMode:'attribute' via applyKbachConfig) — isDark
+    // becomes true here while the active strategy is still the default
+    // ('media', no DOM write needed), so nothing has ever written
+    // `data-theme` yet.
+    setGlobalThemeMode('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+
+    // setTheme() alone (which is all applyKbachConfig used to call) has NO
+    // DOM side effect — switching strategy here must not leave `isDark`'s
+    // already-true value stranded, unreflected in the DOM, until some LATER
+    // unrelated dark-mode event happens to fire one.
+    applyKbachConfig({ darkMode: 'attribute' });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
   });
 });

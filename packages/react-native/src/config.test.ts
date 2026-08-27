@@ -1,4 +1,15 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+
+// applyKbachConfig now also re-syncs darkModeStore.ts's DOM state (see
+// resyncDomWithActiveTheme) — this package's real 'react-native' module
+// carries Flow syntax Vite's SSR transformer can't parse, so any test file
+// that transitively imports darkModeStore.ts needs the same real-native
+// mock every other such test file already provides (nativeBridge.test.ts,
+// jsx-runtime.test.ts, ...); config.ts had no reason to need one before.
+vi.mock('react-native', () => ({
+  Appearance: { getColorScheme: () => 'light', addChangeListener: () => ({ remove: vi.fn() }) },
+}));
+
 import { resolveKbachConfig, applyKbachConfig } from './config';
 import { defaultTheme, getTheme, setTheme } from './theme';
 

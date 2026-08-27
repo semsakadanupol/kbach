@@ -122,4 +122,24 @@ describe('darkModeStore applyToDom (react-native, Expo Web)', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(false);
     resetTheme();
   });
+
+  it('applyKbachConfig() (config.ts) re-syncs the DOM immediately when switching strategy — reproduces a real "system theme not detected" bug found via a headless-browser check', async () => {
+    // System prefers dark, and this is a genuinely cold module graph (like a
+    // real app's first load): darkModeStore.ts's own module-load-time
+    // applyToDom() call runs against whatever getTheme().darkMode is AT THAT
+    // MOMENT — the default theme's 'media' strategy, a harmless no-op — since
+    // it necessarily finishes evaluating before an app's own top-level
+    // applyKbachConfig({darkMode: 'attribute'}) call gets a chance to run.
+    mockAppearance(true);
+    vi.resetModules();
+    const { applyKbachConfig } = await import('./config');
+    // Without resyncDomWithActiveTheme() inside applyKbachConfig, this would
+    // still read null here — isDark was already true, but nothing had ever
+    // written it to the DOM under the new strategy, and setTheme() alone has
+    // no DOM side effect. Confirmed via a real Playwright check against
+    // apps/web-sandbox: useTheme().isDark read true while <html data-theme>
+    // stayed unset, so `dark:` classes silently never applied on load.
+    applyKbachConfig({ darkMode: 'attribute' });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+  });
 });

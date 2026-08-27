@@ -1,5 +1,6 @@
 import { defaultTheme, setTheme } from './theme';
 import type { ContainerConfig, ThemeConfig } from './theme';
+import { resyncDomWithActiveTheme } from './darkModeStore';
 
 /**
  * A `kbach.config.js`-style theme customization — same shape as
@@ -121,9 +122,16 @@ export function resolveKbachConfig(config: KbachConfig): ThemeConfig {
   return theme;
 }
 
-/** `resolveKbachConfig()` + `setTheme()` in one call — the usual entry point from app code. */
+/**
+ * `resolveKbachConfig()` + `setTheme()` in one call — the usual entry point
+ * from app code. Also re-syncs the DOM (Expo Web only) to the CURRENT
+ * dark-mode state right after `setTheme()` — see
+ * `resyncDomWithActiveTheme`'s own doc comment for why this is required,
+ * not optional.
+ */
 export function applyKbachConfig(config: KbachConfig): ThemeConfig {
   const theme = resolveKbachConfig(config);
   setTheme(theme);
+  resyncDomWithActiveTheme();
   return theme;
 }

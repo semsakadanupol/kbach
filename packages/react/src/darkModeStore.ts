@@ -113,6 +113,34 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
+/**
+ * Re-applies the CURRENT `isDark` value to the DOM under whatever
+ * `getTheme().darkMode` strategy is active right now — with no change to
+ * `mode`/`isDark` themselves, so it does NOT `notify()` (nothing a
+ * `useTheme()` consumer reads changed). Exists for `applyKbachConfig()`
+ * (config.ts) to call right after `setTheme()`: this module's own initial
+ * `applyToDom(isDark)` call above runs at IMPORT time, against whatever
+ * `getTheme().darkMode` happened to be at that exact moment — which, in a
+ * real app, is `defaultTheme`'s strategy (`'media'`), since darkModeStore.ts
+ * (transitively pulled in by anything from `@kbach/react` the app also
+ * imports) finishes evaluating before the app's own top-level
+ * `applyKbachConfig({darkMode: 'attribute'})` call runs. Under `'media'`
+ * that first call is a harmless no-op (no DOM write needed at all) — but it
+ * means an app that switches to `'attribute'`/`'class'` via config never
+ * gets a DOM write for its actual current dark state until the NEXT
+ * `notify()`-triggering event (a manual toggle, or a live OS preference
+ * change) happens to fire one. Confirmed via a real headless-browser
+ * reproduction: with the OS set to dark and `darkMode: 'attribute'`
+ * configured, `useTheme().isDark` correctly read `true` on load while
+ * `<html data-theme>` stayed unset — `dark:` classes silently never applied
+ * despite JS state being completely correct, until any later dark-mode
+ * event (even a redundant `setMode('system')` re-click) forced the
+ * already-correct `isDark` to finally reach the DOM.
+ */
+export function resyncDomWithActiveTheme(): void {
+  applyToDom(isDark);
+}
+
 export function getGlobalDarkMode(): boolean {
   return isDark;
 }

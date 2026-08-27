@@ -84,7 +84,7 @@ describe('kb()', () => {
     expect(styleEl.sheet?.cssRules.length).toBe(2);
   });
 
-  it('deduplicates repeat calls with the same class — no duplicate rules injected', async () => {
+  it('deduplicates repeat calls with the same class — no duplicate rules injected, and no redundant re-resolution', async () => {
     const { kb } = await import('./kb');
     kb('bg-blue-6');
     kb('bg-blue-6');
@@ -92,8 +92,12 @@ describe('kb()', () => {
 
     const styleEl = document.head.querySelector('[data-kbach]') as HTMLStyleElement;
     expect(styleEl.sheet?.cssRules.length).toBe(1);
-    expect(mockGenerateCss).toHaveBeenCalledTimes(3); // still resolves every call...
-    // ...but only injects once, since the rule text is identical.
+    // Only the FIRST call actually crosses the WASM boundary — kb() caches
+    // the resolved result per classString (invalidated on a theme change),
+    // since re-resolving an already-seen class string on every call would be
+    // pure waste for a component calling kb() on every render with the same
+    // dynamic class.
+    expect(mockGenerateCss).toHaveBeenCalledTimes(1);
   });
 
   it('reuses one <style> tag across calls with different classes', async () => {

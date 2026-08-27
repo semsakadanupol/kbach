@@ -231,9 +231,9 @@ fn rn_style_value(property: &str, value: &str) -> (Option<Value>, Option<String>
 /// omitted entirely when there are no warnings, so the JSON shape for every
 /// already-passing call site is byte-for-byte unchanged.
 pub fn resolve_style_json(class_string: &str, theme_json: &str, color_scheme: &str, pressed: bool, width: f64) -> String {
-    let theme: ThemeConfig = match serde_json::from_str(theme_json) {
-        Ok(t) => t,
-        Err(_) => return "{}".to_string(),
+    let theme = match crate::theme::parse_theme_cached(theme_json) {
+        Some(t) => t,
+        None => return "{}".to_string(),
     };
     let (mut style, warnings) = resolve_style_with_warnings(class_string, &theme, color_scheme, pressed, width);
     if !warnings.is_empty() {
@@ -299,25 +299,43 @@ pub fn resolve_style_with_warnings(
     for token in class_string.split_whitespace() {
         let parsed = parse_class(token);
 
-        // Checked BEFORE the modifier-gate below, and independent of it —
-        // a typo behind a currently-inactive modifier (`dark:flexx-center`
-        // in light mode) is still a typo; skipping this check whenever
-        // modifiers don't currently hold would only catch it half the time,
-        // by accident, depending on runtime dark-mode/breakpoint state.
-        if !is_recognized_utility(&parsed, theme) {
-            warnings.push(format!(
-                "Kbach: \"{token}\" doesn't match any known Kbach utility — typo? (skipped)"
-            ));
-        }
-
         let all_modifiers_hold = parsed
             .modifiers
             .iter()
             .all(|m| native_modifier_state(m, theme, color_scheme, pressed, width) == Some(true));
         if !all_modifiers_hold {
+            // A typo behind a currently-inactive modifier (`dark:flexx-center`
+            // in light mode) is still a typo — checked here regardless of
+            // modifier state, same as before this branch existed, rather
+            // than only catching it half the time depending on runtime
+            // dark-mode/breakpoint state.
+            if !is_recognized_utility(&parsed, theme) {
+                warnings.push(format!(
+                    "Kbach: \"{token}\" doesn't match any known Kbach utility — typo? (skipped)"
+                ));
+            }
             continue;
         }
-        let Some(decls) = resolve_utility_native(&parsed, theme) else { continue };
+
+        let Some(decls) = resolve_utility_native(&parsed, theme) else {
+            // Not resolvable on native — either a genuine typo, or a real
+            // utility this native engine just doesn't support yet (e.g.
+            // grid-cols-3). `is_recognized_utility` disambiguates via the
+            // web dispatcher (the full vocabulary), which is only worth the
+            // cost of a second resolution pass once the cheaper native one
+            // has already failed — not unconditionally on every token, since
+            // a token that resolves successfully here is by construction a
+            // recognized utility (`resolve_utility_native` only ever
+            // succeeds for a real subset of what `resolve_utility` accepts)
+            // and never needs the web dispatcher called again just to
+            // confirm what a successful native resolve already proves.
+            if !is_recognized_utility(&parsed, theme) {
+                warnings.push(format!(
+                    "Kbach: \"{token}\" doesn't match any known Kbach utility — typo? (skipped)"
+                ));
+            }
+            continue;
+        };
         for d in decls {
             if d.property.starts_with("__") {
                 // divide/space markers — no RN child-combinator equivalent, out of scope.

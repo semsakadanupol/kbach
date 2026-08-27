@@ -98,6 +98,22 @@ function base64ToBytes(base64: string): Uint8Array {
 
 initSync({ module: base64ToBytes(KBACH_CORE_ENGINE_WASM_BASE64) });
 
+// Same rationale/shape as @kbach/react's kb.ts cache and nativeBridge.ts's
+// resolveStyle() cache: `processElement` (jsxRuntimeCoreWeb.ts) calls this
+// for EVERY styled element on EVERY render — unlike real native, there's no
+// dark:/breakpoint gate that skips most elements, since real CSS handles
+// that reactivity with no re-render at all. Without caching, a component
+// re-rendering for any unrelated reason still re-crosses the WASM boundary
+// for every one of its styled elements, even when their className never
+// changed. Bounded (cleared wholesale past RESOLVE_CLASS_NAME_CACHE_MAX)
+// rather than evicted piecewise, same tradeoff as the caches above.
+const RESOLVE_CLASS_NAME_CACHE_MAX = 500;
+const resolveClassNameCache = new Map<string, string>();
+// Reference, not content — getThemeJson() returns the SAME string instance
+// until setTheme() reassigns it (see theme.ts), so comparing references is
+// enough to detect "the theme changed since the cache was built" for free.
+let cachedForThemeJson: string | null = null;
+
 /**
  * Resolves `classString` to CSS via the WASM engine, injects every returned
  * rule into a shared `<style data-kbach-rn>` tag (cascade-order-safe — see
@@ -108,10 +124,21 @@ initSync({ module: base64ToBytes(KBACH_CORE_ENGINE_WASM_BASE64) });
  * text, not the original.
  */
 export function resolveClassName(classString: string): string {
-  const json = wasmGenerateCssAttr(classString, getThemeJson());
+  const themeJson = getThemeJson();
+  if (themeJson !== cachedForThemeJson) {
+    resolveClassNameCache.clear();
+    cachedForThemeJson = themeJson;
+  }
+
+  const cached = resolveClassNameCache.get(classString);
+  if (cached !== undefined) return cached;
+
+  const json = wasmGenerateCssAttr(classString, themeJson);
   const { className, rules } = JSON.parse(json) as GenerateCssResult;
   for (const { rule, order } of rules) {
     injectRule(rule, order);
   }
+  if (resolveClassNameCache.size >= RESOLVE_CLASS_NAME_CACHE_MAX) resolveClassNameCache.clear();
+  resolveClassNameCache.set(classString, className);
   return className;
 }

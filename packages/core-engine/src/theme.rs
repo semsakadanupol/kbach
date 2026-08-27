@@ -3,7 +3,9 @@
 //! without recompiling the engine.
 
 use serde::Deserialize;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// A theme color entry — either a plain hex value, or a mode-aware pair that
 /// resolves to a different hex depending on light/dark mode. Mode-aware
@@ -66,6 +68,50 @@ pub struct ThemeConfig {
     pub dark_mode: DarkModeStrategy,
     #[serde(default)]
     pub container: ContainerConfig,
+}
+
+thread_local! {
+    // Holds the most recently parsed (theme_json, ThemeConfig) pair for this
+    // thread. `Rc`, not a plain owned `ThemeConfig`, so `parse_theme_cached`
+    // can hand out a cheap-to-clone handle without the caller needing to
+    // borrow from (and be lifetime-tied to) this thread_local's own RefCell.
+    //
+    // clippy's `missing_const_for_thread_local` misfires on this item
+    // (confirmed on clippy 0.1.97): the initializer is already the exact
+    // `const { RefCell::new(None) }` form the lint itself asks for, and
+    // clippy still flags it — a false positive, not a real fix to apply.
+    #[allow(clippy::missing_const_for_thread_local)]
+    static THEME_CACHE: RefCell<Option<(String, Rc<ThemeConfig>)>> = const { RefCell::new(None) };
+}
+
+/// Parses `theme_json` into a `ThemeConfig`, reusing the previous parse on
+/// this thread when the JSON text is byte-for-byte identical to the last
+/// call — the common case: every render/style-resolve call on a given
+/// platform passes `getThemeJson()`'s output, which only actually changes
+/// when the app calls `setTheme()`, while `resolveStyle()`/`generateCss()`
+/// themselves are invoked on every single element render. Without this, the
+/// full theme (including the ~280-entry default color palette) gets
+/// deserialized from scratch on every one of those calls — real, wasted
+/// per-render cost this avoids for the overwhelmingly common
+/// unchanged-theme case, at the price of one string comparison per call
+/// (cheap relative to a full `serde_json` parse).
+///
+/// Returns `None` for unparseable JSON, same as a direct
+/// `serde_json::from_str` would — deliberately NOT cached, so a transient
+/// bad string can't poison resolution for a later, valid one.
+pub fn parse_theme_cached(theme_json: &str) -> Option<Rc<ThemeConfig>> {
+    THEME_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((cached_json, cached_theme)) = cache.as_ref() {
+            if cached_json == theme_json {
+                return Some(Rc::clone(cached_theme));
+            }
+        }
+        let theme: ThemeConfig = serde_json::from_str(theme_json).ok()?;
+        let rc = Rc::new(theme);
+        *cache = Some((theme_json.to_string(), Rc::clone(&rc)));
+        Some(rc)
+    })
 }
 
 /// Kbach's default color palette (Phase 16) — NOT part of `ThemeConfig`

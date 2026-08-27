@@ -1,6 +1,7 @@
 import { defaultTheme, setTheme } from './theme';
 import type { ColorEntry, ContainerConfig, DarkModeStrategy, ThemeConfig } from './theme';
 import { parseHexRgb } from './colorVariables';
+import { resyncDomWithActiveTheme } from './darkModeStore';
 
 /**
  * A `kbach.config.js`-style theme customization, in one plain object — same
@@ -122,9 +123,21 @@ export function resolveKbachConfig(config: KbachConfig): ThemeConfig {
   return theme;
 }
 
-/** `resolveKbachConfig()` + `setTheme()` in one call — the usual entry point from app code. Returns the resolved theme (e.g. to also hand to the Vite plugin's own `theme` option). */
+/**
+ * `resolveKbachConfig()` + `setTheme()` in one call — the usual entry point
+ * from app code. Returns the resolved theme (e.g. to also hand to the Vite
+ * plugin's own `theme` option).
+ *
+ * Also re-syncs the DOM to the CURRENT dark-mode state right after
+ * `setTheme()` — see `resyncDomWithActiveTheme`'s own doc comment for why
+ * this is required, not optional: without it, an app that configures
+ * `darkMode: 'attribute'`/`'class'` here can silently never apply its
+ * `dark:` classes on initial load (even though `useTheme().isDark` reads
+ * correctly) until some later, unrelated dark-mode event happens to fire.
+ */
 export function applyKbachConfig(config: KbachConfig): ThemeConfig {
   const theme = resolveKbachConfig(config);
   setTheme(theme);
+  resyncDomWithActiveTheme();
   return theme;
 }

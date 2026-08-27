@@ -10,7 +10,6 @@ mod theme;
 
 use serde::Serialize;
 use std::collections::BTreeMap;
-use theme::ThemeConfig;
 use wasm_bindgen::prelude::*;
 
 #[derive(Debug, Serialize)]
@@ -43,9 +42,9 @@ struct GenerateCssResult {
 /// yields the original class string with no rules, rather than panicking
 /// across the FFI boundary.
 pub(crate) fn resolve_class_string(class_string: &str, theme_json: &str) -> String {
-    let theme: ThemeConfig = match serde_json::from_str(theme_json) {
-        Ok(t) => t,
-        Err(_) => {
+    let theme = match theme::parse_theme_cached(theme_json) {
+        Some(t) => t,
+        None => {
             let fallback = GenerateCssResult { class_name: class_string.to_string(), rules: vec![] };
             return serde_json::to_string(&fallback).unwrap_or_else(|_| "{\"className\":\"\",\"rules\":[]}".to_string());
         }
@@ -106,9 +105,9 @@ pub fn generate_css(class_string: &str, theme_json: &str) -> String {
 /// called from the Android JNI bridge or `@kbach/react` (real DOM, `className`
 /// works there natively) — Expo Web's own dedicated entry point only.
 pub(crate) fn resolve_class_string_for_attribute(class_string: &str, theme_json: &str) -> String {
-    let theme: ThemeConfig = match serde_json::from_str(theme_json) {
-        Ok(t) => t,
-        Err(_) => {
+    let theme = match theme::parse_theme_cached(theme_json) {
+        Some(t) => t,
+        None => {
             let fallback = GenerateCssResult { class_name: class_string.to_string(), rules: vec![] };
             return serde_json::to_string(&fallback).unwrap_or_else(|_| "{\"className\":\"\",\"rules\":[]}".to_string());
         }

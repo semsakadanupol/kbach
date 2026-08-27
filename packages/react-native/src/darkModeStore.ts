@@ -99,6 +99,24 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
+/**
+ * Re-applies the CURRENT `isDark` value to the DOM (Expo Web only — a
+ * genuine no-op on real native, same as `applyToDom` itself) under whatever
+ * `getTheme().darkMode` strategy is active right now, with no change to
+ * `mode`/`isDark` themselves, so it deliberately does NOT `notify()`.
+ * Mirrors @kbach/react's identical `resyncDomWithActiveTheme` — see that
+ * one's own doc comment for the full race it fixes: this module's initial
+ * `applyToDom(isDark)` call (above) runs at IMPORT time against whichever
+ * `darkMode` strategy `defaultTheme` had at that moment, which on Expo Web
+ * is BEFORE an app's own `applyKbachConfig({darkMode: 'attribute'})` call
+ * (in config.ts) has had a chance to switch it — without this, that config
+ * call would silently never get its `dark:` classes to apply on initial
+ * load, even though `useTheme().isDark` already reads correctly.
+ */
+export function resyncDomWithActiveTheme(): void {
+  applyToDom(isDark);
+}
+
 export function getGlobalDarkMode(): boolean {
   return isDark;
 }

@@ -120,16 +120,62 @@ interface Spec extends TurboModule {
  * them directly via `resolveStyleJsWithWarnings`. Both paths converge here
  * so call sites never need to know which engine actually resolved anything.
  */
+// resolveStyle's result is a pure function of (classString, pressed,
+// colorScheme, width, the active theme) — every render of every styled
+// element calls this fresh, though, with no way to skip the work even when
+// none of those inputs actually changed since the last call (jsx()/jsxs()
+// are plain functions invoked by the JSX transform on every render, not a
+// component that could hold its own useMemo — see jsxRuntimeCore.ts's own
+// doc comments). This cache fills that gap: a `dark:`/breakpoint: element
+// re-rendering because darkModeStore ticked, or a parent re-rendering with
+// an unchanged static className, both hit the same cached style object
+// instead of re-crossing the JNI/WASM bridge and re-resolving from scratch.
+// Cleared wholesale (not evicted one entry at a time) once it exceeds
+// RESOLVE_STYLE_CACHE_MAX — bounds memory for an app that builds many
+// distinct/one-off class strings (or sweeps `width` through many values
+// during a resize/rotation animation) without needing real LRU bookkeeping;
+// the cost of an occasional full-cache miss is far cheaper than the
+// unbounded growth a never-evicted cache would risk.
+const RESOLVE_STYLE_CACHE_MAX = 500;
+const resolveStyleCache = new Map<string, StyleObject>();
+// Reference, not content — getThemeJson() returns the SAME string instance
+// until setTheme() reassigns it (see theme.ts), so comparing references is
+// enough to detect "the theme changed since the cache was built" for free.
+let cachedForThemeJson: string | null = null;
+
 export function resolveStyle(classString: string, pressed = false): StyleObject {
   const colorScheme = getGlobalDarkMode() ? 'dark' : 'light';
   const width = Dimensions.get('window').width;
+  const themeJson = getThemeJson();
+  if (themeJson !== cachedForThemeJson) {
+    resolveStyleCache.clear();
+    cachedForThemeJson = themeJson;
+  }
+
+  const cacheKey = `${classString} ${pressed} ${colorScheme} ${width}`;
+  const cached = resolveStyleCache.get(cacheKey);
+  // A fresh shallow copy on every return (cached or not) — callers
+  // downstream (resolvedStyleFor's `Object.assign(resolved, layoutOverrides)`
+  // in jsxRuntimeCore.ts) mutate the object this returns in place, which was
+  // always safe when every call produced a genuinely fresh object; sharing
+  // the SAME cached object across calls would let one caller's mutation leak
+  // into every other cache hit for the same key.
+  if (cached !== undefined) return { ...cached };
+
+  const style = resolveStyleUncached(classString, pressed, colorScheme, width, themeJson);
+  if (resolveStyleCache.size >= RESOLVE_STYLE_CACHE_MAX) resolveStyleCache.clear();
+  resolveStyleCache.set(cacheKey, style);
+  return { ...style };
+}
+
+function resolveStyleUncached(classString: string, pressed: boolean, colorScheme: string, width: number, themeJson: string): StyleObject {
   const KbachModule = TurboModuleRegistry.get<Spec>('KbachModule');
   if (!KbachModule) {
     const { style, warnings } = resolveStyleJsWithWarnings(classString, getTheme(), colorScheme, pressed, width);
     warnIfDev(classString, warnings);
     return style;
   }
-  const json = KbachModule.resolveStyle(classString, getThemeJson(), colorScheme, pressed, width);
+  const json = KbachModule.resolveStyle(classString, themeJson, colorScheme, pressed, width);
   const style = JSON.parse(json) as StyleObject & { __kbachWarnings?: string[] };
   const warnings = style.__kbachWarnings;
   if (warnings !== undefined) {

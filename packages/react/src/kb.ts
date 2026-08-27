@@ -105,6 +105,25 @@ function ensureResetInjected(): void {
   document.head.insertBefore(el, document.head.firstChild);
 }
 
+// generateCss()'s result is a pure function of (classString, the active
+// theme) — kb() is meant to be called on every render of a component using
+// dynamic classes, though, so without this, the same className crossing the
+// WASM boundary and getting fully re-resolved (and re-JSON.parsed) on every
+// single render would be the norm, not the exception, for any component
+// that calls kb() at all. injectRule() below is already a cheap no-op for a
+// rule it's seen before, but reaching that point still required the full
+// resolve first — this cache skips resolving at all on a repeat call.
+// Cleared wholesale once it exceeds KB_CACHE_MAX, same bounded-not-evicted
+// tradeoff `resolveStyle()`'s cache in @kbach/react-native's nativeBridge.ts
+// makes, for the same reason: bounds memory for an app that builds many
+// distinct/one-off class strings, at the cost of an occasional full miss.
+const KB_CACHE_MAX = 500;
+const kbCache = new Map<string, GenerateCssResult>();
+// Reference, not content — getThemeJson() returns the SAME string instance
+// until setTheme() reassigns it (see theme.ts), so comparing references is
+// enough to detect "the theme changed since the cache was built" for free.
+let cachedForThemeJson: string | null = null;
+
 /**
  * Resolves a Kbach class string via the Rust/WASM engine, cascade-order-safe
  * injects the resulting CSS rules into a single `<style data-kbach>` tag,
@@ -113,8 +132,21 @@ function ensureResetInjected(): void {
  * Must be called after `await initKbach()` resolves — see wasmLoader.ts.
  */
 export function kb(classString: string): string {
-  const json = generateCss(classString, getThemeJson());
-  const { className, rules } = JSON.parse(json) as GenerateCssResult;
+  const themeJson = getThemeJson();
+  if (themeJson !== cachedForThemeJson) {
+    kbCache.clear();
+    cachedForThemeJson = themeJson;
+  }
+
+  let result = kbCache.get(classString);
+  if (result === undefined) {
+    const json = generateCss(classString, themeJson);
+    result = JSON.parse(json) as GenerateCssResult;
+    if (kbCache.size >= KB_CACHE_MAX) kbCache.clear();
+    kbCache.set(classString, result);
+  }
+
+  const { className, rules } = result;
   if (!runtimeCSSDisabled) {
     ensureResetInjected();
     for (const { rule, order } of rules) {
@@ -124,7 +156,7 @@ export function kb(classString: string): string {
   return className;
 }
 
-/** Exported for tests only — resets injected-rule tracking, the <style> tag, the reset tag, and the disableRuntimeCSS() flag. */
+/** Exported for tests only — resets injected-rule tracking, the <style> tag, the reset tag, the disableRuntimeCSS() flag, and the resolved-className cache. */
 export function _resetForTests(): void {
   sheetKeys.length = 0;
   ruleOrderByKey.clear();
@@ -133,4 +165,6 @@ export function _resetForTests(): void {
   runtimeCSSDisabled = false;
   resetChecked = false;
   document.getElementById(RESET_STYLE_ID)?.remove();
+  kbCache.clear();
+  cachedForThemeJson = null;
 }

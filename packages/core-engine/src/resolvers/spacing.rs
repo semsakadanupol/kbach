@@ -243,14 +243,29 @@ mod tests {
     }
 
     #[test]
-    fn negative_margin_has_no_form_for_full_auto_or_arbitrary_values() {
-        // Real Tailwind doesn't generate "-m-full"/"-m-auto" at all, and an
-        // arbitrary negative is written directly ("mt-[-10px]"), not via
-        // this "-" convention — both are unresolvable here, not a bug.
+    fn negative_margin_has_no_form_for_full_or_auto() {
+        // Real Tailwind doesn't generate "-m-full"/"-m-auto" at all —
+        // unresolvable here too, not a bug.
         let t = theme();
         assert_eq!(resolve(&parse_class("-mt-full"), &t), None);
         assert_eq!(resolve(&parse_class("-mt-auto"), &t), None);
-        assert_eq!(resolve(&parse_class("-mt-[10px]"), &t), None);
+    }
+
+    #[test]
+    fn negative_leading_dash_also_works_on_an_arbitrary_margin_value() {
+        // A Kbach extension beyond real Tailwind (which only supports the
+        // sign written inside the brackets, "mt-[-10px]") — "-mt-[10px]"
+        // resolves to the same negated value via a calc(value * -1) wrap,
+        // which stays correct even for a non-numeric-literal arbitrary
+        // value like var(...)/calc(...), unlike a plain string "-" prefix.
+        let t = theme();
+        assert_eq!(resolve(&parse_class("-mt-[10px]"), &t), Some(vec![decl("margin-top", "calc(10px * -1)")]));
+        assert_eq!(
+            resolve(&parse_class("-mt-[var(--gap)]"), &t),
+            Some(vec![decl("margin-top", "calc(var(--gap) * -1)")]),
+        );
+        // Both writing styles now produce the same effective value.
+        assert_eq!(resolve(&parse_class("mt-[-10px]"), &t), Some(vec![decl("margin-top", "-10px")]));
     }
 
     #[test]

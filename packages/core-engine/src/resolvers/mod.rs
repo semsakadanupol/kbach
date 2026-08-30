@@ -104,19 +104,28 @@ pub(crate) fn resolve_length(theme: &ThemeConfig, parsed: &ParsedClass) -> Optio
 /// `resolve_length`, but honoring `parsed.negative` (real Tailwind's
 /// leading-"-" convention, e.g. "-mt-4") — used by the specific utilities
 /// real Tailwind actually allows negative values on: margin, inset/top/
-/// right/bottom/left, and (web-only) translate-x/y. Deliberately narrower
-/// than `resolve_length`: negation only applies to the NUMERIC spacing
-/// scale, matching real Tailwind exactly — "full"/"auto" and arbitrary
-/// values have no negative form there either (an arbitrary negative is
-/// written directly, "mt-[-10px]", not "-mt-[10px]"), so this returns
-/// `None` for those when `parsed.negative` is set rather than emitting
-/// nonsensical CSS like "-auto" or "-100%".
+/// right/bottom/left, and (web-only) translate-x/y.
+///
+/// An arbitrary value also honors the leading dash (`-mt-[10px]` resolves
+/// the exact same as `mt-[-10px]`) — this is a deliberate Kbach extension
+/// beyond real Tailwind, which only supports the sign written inside the
+/// brackets. Wrapped as `calc(<value> * -1)` rather than a plain string
+/// negation (`"-" + value`) since an arbitrary value isn't always a bare
+/// number-plus-unit — it can be `calc(...)`, `var(...)`, or any other CSS
+/// expression, and prefixing those with a literal "-" produces invalid CSS
+/// (`-var(--x)` doesn't mean anything); `calc(value * -1)` is valid and
+/// correctly negates any of those shapes uniformly, at the cost of slightly
+/// more verbose output than a plain sign flip for the common simple case.
+/// "full"/"auto" (on the NAMED scale, not arbitrary) still have no negative
+/// form — returns `None` for those when `parsed.negative` is set rather
+/// than emitting nonsensical CSS like "-auto" or "-100%".
 pub(crate) fn resolve_negatable_length(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<String> {
     if !parsed.negative {
         return resolve_length(theme, parsed);
     }
     if parsed.is_arbitrary {
-        return None;
+        let value = parsed.value.as_deref()?;
+        return Some(format!("calc({value} * -1)"));
     }
     let value = parsed.value.as_deref()?;
     let px = spacing_px(theme, value)?;

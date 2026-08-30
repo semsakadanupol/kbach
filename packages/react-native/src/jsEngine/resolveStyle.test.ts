@@ -338,6 +338,18 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('-top-4', t, 'light', false, W).top).toBe(-16);
   });
 
+  it('resolves negative margin/inset/translate via the leading dash on an arbitrary value too', () => {
+    // Both writing styles now work — "-mt-[10px]" (leading dash) and
+    // "mt-[-10px]" (sign inside the brackets) — and resolve to the exact
+    // same real native number via the calc(value * -1) -> reduceConstantMath
+    // pipeline, not just as a raw unresolved string.
+    const t = theme();
+    expect(resolveStyleJs('-mt-[10px]', t, 'light', false, W).marginTop).toBe(-10);
+    expect(resolveStyleJs('mt-[-10px]', t, 'light', false, W).marginTop).toBe(-10);
+    expect(resolveStyleJs('-top-[1px]', t, 'light', false, W).top).toBe(-1);
+    expect(resolveStyleJs('-translate-x-[10px]', t, 'light', false, W).transform).toEqual([{ translateX: -10 }]);
+  });
+
   it('resolves negative z-index and order as a literal dash prefix', () => {
     expect(resolveStyleJs('-z-10', theme(), 'light', false, W).zIndex).toBe(-10);
     expect(resolveStyleJs('-order-1', theme(), 'light', false, W).order).toBe(-1);

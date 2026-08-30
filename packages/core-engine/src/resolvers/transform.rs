@@ -417,6 +417,19 @@ mod tests {
     }
 
     #[test]
+    fn resolves_negative_translate_via_the_leading_dash_on_an_arbitrary_value_too() {
+        // Unlike rotate/skew's angle() (which ignores parsed.negative for
+        // arbitrary values — a sign is already expressible directly inside
+        // the brackets), translate-x/y go through resolve_negatable_length,
+        // which now accepts the leading-dash form on arbitrary values too.
+        let t = theme();
+        assert_eq!(
+            resolve(&parse_class("-translate-x-[10px]"), &t),
+            Some(vec![decl("--kb-translate-x", "calc(10px * -1)"), decl("transform", TRANSFORM_COMPOSE_CPU)]),
+        );
+    }
+
+    #[test]
     fn resolves_3d_rotate_translate_and_scale() {
         let t = theme();
         assert_eq!(

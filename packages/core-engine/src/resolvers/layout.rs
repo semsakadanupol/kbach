@@ -456,6 +456,16 @@ mod tests {
     }
 
     #[test]
+    fn resolves_negative_inset_via_the_leading_dash_on_an_arbitrary_value_too() {
+        // Both writing styles are accepted and produce the same effective
+        // value — "-top-[1px]" (leading dash) and "top-[-1px]" (sign inside
+        // the brackets).
+        let t = theme();
+        assert_eq!(resolve(&parse_class("-top-[1px]"), &t), Some(vec![decl("top", "calc(1px * -1)")]));
+        assert_eq!(resolve(&parse_class("top-[-1px]"), &t), Some(vec![decl("top", "-1px")]));
+    }
+
+    #[test]
     fn resolves_negative_z_index_and_order_as_a_literal_dash_prefix() {
         let t = theme();
         assert_eq!(resolve(&parse_class("-z-10"), &t), Some(vec![decl("z-index", "-10")]));

@@ -55,15 +55,28 @@ export function resolveLength(theme: ThemeConfig, parsed: ParsedClass): string |
  * `resolveLength`, but honoring `parsed.negative` (real Tailwind's
  * leading-"-" convention, e.g. "-mt-4") — used by the specific utilities
  * real Tailwind actually allows negative values on: margin and inset/top/
- * right/bottom/left. Negation only applies to the NUMERIC spacing scale
- * (matching real Tailwind) — "full"/"auto" and arbitrary values have no
- * negative form there either, so this returns `null` for those when
- * `parsed.negative` is set rather than emitting nonsensical CSS like
- * "-auto".
+ * right/bottom/left.
+ *
+ * An arbitrary value also honors the leading dash (`-mt-[10px]` resolves
+ * the same as `mt-[-10px]`) — a deliberate Kbach extension beyond real
+ * Tailwind, mirroring `resolvers/mod.rs`'s identical `resolve_negatable_length`
+ * on the Rust/WASM side. Wrapped as `calc(<value> * -1)` rather than a
+ * plain string negation, since an arbitrary value isn't always a bare
+ * number-plus-unit (it can be `calc(...)`, a CSS variable reference, ...)
+ * and prefixing those with a literal "-" produces nonsense. This resolves
+ * correctly on native too: `resolveStyle.ts`'s `rnStyleValue` already
+ * reduces a constant-only `calc()` (via `reduceConstantMath`) to a real
+ * number for a numeric-length property — `calc(10px * -1)` reduces to
+ * `-10`, the exact same value `mt-[-10px]` itself produces — no separate
+ * native-specific handling needed. "full"/"auto" (on the NAMED scale, not
+ * arbitrary) still have no negative form — returns `null` for those.
  */
 export function resolveNegatableLength(theme: ThemeConfig, parsed: ParsedClass): string | null {
   if (!parsed.negative) return resolveLength(theme, parsed);
-  if (parsed.isArbitrary) return null;
+  if (parsed.isArbitrary) {
+    const value = parsed.value;
+    return value === null ? null : `calc(${value} * -1)`;
+  }
   const value = parsed.value;
   if (value === null) return null;
   const px = spacingPx(theme, value);

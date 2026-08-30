@@ -27,3 +27,11 @@ export type { ThemeMode } from './darkModeStore';
 
 export { useColors } from './useColors';
 export type { ColorsAPI, ColorScale } from './useColors';
+
+// clsx — a plain, platform-agnostic utility with nothing React-specific
+// about it, shared with @kbach/react-native rather than duplicated (see
+// @kbach/core's own doc comment). Bundled directly into this package's own
+// dist output (not left as an external runtime dependency), so installing
+// @kbach/react alone is enough — no separate @kbach/core install needed.
+export { clsx } from '@kbach/core';
+export type { ClassValue, ClassDictionary, ClassArray } from '@kbach/core';

@@ -50,3 +50,12 @@ export type { ColorsAPI, ColorScale } from './useColors';
 // so consuming code doesn't need a platform branch just to set one.
 export { setDynamicToken, getDynamicToken, deleteDynamicToken, subscribeDynamicTokens } from './dynamicTokens';
 export { useDynamicToken } from './useDynamicToken';
+
+// clsx — a plain, platform-agnostic utility with nothing web-specific
+// about it, shared with @kbach/react rather than duplicated (see
+// @kbach/core's own doc comment). Bundled directly into this package's own
+// dist output (not left as an external runtime dependency), so installing
+// @kbach/react-native alone is enough — no separate @kbach/core install
+// needed.
+export { clsx } from '@kbach/core';
+export type { ClassValue, ClassDictionary, ClassArray } from '@kbach/core';

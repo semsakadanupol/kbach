@@ -446,7 +446,14 @@ function ReactiveElement({
           resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed, layoutOverrides, states)
       : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false, layoutOverrides, states);
 
-  return makeElement(isStaticChildren, hostType, { ...hostRestWithLayout, style: finalStyle }, elementKey);
+  // className is put back on the props alongside the computed style — see
+  // processElement's own doc comment on this same pattern for why.
+  return makeElement(
+    isStaticChildren,
+    hostType,
+    { ...hostRestWithLayout, className: classStrRaw, style: finalStyle },
+    elementKey,
+  );
 }
 
 function processElement(
@@ -467,6 +474,20 @@ function processElement(
   if (typeof classStrRaw !== 'string') {
     return makeElement(isStaticChildren, type, rawProps, key);
   }
+
+  // `type` here can be a REAL RN host primitive (View, Text, Pressable, an
+  // Animated.* wrapper, ...) or a plain component YOU wrote — jsx()/jsxs()
+  // can't tell those apart (RN host components are real component
+  // references here, not plain strings the way "div" is on the web, so
+  // there's no cheap typeof check that would draw the line). Rather than
+  // guess, `className` is put back on the outgoing props below ALONGSIDE
+  // the computed `style` — a host primitive already gets everything it
+  // needs from `style` and silently ignores the extra unrecognized
+  // `className` prop (RN's native view managers never error on a prop
+  // they don't declare), while a custom component like `<PrimaryBg
+  // className="...">` now genuinely receives `className` again, exactly
+  // as its own props type expects — no manual `style`-forwarding required
+  // just to make a caller's className reach the component at all.
 
   if (
     DARK_MODIFIER_RE.test(classStrRaw) ||
@@ -497,7 +518,7 @@ function processElement(
       ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed, undefined, staticStates)
       : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false, undefined, staticStates);
 
-  return makeElement(isStaticChildren, type, { ...rest, style: finalStyle }, key);
+  return makeElement(isStaticChildren, type, { ...rest, className: classStrRaw, style: finalStyle }, key);
 }
 
 /**

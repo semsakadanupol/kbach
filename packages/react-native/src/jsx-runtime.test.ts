@@ -110,12 +110,16 @@ describe('jsx-runtime (react-native)', () => {
     mountedRenderers.length = 0;
   });
 
-  it('resolves a plain-string className into the style prop, not className', async () => {
+  it('resolves a plain-string className into the style prop, and puts className back on props too (for custom components)', async () => {
     const { jsx } = await import('./jsx-runtime');
     const el = jsx('View', { className: 'flex items-center' }, undefined);
     expect(mockResolveStyle).toHaveBeenCalledWith('flex items-center', false);
     expect((el as any).props.style).toEqual({ resolved: 'flex items-center', pressed: false, dark: false });
-    expect((el as any).props.className).toBeUndefined();
+    // A real host primitive ignores this extra prop; a custom component
+    // (which jsx()/jsxs() can't distinguish from a host one here) needs it
+    // to actually receive `className` at all — see jsxRuntimeCore.ts's own
+    // doc comment on this exact tradeoff.
+    expect((el as any).props.className).toBe('flex items-center');
   });
 
   it('merges an explicit inline style prop AFTER the resolved style (explicit wins on overlap)', async () => {
@@ -145,6 +149,26 @@ describe('jsx-runtime (react-native)', () => {
     const el = jsx('View', { className: classNameFn }, undefined);
     expect(mockResolveStyle).not.toHaveBeenCalled();
     expect((el as any).props.className).toBe(classNameFn);
+  });
+
+  it('gives a custom component (not a host primitive) a real className prop, not just a computed style', async () => {
+    // This is the actual bug class this pattern fixes: `type` here is a
+    // plain function, not "View" — jsx()/jsxs() can't tell that apart from
+    // a host primitive, so BOTH the computed style AND the original
+    // className need to reach it, since only the component's own code
+    // decides which one it actually uses.
+    const CustomWrapper = (_props: { className?: string }) => null;
+    const { jsx } = await import('./jsx-runtime');
+    const el = jsx(CustomWrapper, { className: 'flex-1 items-center' }, undefined);
+    expect((el as any).props.className).toBe('flex-1 items-center');
+    expect((el as any).props.style).toEqual({ resolved: 'flex-1 items-center', pressed: false, dark: false });
+  });
+
+  it('still puts className on props for a dark:-qualified class routed through ReactiveElement', async () => {
+    const { jsx } = await import('./jsx-runtime');
+    const el = mount(jsx('View', { className: 'dark:bg-neutral-11' }, undefined) as any);
+    const view = el.root.findByType('View' as any);
+    expect(view.props.className).toBe('dark:bg-neutral-11');
   });
 
   it('passes through null type and symbol type untouched', async () => {

@@ -58,7 +58,14 @@ function processElement(
   const resolved = resolveClassName(classStrRaw);
   const dataSet = { ...(userDataSet as Record<string, unknown> | undefined), kb: resolved };
 
-  return makeElement(isStaticChildren, type, { ...rest, dataSet }, key);
+  // className goes back onto the outgoing props alongside dataSet — same
+  // reasoning as jsxRuntimeCore.ts's native processElement: `type` can be
+  // a real react-native-web host primitive (which only ever reads
+  // dataSet.kb here, and ignores the extra className prop) or a custom
+  // component you wrote (which needs className to actually arrive, or a
+  // caller's classes on it silently vanish — see that file's doc comment
+  // for the full native-side writeup of this same bug).
+  return makeElement(isStaticChildren, type, { ...rest, className: classStrRaw, dataSet }, key);
 }
 
 export function createJsxFunctionsWeb(resolveClassName: ResolveClassNameFn) {

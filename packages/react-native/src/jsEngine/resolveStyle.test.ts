@@ -322,6 +322,16 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('skew-x-12', theme(), 'light', false, W).transform).toEqual([{ skewX: '12deg' }]);
   });
 
+  it('resolves translate-x/y fractions to a percentage (the left-1/2 -translate-x-1/2 centering trick)', () => {
+    // Regression: translate-x/y used to go through resolveNegatableLength
+    // (no fraction support) instead of resolveNegatableSize, so
+    // "translate-x-1/2" silently failed to resolve at all — Number("1/2")
+    // is NaN — dropping the whole classic centering pattern's transform half.
+    expect(resolveStyleJs('translate-x-1/2', theme(), 'light', false, W).transform).toEqual([{ translateX: '50%' }]);
+    expect(resolveStyleJs('-translate-x-1/2', theme(), 'light', false, W).transform).toEqual([{ translateX: '-50%' }]);
+    expect(resolveStyleJs('translate-y-1/2', theme(), 'light', false, W).transform).toEqual([{ translateY: '50%' }]);
+  });
+
   it('resolves italic but not DOM-only typography-completeness utilities', () => {
     const style = resolveStyleJs('italic decoration-2 underline-offset-4 indent-4', theme(), 'light', false, W);
     expect(style.fontStyle).toBe('italic');

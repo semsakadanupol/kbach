@@ -69,7 +69,7 @@
 //! instead (`scale-x-[-1]`), which already works today since arbitrary
 //! values can contain a literal "-".
 
-use super::{decl, resolve_negatable_length, Declaration};
+use super::{decl, resolve_negatable_length, resolve_negatable_size, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
 
@@ -224,11 +224,18 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
             Some(composed(vec![decl("--kb-skew-y", &format!("skewY({deg})"))]))
         }
         "translate-x" => {
-            let v = resolve_negatable_length(theme, parsed)?;
+            // `resolve_negatable_size`, not `resolve_negatable_length` — real
+            // Tailwind gives translate-x/y the same percentage-fraction scale
+            // as top/right/bottom/left (`translate-x-1/2` -> `50%`), which is
+            // exactly what the classic `left-1/2 -translate-x-1/2` centering
+            // trick relies on. Using the plain (non-fraction) helper here
+            // silently dropped the declaration entirely for any `-1/2`-style
+            // value, since a bare `"1/2".parse::<f64>()` fails.
+            let v = resolve_negatable_size(theme, parsed)?;
             Some(composed(vec![decl("--kb-translate-x", &v)]))
         }
         "translate-y" => {
-            let v = resolve_negatable_length(theme, parsed)?;
+            let v = resolve_negatable_size(theme, parsed)?;
             Some(composed(vec![decl("--kb-translate-y", &v)]))
         }
         "origin" => {
@@ -271,11 +278,13 @@ pub fn native_resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<D
         "backface-visible" => Some(vec![decl("backface-visibility", "visible")]),
         "backface-hidden" => Some(vec![decl("backface-visibility", "hidden")]),
         "translate-x" => {
-            let v = resolve_negatable_length(theme, parsed)?;
+            // Same fraction-scale fix as the web `resolve()` above — see its
+            // own doc comment on this arm.
+            let v = resolve_negatable_size(theme, parsed)?;
             Some(vec![decl("transform-op-translate-x", &v)])
         }
         "translate-y" => {
-            let v = resolve_negatable_length(theme, parsed)?;
+            let v = resolve_negatable_size(theme, parsed)?;
             Some(vec![decl("transform-op-translate-y", &v)])
         }
         "scale" => {
@@ -385,6 +394,32 @@ mod tests {
         assert_eq!(
             resolve(&parse_class("translate-x-[10px]"), &t),
             Some(vec![decl("--kb-translate-x", "10px"), decl("transform", TRANSFORM_COMPOSE_CPU)]),
+        );
+    }
+
+    #[test]
+    fn resolves_translate_fractions_to_a_percentage_for_the_left_half_translate_x_half_centering_trick() {
+        // Regression: translate-x/y used to go through resolve_negatable_length
+        // (no fraction support) instead of resolve_negatable_size, so
+        // "translate-x-1/2" silently failed to resolve at all — a bare
+        // "1/2".parse::<f64>() isn't a number — dropping the WHOLE
+        // classic `left-1/2 -translate-x-1/2` centering pattern.
+        let t = theme();
+        assert_eq!(
+            resolve(&parse_class("translate-x-1/2"), &t),
+            Some(vec![decl("--kb-translate-x", "50%"), decl("transform", TRANSFORM_COMPOSE_CPU)]),
+        );
+        assert_eq!(
+            resolve(&parse_class("-translate-x-1/2"), &t),
+            Some(vec![decl("--kb-translate-x", "-50%"), decl("transform", TRANSFORM_COMPOSE_CPU)]),
+        );
+        assert_eq!(
+            resolve(&parse_class("translate-y-1/3"), &t),
+            Some(vec![decl("--kb-translate-y", "33.333333%"), decl("transform", TRANSFORM_COMPOSE_CPU)]),
+        );
+        assert_eq!(
+            native_resolve(&parse_class("-translate-x-1/2"), &t),
+            Some(vec![decl("transform-op-translate-x", "-50%")]),
         );
     }
 

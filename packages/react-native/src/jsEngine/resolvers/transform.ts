@@ -21,7 +21,7 @@
  * CPU/GPU compositing distinction in RN's style system) all stay
  * unresolved here, same as on the Rust/native-module side.
  */
-import { decl, resolveNegatableLength, type Declaration } from '../shared';
+import { decl, resolveNegatableSize, type Declaration } from '../shared';
 import type { ParsedClass } from '../parser';
 import type { ThemeConfig } from '../../theme';
 
@@ -51,11 +51,19 @@ export function resolveNative(parsed: ParsedClass, theme: ThemeConfig): Declarat
     case 'backface-hidden':
       return [decl('backface-visibility', 'hidden')];
     case 'translate-x': {
-      const v = resolveNegatableLength(theme, parsed);
+      // resolveNegatableSize, not resolveNegatableLength — real Tailwind
+      // gives translate-x/y the same percentage-fraction scale as
+      // top/right/bottom/left (translate-x-1/2 -> 50%), which the classic
+      // `left-1/2 -translate-x-1/2` centering trick relies on. The plain
+      // helper silently dropped the declaration entirely for any -1/2-style
+      // value, since a bare "1/2".parse<f64>() (its Rust counterpart) /
+      // Number("1/2") (here) both fail. Mirrors the same fix in
+      // resolvers/transform.rs's `resolve`/`native_resolve`.
+      const v = resolveNegatableSize(theme, parsed);
       return v === null ? null : [decl('transform-op-translate-x', v)];
     }
     case 'translate-y': {
-      const v = resolveNegatableLength(theme, parsed);
+      const v = resolveNegatableSize(theme, parsed);
       return v === null ? null : [decl('transform-op-translate-y', v)];
     }
     case 'scale': {

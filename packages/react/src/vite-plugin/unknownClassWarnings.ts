@@ -9,33 +9,10 @@
 // literal substring, which is good enough here).
 import { join } from 'path';
 import { scanDir } from './scan';
+import { blue, bold, gray, green, highlight, kbachTag } from '../terminalWarn';
 
 const CSS_CLASS_SELECTOR_RE = /\.(-?[a-zA-Z_][a-zA-Z0-9_-]*)/g;
 const CSS_FILE_RE = /\.(css|scss|sass|less)$/;
-
-// Plain ANSI escapes — no chalk/picocolors dependency needed for a single
-// warning. No-op when stdout isn't a color-capable TTY (CI logs, redirected
-// output) or NO_COLOR is set, so raw escape codes never leak into log files.
-//
-// Styled after Vite's own startup banner (green arrow, bold labels, sparing
-// color) rather than old-kbach's yellow-message scheme — yellow foreground
-// text and SGR "dim" are both notoriously low-contrast on light-theme
-// terminals (yellow-on-white is close to unreadable; "dim" scales intensity
-// relative to the terminal's own foreground rather than picking an actual
-// color, so it's unpredictable). `gray` below uses the explicit "bright
-// black" ANSI code instead of dim for the de-emphasized sentence text —
-// a specific, requestable color rather than an intensity modifier, so it
-// renders consistently across themes instead of at the terminal's mercy.
-const useColor = !!process.stdout?.isTTY && !process.env.NO_COLOR;
-const paint = (code: string, s: string) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
-const green = (s: string) => paint('32', s);
-const blue = (s: string) => paint('34', s);
-const white = (s: string) => paint('97', s);
-const gray = (s: string) => paint('90', s);
-const bold = (s: string) => paint('1', s);
-const ARROW = () => green('→');
-const TAG = () => bold(green('[kbach]'));
-const highlight = (s: string) => bold(white(s));
 
 // Most terminals (VS Code's integrated terminal, iTerm2, Windows Terminal, …)
 // auto-detect a bare `path:line:column` and turn it into a clickable link
@@ -119,6 +96,6 @@ export function warnIfUnknownClass(
   // for clickable file locations (e.g. TypeScript's own diagnostics).
   const location = pos ? `${blue(filePath)}${green(`:${pos.line}:${pos.column}`)}` : blue(filePath);
   console.warn(
-    `${ARROW()} ${TAG()} ${gray('Unknown class')} ${highlight(token)} ${gray('— no Kbach utility or project CSS rule matches it. Typo?')}\n  ${bold('at')} ${location}`,
+    `${kbachTag()} ${gray('Unknown class')} ${highlight(token)} ${gray('— no Kbach utility or project CSS rule matches it. Typo?')}\n  ${bold('at')} ${location}`,
   );
 }

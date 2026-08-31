@@ -41,9 +41,21 @@ export function ThemeProvider({ children, defaultMode = 'system' }: ThemeProvide
     mountedProviderCount++;
     if (mountedProviderCount > 1 && !warnedMultipleProviders && process.env.NODE_ENV !== 'production') {
       warnedMultipleProviders = true;
+      // `%c` — real CSS applied to the console line, a badge the same way
+      // React DevTools/Vite's own browser-console messages brand theirs.
+      // Safe unconditionally here specifically because this whole branch
+      // only ever runs inside a mounted effect, which never executes during
+      // SSR/RSC rendering — always a real browser console, never Node's
+      // (which prints `%c` and the CSS string literally, with no actual
+      // styling — see @kbach/react-native's ThemeProvider.tsx for a warning
+      // that DOES need to render correctly outside a browser, and stays
+      // plain text for exactly that reason).
       console.warn(
-        '[kbach] Multiple <ThemeProvider> instances are mounted at once. ' +
-          'Dark-mode state is one global store useTheme() reads everywhere, not scoped per-provider, so their defaultMode seeds will fight over the same state.',
+        '%c[Kbach]%c Multiple <ThemeProvider> instances are mounted at once.\n' +
+          'Dark mode is one global store — useTheme() reads it everywhere, not scoped per provider — so their defaultMode seeds will fight over the same state.\n' +
+          'Mount exactly one <ThemeProvider>, as high in the tree as convenient.',
+        'background:#7c3aed;color:#fff;font-weight:600;padding:1px 6px;border-radius:3px',
+        'font-weight:400',
       );
     }
     return () => {

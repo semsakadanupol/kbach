@@ -202,7 +202,11 @@ function warnIfDev(classString: string, warnings: string[]): void {
   if (warnings.length === 0) return;
   if (typeof __DEV__ !== 'undefined' && !__DEV__) return;
   for (const warning of warnings) {
-    const message = `${warning} (from className "${classString}")`;
+    // The offending className on its own trailing line — same "one fact
+    // per line" scan-ability the warning text itself already uses (see
+    // rn_style_value/rnStyleValue's own doc comment), rather than a
+    // trailing parenthetical tacked onto a full paragraph.
+    const message = `${warning}\nFrom className: "${classString}"`;
     if (warnedMessages.has(message)) continue;
     warnedMessages.add(message);
     console.warn(message);

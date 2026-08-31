@@ -66,6 +66,17 @@ fn is_recognized_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> bool {
     MARKER_UTILITIES.contains(&parsed.utility.as_str()) || resolve_utility(parsed, theme).is_some()
 }
 
+/// The one typo-warning message, shared by both call sites below (an
+/// inactive-modifier miss and a native-unresolvable miss) rather than two
+/// copies of the same format! drifting independently. Rust/JNI-only —
+/// deliberately NOT ported to the jsEngine (Expo Go fallback), which has no
+/// equivalent warning at all yet (see resolveStyle.ts's own doc comment for
+/// why: it would need the full web dispatcher as its "is this a typo"
+/// ground truth, which this jsEngine directory doesn't have a port of).
+fn typo_warning(token: &str) -> String {
+    format!("[Kbach] \"{token}\" doesn't match any known Kbach utility — typo? (skipped)")
+}
+
 /// Whether a single modifier's condition currently holds, for the three
 /// modifier kinds native actually understands — `None` for anything else
 /// (hover/group/peer/aria/container/starting/...), which `resolve_style`
@@ -205,13 +216,18 @@ fn rn_style_value(property: &str, value: &str) -> (Option<Value>, Option<String>
         return (Some(Value::Number(n)), None);
     }
 
+    // One short line per fact (headline, reason, fix) rather than a single
+    // run-on paragraph — plain text, no ANSI/terminal color codes (this
+    // reaches RN's on-device LogBox via nativeBridge.ts's `warnIfDev`,
+    // which renders raw text only). Mirror any wording change here in
+    // jsEngine/resolveStyle.ts's identical TS warning (the Expo Go
+    // fallback path's own copy of this exact message).
     let warning = format!(
-        "Kbach: \"{value}\" is not a valid native value for \"{property}\" — dropped. \
-         calc()/clamp()/min()/max() only resolve on native when every operand is a \
-         constant px/rem length (no %, vw, vh, var(), or other viewport/CSS-variable \
-         units — those need real layout/DOM, which doesn't exist on native at paint \
-         time). Use a plain px/rem calc, a fraction utility (e.g. w-1/2), or resolve \
-         this value in JS instead."
+        "[Kbach] \"{value}\" isn't a valid native value for \"{property}\" — dropped.\n\
+         calc()/min()/max()/clamp() only resolve on native when every operand is a constant px/rem length \
+         (no %, vw, vh, var(), or other viewport/CSS-variable units — those need real layout/DOM, which \
+         doesn't exist on native at paint time).\n\
+         Fix: use a plain px/rem calc, a fraction utility (e.g. w-1/2), or resolve this value in JS instead."
     );
     (None, Some(warning))
 }
@@ -310,9 +326,7 @@ pub fn resolve_style_with_warnings(
             // than only catching it half the time depending on runtime
             // dark-mode/breakpoint state.
             if !is_recognized_utility(&parsed, theme) {
-                warnings.push(format!(
-                    "Kbach: \"{token}\" doesn't match any known Kbach utility — typo? (skipped)"
-                ));
+                warnings.push(typo_warning(token));
             }
             continue;
         }
@@ -330,9 +344,7 @@ pub fn resolve_style_with_warnings(
             // and never needs the web dispatcher called again just to
             // confirm what a successful native resolve already proves.
             if !is_recognized_utility(&parsed, theme) {
-                warnings.push(format!(
-                    "Kbach: \"{token}\" doesn't match any known Kbach utility — typo? (skipped)"
-                ));
+                warnings.push(typo_warning(token));
             }
             continue;
         };

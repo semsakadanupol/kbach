@@ -75,9 +75,15 @@ export function ThemeProvider({ children, defaultMode = 'system', persist = fals
     mountedProviderCount++;
     if (mountedProviderCount > 1 && !warnedMultipleProviders) {
       warnedMultipleProviders = true;
+      // Plain text, no ANSI/`%c` — this file runs on real native (RN's
+      // on-device LogBox, which renders raw text only) as well as Expo Web,
+      // so it can't assume a real browser console the way
+      // @kbach/react's own ThemeProvider.tsx can. One short line per fact
+      // instead reads cleanly in both places without needing any styling.
       console.warn(
-        '[kbach] Multiple <ThemeProvider> instances are mounted at once. ' +
-          'Dark-mode state is one global store useTheme() reads everywhere, not scoped per-provider, so their defaultMode seeds will fight over the same state.',
+        '[Kbach] Multiple <ThemeProvider> instances are mounted at once.\n' +
+          'Dark mode is one global store — useTheme() reads it everywhere, not scoped per provider — so their defaultMode/persist seeds will fight over the same state.\n' +
+          'Mount exactly one <ThemeProvider>, as high in the tree as convenient.',
       );
     }
     return () => {

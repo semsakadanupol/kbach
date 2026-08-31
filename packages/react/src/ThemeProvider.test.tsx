@@ -164,7 +164,9 @@ describe('useTheme + ThemeProvider', () => {
       );
     });
 
-    expect(spy).toHaveBeenCalledWith(expect.stringContaining('Multiple <ThemeProvider> instances'));
+    // Called with a %c-styled first argument plus its CSS strings — assert
+    // the message text itself, not the exact call arity.
+    expect(spy.mock.calls[0]![0]).toEqual(expect.stringContaining('Multiple <ThemeProvider> instances'));
     spy.mockRestore();
   });
 });

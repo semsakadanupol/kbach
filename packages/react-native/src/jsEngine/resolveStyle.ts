@@ -143,13 +143,19 @@ function rnStyleValue(property: string, value: string): { value: string | number
     return { value: reduced, warning: null };
   }
 
+  // One short line per fact (headline, reason, fix) rather than a single
+  // run-on paragraph — plain text, no ANSI/`%c` (this reaches RN's
+  // on-device LogBox, which renders raw text only — see nativeBridge.ts's
+  // own doc comment on `warnIfDev` for where this ends up printed, and
+  // @kbach/react-native's ThemeProvider.tsx for the same constraint).
+  // Mirror any wording change here in resolve_style.rs's identical Rust
+  // warning (the native/JNI path's own copy of this exact message).
   const warning =
-    `Kbach: "${value}" is not a valid native value for "${property}" — dropped. ` +
-    'calc()/clamp()/min()/max() only resolve on native when every operand is a ' +
-    'constant px/rem length (no %, vw, vh, var(), or other viewport/CSS-variable ' +
-    "units — those need real layout/DOM, which doesn't exist on native at paint " +
-    'time). Use a plain px/rem calc, a fraction utility (e.g. w-1/2), or resolve ' +
-    'this value in JS instead.';
+    `[Kbach] "${value}" isn't a valid native value for "${property}" — dropped.\n` +
+    'calc()/min()/max()/clamp() only resolve on native when every operand is a constant px/rem length ' +
+    '(no %, vw, vh, var(), or other viewport/CSS-variable units — those need real layout/DOM, which ' +
+    "doesn't exist on native at paint time).\n" +
+    'Fix: use a plain px/rem calc, a fraction utility (e.g. w-1/2), or resolve this value in JS instead.';
   return { value: null, warning };
 }
 

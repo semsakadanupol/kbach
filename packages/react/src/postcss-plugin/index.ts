@@ -28,6 +28,7 @@ import { createKbachStaticCssEngine } from '../staticCss/engine';
 import { resolveEffectiveTheme, DEFAULT_SCAN_DIRS } from '../vite-plugin/index';
 import type { ThemeConfig } from '../theme';
 import type { KbachConfig } from '../config';
+import { bold, gray, highlight, kbachTag } from '../terminalWarn';
 
 export interface KbachPostcssPluginOptions {
   /**
@@ -81,7 +82,7 @@ function spliceGeneratedCss(root: Root, generatedCss: string): void {
   if (startIdx === -1 || endIdx === -1) {
     // eslint-disable-next-line no-console
     console.warn(
-      '[kbach] postcss plugin: no "/* kbach:start */" / "/* kbach:end */" marker pair found — add both to the file this plugin processes (see @kbach/react/vite\'s own convention). Nothing was generated.',
+      `${kbachTag()} ${gray('No')} ${highlight('/* kbach:start */')}${gray(' / ')}${highlight('/* kbach:end */')} ${gray('marker pair found in this file — nothing was generated.')}\n  ${bold('fix:')} ${gray('add both markers to the file this plugin processes (same convention the Vite plugin\'s generated kbach.css uses).')}`,
     );
     return;
   }

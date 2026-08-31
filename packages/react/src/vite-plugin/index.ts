@@ -4,7 +4,6 @@ import { pathToFileURL } from 'url';
 import { createRequire } from 'module';
 import type { Plugin } from 'vite';
 import { writeKbachToFile, KBACH_START, KBACH_END } from './format';
-import { buildClassTokens, buildClassNameHintsDts } from './classNameHints';
 import { defaultTheme } from '../theme';
 import type { ThemeConfig } from '../theme';
 import { resolveKbachConfig } from '../config';
@@ -241,26 +240,6 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
     return mainCSSFilePath;
   }
 
-  // Lives in a dot-prefixed project-root folder, not next to real source —
-  // it's a generated, do-not-edit tooling artifact (like .vite/.turbo
-  // elsewhere in this monorepo), not something that should clutter the
-  // visible file tree next to the user's own files. Consuming apps add
-  // ".kbach" to their tsconfig's "include" so TS still picks it up, and can
-  // hide it from their editor's file explorer (e.g. VS Code's
-  // files.exclude) without affecting compilation — that's a view-only
-  // concern, unrelated to whether the language service reads the file.
-  function classNameHintsFile(): string {
-    return join(root, '.kbach', 'kbach-classnames.d.ts');
-  }
-
-  // Depends only on the theme, not on which classes are used in source —
-  // unlike kbach.css, this never needs regenerating from handleHotUpdate/
-  // configureServer's per-file-edit handlers, only once at startup.
-  function writeClassNameHints(): void {
-    const dts = buildClassNameHintsDts(buildClassTokens(theme));
-    writeFileEnsuringDir(classNameHintsFile(), dts);
-  }
-
   function syncMainCSSFile(server?: { watcher: { emit(event: string, ...args: unknown[]): unknown } }): void {
     const changed = writeKbachToFile(mainCSSFile(), engine.generateCSS(), readSourceFile, writeFileEnsuringDir);
     if (changed && server) server.watcher.emit('change', mainCSSFile());
@@ -301,7 +280,6 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
       engine.initialScan();
       engine.processSafelist();
       writeKbachToFile(mainCSSFile(), engine.generateCSS(), readSourceFile, writeFileEnsuringDir);
-      writeClassNameHints();
     },
 
     // handleHotUpdate covers edits; add/unlink (create/delete) land on the

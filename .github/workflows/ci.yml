@@ -22,7 +22,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-          components: clippy
+          components: clippy, llvm-tools-preview
 
       - name: Cache cargo registry/build artifacts
         uses: Swatinem/rust-cache@v2
@@ -31,6 +31,9 @@ jobs:
 
       - name: Install wasm-pack
         uses: taiki-e/install-action@wasm-pack
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Install npm dependencies
         run: npm ci
@@ -54,6 +57,27 @@ jobs:
       # core-engine's freshly built dist-node/ output.
       - name: Verify generated files are up to date
         run: npm run verify:generated
+
+      # Coverage-instrumented builds (Rust `-C instrument-coverage`, V8
+      # coverage for the TS packages) run as their own step, separately
+      # from the plain `test` above — informational only (report upload,
+      # not a pass/fail gate), so a coverage regression never blocks a PR
+      # on its own. `npm run test:coverage` also works locally on macOS/
+      # Linux; on Windows, `@kbach/core-engine`'s share of it needs either
+      # the MSVC Rust toolchain (with a working `link.exe`, i.e. real MSVC
+      # Build Tools installed) or accept that it only runs here in CI —
+      # the windows-gnu host Rust ships via `rustup` by default has no
+      # `profiler_builtins` crate, which `cargo llvm-cov` requires.
+      - name: Generate coverage reports (core-engine, react, react-native)
+        run: npx turbo run test:coverage
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            packages/*/coverage
+          retention-days: 14
 
       # apps/native-sandbox and apps/expo-sandbox are excluded from npm
       # workspaces (see their own metro.config.js doc comments — hoisting

@@ -35,6 +35,7 @@
     "build": "wasm-pack build --target web --out-dir dist && wasm-pack build --target nodejs --out-dir dist-node && node -e \"require('fs').rmSync('dist/.gitignore',{force:true});require('fs').rmSync('dist-node/.gitignore',{force:true})\" && node scripts/build-android-if-available.mjs",
     "build:android": "node scripts/build-android.mjs",
     "test": "cargo test",
+    "test:coverage": "cargo llvm-cov --all-features --html --output-dir coverage",
     "lint": "cargo check && cargo clippy --all-targets --all-features -- -D warnings",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('dist-node',{recursive:true,force:true});require('fs').rmSync('target',{recursive:true,force:true})\""
   }

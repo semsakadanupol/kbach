@@ -87,6 +87,7 @@
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsup",
     "dev": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsup --watch",
     "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --coverage --passWithNoTests",
     "lint": "tsc --noEmit",
     "generate:colors": "node ../core-engine/scripts/generate-palette.mjs src/generatedPalette.ts",
     "generate:wasm-base64": "node ../core-engine/scripts/generate-wasm-base64.mjs src/wasmBinary.generated.ts",
@@ -95,6 +96,7 @@
   "devDependencies": {
     "@types/react": "^19.2.0",
     "@types/react-test-renderer": "^19.1.0",
+    "@vitest/coverage-v8": "^1.6.1",
     "jsdom": "^30.0.1",
     "react-native": "^0.87.0",
     "react-test-renderer": "^19.2.0",

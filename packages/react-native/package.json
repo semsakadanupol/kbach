@@ -1,6 +1,6 @@
 {
   "name": "@kbach/react-native",
-  "version": "1.0.0-beta.28",
+  "version": "1.0.0-beta.29",
   "description": "Kbach's utility-class styling engine for React Native — the same class names as @kbach/react, resolved to a StyleSheet-ready style object via a Kotlin/JNI TurboModule (native), the same WASM engine @kbach/react uses (Expo Web / react-native-web), or a pure-JS fallback engine (Expo Go). Ships its own native Android module — one npm install, no separate native package. Beta. Native is Android-only (no iOS bridge yet); works with the React Native CLI, an Expo dev client, AND Expo Go (a reduced-coverage pure-JS fallback, since Expo Go can't load any custom native module).",
   "keywords": [
     "css",

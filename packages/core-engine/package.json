@@ -1,8 +1,15 @@
 {
   "name": "@kbach/core-engine",
-  "version": "1.0.0-beta.9",
+  "version": "1.0.0-beta.10",
   "description": "Rust/WASM utility-class resolution engine powering @kbach/react and @kbach/react-native.",
-  "keywords": ["css", "wasm", "rust", "tailwind", "utility-first", "styling"],
+  "keywords": [
+    "css",
+    "wasm",
+    "rust",
+    "tailwind",
+    "utility-first",
+    "styling"
+  ],
   "license": "MIT",
   "author": "semsakadanupol",
   "repository": {
@@ -30,7 +37,10 @@
       "default": "./dist-node/kbach_core_engine.js"
     }
   },
-  "files": ["dist", "dist-node"],
+  "files": [
+    "dist",
+    "dist-node"
+  ],
   "scripts": {
     "build": "wasm-pack build --target web --out-dir dist && wasm-pack build --target nodejs --out-dir dist-node && node -e \"require('fs').rmSync('dist/.gitignore',{force:true});require('fs').rmSync('dist-node/.gitignore',{force:true})\" && node scripts/build-android-if-available.mjs",
     "build:android": "node scripts/build-android.mjs",

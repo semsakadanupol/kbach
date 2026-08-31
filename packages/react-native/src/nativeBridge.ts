@@ -11,7 +11,9 @@ import { resolveStyleJsWithWarnings } from './jsEngine/resolveStyle';
 // transform-op-*) by both the JNI engine (resolve_style.rs) and the JS
 // engine (jsEngine/resolveStyle.ts) before returning. See those files' own
 // accumulator doc comments.
-export type StyleValue =
+// Not exported — only StyleObject (below) is part of this file's public
+// surface; nothing outside needs the value type on its own.
+type StyleValue =
   | string
   | number
   | { width: number; height: number }

@@ -81,8 +81,8 @@ export interface ParsedClass {
   original: string;
 }
 
-/** Rejects arbitrary values that could smuggle extra CSS declarations/selectors — a value containing `{`, `}`, or `;`. */
-export function isSafeArbitraryValue(value: string): boolean {
+/** Rejects arbitrary values that could smuggle extra CSS declarations/selectors — a value containing `{`, `}`, or `;`. Only used within this file — not part of the jsEngine's public surface. */
+function isSafeArbitraryValue(value: string): boolean {
   return !value.includes('{') && !value.includes('}') && !value.includes(';');
 }
 

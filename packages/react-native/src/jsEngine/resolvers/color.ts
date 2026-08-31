@@ -18,7 +18,8 @@
 import type { ThemeConfig } from '../../theme';
 import type { ParsedClass } from '../parser';
 
-export function lookupHex(theme: ThemeConfig, key: string): string | null {
+// Only used within this file — not part of the jsEngine's public surface.
+function lookupHex(theme: ThemeConfig, key: string): string | null {
   const entry = theme.colors[key];
   return typeof entry === 'string' ? entry : null;
 }

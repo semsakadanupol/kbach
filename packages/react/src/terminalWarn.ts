@@ -32,7 +32,7 @@ const paint = (code: string, s: string) => (useColor ? `\x1b[${code}m${s}\x1b[0m
 
 export const green = (s: string) => paint('32', s);
 export const blue = (s: string) => paint('34', s);
-export const white = (s: string) => paint('97', s);
+const white = (s: string) => paint('97', s); // only used by highlight() below
 export const gray = (s: string) => paint('90', s);
 export const bold = (s: string) => paint('1', s);
 export const highlight = (s: string) => bold(white(s));

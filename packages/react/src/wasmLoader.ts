@@ -31,16 +31,10 @@ export function isKbachReady(): boolean {
 export function generateCss(classString: string, themeJson: string): string {
   if (!ready) {
     throw new Error(
-      '[kbach] generateCss() was called before initKbach() resolved. ' +
+      '[Kbach] generateCss() was called before initKbach() resolved. ' +
         'Call `await initKbach()` once at startup (e.g. before rendering your app) ' +
         'before using kb().',
     );
   }
   return wasmGenerateCss(classString, themeJson);
-}
-
-/** Exported for tests only — resets module-level init state between test cases. */
-export function _resetForTests(): void {
-  readyPromise = null;
-  ready = false;
 }

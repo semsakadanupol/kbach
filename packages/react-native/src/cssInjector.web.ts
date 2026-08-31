@@ -57,11 +57,3 @@ export function injectRule(rule: string, order: number): void {
   sheetKeys.splice(idx, 0, rule);
   ruleOrderByKey.set(rule, order);
 }
-
-/** Exported for tests only — resets injected-rule tracking and removes the `<style>` tag. */
-export function _resetForTests(): void {
-  sheetKeys.length = 0;
-  ruleOrderByKey.clear();
-  styleEl?.remove();
-  styleEl = null;
-}

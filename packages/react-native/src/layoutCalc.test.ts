@@ -39,8 +39,38 @@ describe('parsePercentRelativeCalc', () => {
     expect(parsePercentRelativeCalc('p-[calc(100%_-_3rem)]')).toBeNull();
   });
 
-  it('returns null for multiple percentage terms', () => {
-    expect(parsePercentRelativeCalc('w-[calc(100%_-_50%)]')).toBeNull();
+  it('combines multiple percentage terms into one coefficient (capability upgrade — used to return null)', () => {
+    // 100% - 50% is a perfectly linear combination (50%), unlike the old
+    // two-term-only parser which only ever understood ONE percent term.
+    expect(parsePercentRelativeCalc('w-[calc(100%_-_50%)]')).toEqual({
+      property: 'width',
+      percentCoefficient: 50,
+      constantPx: 0,
+    });
+  });
+
+  it('resolves a percentage divided by a plain number (real Tailwind has no such scale, but real CSS calc() does)', () => {
+    expect(parsePercentRelativeCalc('w-[calc(100%/2)]')).toEqual({
+      property: 'width',
+      percentCoefficient: 50,
+      constantPx: 0,
+    });
+  });
+
+  it('resolves a nested-parens expression mixing division and subtraction', () => {
+    expect(parsePercentRelativeCalc('w-[calc((100%/2)-10px)]')).toEqual({
+      property: 'width',
+      percentCoefficient: 50,
+      constantPx: -10,
+    });
+  });
+
+  it('returns null for dividing by a percentage (not a linear operation)', () => {
+    expect(parsePercentRelativeCalc('w-[calc(10px/50%)]')).toBeNull();
+  });
+
+  it('returns null for multiplying two percentages together (not a real CSS type)', () => {
+    expect(parsePercentRelativeCalc('w-[calc(50%*50%)]')).toBeNull();
   });
 
   it('returns null for an unreducible constant term (viewport unit)', () => {
@@ -128,8 +158,10 @@ describe('parsePercentRelativeExpr — min()/max()/clamp()', () => {
     expect(parsePercentRelativeExpr('w-[clamp(50%,20rem)]')).toBeNull();
   });
 
-  it('returns null when any single argument mixes a percentage with arithmetic (out of scope, same as calc())', () => {
-    expect(parsePercentRelativeExpr('w-[min(50%_-_1rem,20rem)]')).toBeNull();
+  it('resolves an argument that mixes a percentage with arithmetic (capability upgrade — used to return null)', () => {
+    const expr = parsePercentRelativeExpr('w-[min(50%_-_1rem,20rem)]');
+    // 50% of 500 - 16 = 234, vs a fixed 320 (20rem) — min is 234.
+    expect(expr?.resolve(500)).toBe(234);
   });
 
   it('returns null when an argument is unreducible (viewport unit)', () => {

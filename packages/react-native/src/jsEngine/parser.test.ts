@@ -159,4 +159,62 @@ describe('parseClass', () => {
     expect(parseClass('col-start-3').utility).toBe('col-start');
     expect(parseClass('col-auto').utility).toBe('col');
   });
+
+  describe('normalizeMathWhitespace (via parseClass)', () => {
+    it('normalizes a binary minus/plus with no surrounding whitespace', () => {
+      expect(parseClass('w-[calc(100%-10px)]').value).toBe('calc(100% - 10px)');
+      expect(parseClass('w-[calc(100%+10px)]').value).toBe('calc(100% + 10px)');
+    });
+
+    it('leaves already correctly spaced math unchanged', () => {
+      expect(parseClass('w-[calc(100% - 10px)]').value).toBe('calc(100% - 10px)');
+    });
+
+    it('does not touch multiplication or division, which never need spacing', () => {
+      expect(parseClass('w-[calc(100%/2)]').value).toBe('calc(100%/2)');
+      expect(parseClass('w-[calc(100%*2)]').value).toBe('calc(100%*2)');
+    });
+
+    it('preserves a leading unary minus instead of spacing it out', () => {
+      expect(parseClass('w-[calc(-10px+5%)]').value).toBe('calc(-10px + 5%)');
+    });
+
+    it('treats a sign right after a closing paren as binary, but after ( or , as unary', () => {
+      expect(parseClass('w-[calc((100%/2)-10px)]').value).toBe('calc((100%/2) - 10px)');
+      expect(parseClass('w-[min(-10px,5px)]').value).toBe('min(-10px, 5px)');
+    });
+
+    it('treats a sign right after multiply or divide as unary', () => {
+      expect(parseClass('w-[calc(10px*-2)]').value).toBe('calc(10px*-2)');
+    });
+
+    it('handles nested parens and multiple operators together', () => {
+      expect(parseClass('w-[calc((100%/2)-10px+1rem)]').value).toBe('calc((100%/2) - 10px + 1rem)');
+    });
+
+    it('copies var() calls through untouched, including an internal hyphen', () => {
+      // The literal "-" inside "--sidebar-width" must NEVER be read as a
+      // binary operator and spaced out — that would corrupt the custom
+      // property name into invalid CSS.
+      expect(parseClass('w-[calc(var(--sidebar-width)-1rem)]').value).toBe('calc(var(--sidebar-width) - 1rem)');
+    });
+
+    it('normalizes min/max/clamp the same way calc does', () => {
+      expect(parseClass('w-[min(100%-10px,20rem)]').value).toBe('min(100% - 10px, 20rem)');
+      expect(parseClass('w-[max(100%-10px,20rem)]').value).toBe('max(100% - 10px, 20rem)');
+      expect(parseClass('w-[clamp(10px,100%-10px,20rem)]').value).toBe('clamp(10px, 100% - 10px, 20rem)');
+    });
+
+    it('normalizes math inside an arbitrary property value too', () => {
+      expect(parseClass('[margin-top:calc(100%-10px)]').value).toBe('margin-top:calc(100% - 10px)');
+    });
+
+    it('the underscore convention still works unchanged (runs before normalization)', () => {
+      expect(parseClass('w-[calc(100%_-_10px)]').value).toBe('calc(100% - 10px)');
+    });
+
+    it('is a no-op for a non-math arbitrary value', () => {
+      expect(parseClass('bg-[#6366f1]').value).toBe('#6366f1');
+    });
+  });
 });

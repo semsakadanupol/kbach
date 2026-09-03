@@ -87,6 +87,91 @@ function isSafeArbitraryValue(value: string): boolean {
 }
 
 /**
+ * Port of `parser.rs`'s `normalize_math_whitespace` — see that function's
+ * own doc comment for the full reasoning (unary-vs-binary `+`/`-`
+ * disambiguation, `var(...)` treated as opaque, the scientific-notation
+ * caveat). Native doesn't strictly NEED this the way web does (real CSS
+ * requires whitespace around a binary `+`/`-`; this engine's own
+ * `reduceConstantMath`/`layoutCalc.ts` evaluators already tolerate zero
+ * spacing on their own), but it's ported anyway to keep the actual PARSED
+ * value identical to what parser.rs produces for the same input — this
+ * file's own doc comment already commits to staying byte-for-byte in sync.
+ */
+function normalizeMathWhitespace(raw: string): string {
+  if (!(raw.startsWith('calc(') || raw.startsWith('min(') || raw.startsWith('max(') || raw.startsWith('clamp('))) {
+    return raw;
+  }
+
+  const chars = Array.from(raw);
+  let out = '';
+  let i = 0;
+  // Whether the character just emitted could END a value — true right
+  // after a digit/unit/`%`/`)`, meaning a following `+`/`-` is binary;
+  // false at the start, or right after `(`/`,`/another operator, meaning
+  // it's unary and stays glued to what follows.
+  let prevEndsValue = false;
+
+  while (i < chars.length) {
+    const c = chars[i]!;
+
+    // `var(` — copy through verbatim up to its matching `)`, untouched,
+    // rather than reading its contents as arithmetic at all.
+    if (c === 'v' && chars[i + 1] === 'a' && chars[i + 2] === 'r' && chars[i + 3] === '(') {
+      const start = i;
+      let depth = 0;
+      while (i < chars.length) {
+        if (chars[i] === '(') depth++;
+        else if (chars[i] === ')') {
+          depth--;
+          if (depth === 0) {
+            i++;
+            break;
+          }
+        }
+        i++;
+      }
+      out += chars.slice(start, i).join('');
+      prevEndsValue = true;
+      continue;
+    }
+
+    if (c === '+' || c === '-') {
+      if (prevEndsValue) {
+        out += ` ${c} `;
+        i++;
+        // Don't double up if the author already wrote spacing (or
+        // underscores, already converted to spaces above).
+        while (i < chars.length && /\s/.test(chars[i]!)) i++;
+        prevEndsValue = false;
+        continue;
+      }
+      out += c; // unary — glued to the number that follows
+      prevEndsValue = false;
+    } else if (c === '(' || c === ',') {
+      out += c;
+      if (c === ',') out += ' ';
+      prevEndsValue = false;
+    } else if (c === ')') {
+      out += c;
+      prevEndsValue = true;
+    } else if (/\s/.test(c)) {
+      // Dropped — the '+'/'-' branch above is solely responsible for the
+      // whitespace THIS function emits; any other whitespace (around
+      // `*`/`/`, inside a bare number) means nothing to CSS either way.
+    } else if (c === '*' || c === '/') {
+      out += c;
+      prevEndsValue = false; // `2*-3`/`2/-3` — the sign stays unary
+    } else {
+      // A digit, unit letter, or '%' — anything else that can end a value.
+      out += c;
+      prevEndsValue = true;
+    }
+    i++;
+  }
+  return out;
+}
+
+/**
  * Splits on ':' the same way `string.split(':')` would, except a ':' nested
  * inside a `[...]` bracket never counts as a separator. Exported (not just
  * an internal `parseClass` helper) so `jsxRuntimeCore.ts` can reuse the
@@ -141,7 +226,7 @@ export function parseClass(token: string): ParsedClass {
       const property = raw.slice(0, colonIdx);
       const rawValue = raw.slice(colonIdx + 1);
       if (property !== '' && rawValue !== '' && isSafeArbitraryValue(raw)) {
-        const value = rawValue.replace(/_/g, ' ');
+        const value = normalizeMathWhitespace(rawValue.replace(/_/g, ' '));
         return {
           modifiers,
           utility: ARBITRARY_PROPERTY_SENTINEL,
@@ -167,7 +252,7 @@ export function parseClass(token: string): ParsedClass {
         // (mirrors Rust's `continue` — a later, shorter prefix might still match).
         continue;
       }
-      const spaced = raw.replace(/_/g, ' ');
+      const spaced = normalizeMathWhitespace(raw.replace(/_/g, ' '));
       return {
         modifiers,
         utility: prefix.slice(0, -1),

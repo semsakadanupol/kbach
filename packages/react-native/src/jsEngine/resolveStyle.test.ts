@@ -423,7 +423,9 @@ describe('resolveStyleJs', () => {
     const { style, warnings } = resolveStyleJsWithWarnings('w-[calc(50%-0.5rem)]', theme(), 'light', false, W);
     expect(style.width).toBeUndefined();
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('calc(50%-0.5rem)');
+    // normalizeMathWhitespace (parser.ts) inserts the CSS-mandated spacing
+    // around the binary "-" before this ever reaches here.
+    expect(warnings[0]).toContain('calc(50% - 0.5rem)');
     expect(warnings[0]).toContain('width');
   });
 

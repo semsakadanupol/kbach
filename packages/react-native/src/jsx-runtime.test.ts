@@ -482,6 +482,23 @@ describe('jsx-runtime (react-native)', () => {
       expect(renderer.root.findByType('View' as any).props.style.width).toBe(342);
     });
 
+    it('resolves a nested-parens expression mixing division and subtraction (capability upgrade)', async () => {
+      // Also exercises PERCENT_RELATIVE_CALC_HINT_RE's own fix — its old
+      // `[^)]*`-based regex could never match past the inner ")" of
+      // "(100%/2)", so a token shaped like this never even reached the
+      // real parser before.
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'w-[calc((100%/2)-10px)]' }, undefined);
+      const renderer = mount(el);
+
+      act(() => {
+        renderer.root.findByType('View' as any).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 100 } } });
+      });
+
+      // (390 / 2) - 10 = 185
+      expect(renderer.root.findByType('View' as any).props.style.width).toBe(185);
+    });
+
     it('re-measures on a genuine window-size change (e.g. rotation), gated by useWindowDimensions', async () => {
       const { jsx } = await import('./jsx-runtime');
       const el = jsx('View', { className: 'w-[calc(100%_-_3rem)]' }, undefined);

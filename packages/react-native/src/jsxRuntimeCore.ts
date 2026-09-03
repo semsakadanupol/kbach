@@ -65,8 +65,16 @@ function substituteDynamicTokens(classStrRaw: string): string {
 // h-[calc(...%...)], and now also w-[min(...%...)]/max(...)/clamp(...))
 // closely enough to gate the more expensive per-token work in
 // processElement's dispatch, without duplicating that function's own
-// parsing logic.
-const PERCENT_RELATIVE_CALC_HINT_RE = /[wh]-\[(calc|min|max|clamp)\([^)]*%[^)]*\)\]/;
+// parsing logic. Deliberately `.*`, not `[^)]*`, between the parens — a
+// nested paren (`w-[calc((100%/2)-10px)]`, now supported since
+// layoutCalc.ts's evaluator understands `/` and nesting) contains a `)`
+// of its own, which `[^)]*` can never match past regardless of
+// backtracking — that silently disqualified every nested-paren token from
+// this hint, so it never even reached the real parser at all. A false
+// POSITIVE here only costs an extra parse attempt that correctly returns
+// null; a false NEGATIVE silently drops a feature — so this errs toward
+// matching too much, never too little.
+const PERCENT_RELATIVE_CALC_HINT_RE = /[wh]-\[(calc|min|max|clamp)\(.*%.*\)\]/;
 
 /** Every `w-[calc(...)]`/`h-[calc(...)]`/`w-[min(...)]`/`max(...)`/`clamp(...)` token in `classStrRaw` that resolves via `parsePercentRelativeExpr` — usually 0, at most 2 (one per property). */
 function extractPercentRelativeCalcs(classStrRaw: string): PercentRelativeExpr[] {

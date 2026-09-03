@@ -222,6 +222,129 @@ pub(crate) fn is_safe_arbitrary_value(value: &str) -> bool {
     !value.contains('{') && !value.contains('}') && !value.contains(';')
 }
 
+/// Rewrites a `calc()`/`min()`/`max()`/`clamp()` arbitrary value so it's
+/// valid CSS regardless of how loosely the author wrote its `+`/`-`
+/// operators. Real CSS requires whitespace on both sides of a BINARY `+`/
+/// `-` (`calc(100% - 10px)`) — without it, `calc(100%-10px)` is genuinely
+/// invalid and a real browser drops the whole `calc()` — but a UNARY sign
+/// (`calc(-10px + 5%)`, the leading `-`) must stay glued to its number, or
+/// inserting a space would silently change what it means. This tells the
+/// two apart the same way a real CSS tokenizer does: a `+`/`-` is binary
+/// exactly when it immediately follows something that can END a value
+/// (a digit, a unit, `%`, or a closing paren) — anything else (the very
+/// start, right after `(`/`,`, or right after another operator) makes it
+/// unary. `*`/`/` never need surrounding whitespace in real CSS either
+/// way, so they're left exactly as written.
+///
+/// `var(...)` calls are copied through completely untouched (opaque,
+/// balanced-paren scan) rather than tokenized as arithmetic — a custom
+/// property NAME can itself contain a literal `-` (`var(--sidebar-width)`),
+/// which this function must never mistake for a binary operator and space
+/// out into `--sidebar - width`, corrupting the identifier. A `calc(...)`
+/// nested inside a `var(...)` fallback (`var(--x, calc(1px+2px))`) is the
+/// one thing this deliberately does NOT reach into and normalize — a rare
+/// enough shape that the existing underscore convention remains the way to
+/// write it, same as before this function existed at all.
+///
+/// A no-op (returns `raw` unchanged, no tokenizing at all) for anything
+/// that doesn't start with one of the four function names this applies to
+/// — the overwhelmingly common case (a plain arbitrary color, length,
+/// keyword, ...) never pays for a scan it doesn't need.
+///
+/// Scientific notation (`1e-5px`) is a known, deliberately unhandled edge
+/// case — the `-` right after `e` would be (wrongly) read as binary and
+/// split the exponent apart. Nobody has ever written a Tailwind-family
+/// arbitrary value this way in practice, so this stays a documented gap
+/// rather than added complexity for it.
+fn normalize_math_whitespace(raw: &str) -> String {
+    if !(raw.starts_with("calc(") || raw.starts_with("min(") || raw.starts_with("max(") || raw.starts_with("clamp(")) {
+        return raw.to_string();
+    }
+
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = String::with_capacity(raw.len() + 8);
+    let mut i = 0;
+    // Whether the character just emitted could END a value — true right
+    // after a digit/unit/`%`/`)`, meaning a following `+`/`-` is binary;
+    // false at the start, or right after `(`/`,`/another operator, meaning
+    // it's unary and stays glued to what follows.
+    let mut prev_ends_value = false;
+
+    while i < chars.len() {
+        let c = chars[i];
+
+        // `var(` — copy through verbatim up to its matching `)`, untouched,
+        // rather than reading its contents as arithmetic at all.
+        if c == 'v' && chars[i..].starts_with(&['v', 'a', 'r', '(']) {
+            let start = i;
+            let mut depth = 0i32;
+            while i < chars.len() {
+                if chars[i] == '(' {
+                    depth += 1;
+                } else if chars[i] == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        i += 1;
+                        break;
+                    }
+                }
+                i += 1;
+            }
+            out.extend(&chars[start..i]);
+            prev_ends_value = true;
+            continue;
+        }
+
+        match c {
+            '+' | '-' => {
+                if prev_ends_value {
+                    out.push(' ');
+                    out.push(c);
+                    out.push(' ');
+                    i += 1;
+                    // Don't double up if the author already wrote spacing
+                    // (or underscores, already converted to spaces above).
+                    while i < chars.len() && chars[i].is_whitespace() {
+                        i += 1;
+                    }
+                    prev_ends_value = false;
+                    continue;
+                }
+                out.push(c); // unary — glued to the number that follows
+                prev_ends_value = false;
+            }
+            '(' | ',' => {
+                out.push(c);
+                if c == ',' {
+                    out.push(' ');
+                }
+                prev_ends_value = false;
+            }
+            ')' => {
+                out.push(c);
+                prev_ends_value = true;
+            }
+            _ if c.is_whitespace() => {
+                // Dropped — the '+'/'-' arm above is solely responsible for
+                // the whitespace THIS function emits; any other whitespace
+                // (around `*`/`/`, inside a bare number) means nothing to
+                // CSS either way.
+            }
+            '*' | '/' => {
+                out.push(c);
+                prev_ends_value = false; // `2*-3`/`2/-3` — the sign stays unary
+            }
+            _ => {
+                // A digit, unit letter, or '%' — anything else that can end a value.
+                out.push(c);
+                prev_ends_value = true;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
 /// Splits `token` on ':' the same way `str::split(':')` would, EXCEPT a ':'
 /// nested inside a `[...]` bracket never counts as a modifier separator.
 /// Needed for Phase 24's parameterized modifiers, whose bracket content can
@@ -281,7 +404,7 @@ pub fn parse_class(token: &str) -> ParsedClass {
         let raw = &base[1..base.len() - 1];
         if let Some((property, value)) = raw.split_once(':') {
             if !property.is_empty() && !value.is_empty() && is_safe_arbitrary_value(raw) {
-                let value = value.replace('_', " ");
+                let value = normalize_math_whitespace(&value.replace('_', " "));
                 return ParsedClass {
                     modifiers,
                     utility: ARBITRARY_PROPERTY_SENTINEL.to_string(),
@@ -318,6 +441,17 @@ pub fn parse_class(token: &str) -> ParsedClass {
             // has needed one yet, and Tailwind's own is a rarely-used escape
             // hatch for a rarely-used case.
             let raw = raw.replace('_', " ");
+            // THEN normalize calc()/min()/max()/clamp() operator spacing —
+            // real CSS requires whitespace around a BINARY +/- (to
+            // disambiguate from a unit's sign or exponent), which is
+            // exactly what the underscore convention above works around by
+            // making that whitespace mandatory to type. This makes it
+            // optional instead: `calc(100%-10px)`, `calc(100% - 10px)`, and
+            // `calc(100%_-_10px)` all normalize to the same valid CSS text.
+            // See `normalize_math_whitespace`'s own doc comment for the
+            // full reasoning (unary-vs-binary disambiguation, `var(...)`
+            // handled as opaque, etc).
+            let raw = normalize_math_whitespace(&raw);
             return ParsedClass {
                 modifiers,
                 utility: prefix[..prefix.len() - 1].to_string(),
@@ -569,6 +703,12 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_math_whitespace_in_an_arbitrary_property_value_too() {
+        let p = parse_class("[margin-top:calc(100%-10px)]");
+        assert_eq!(p.value.as_deref(), Some("margin-top:calc(100% - 10px)"));
+    }
+
+    #[test]
     fn rejects_an_arbitrary_property_with_no_colon_or_an_empty_side() {
         // No colon at all — not a property:value pair, unresolvable.
         let no_colon = parse_class("[luminance]");
@@ -584,5 +724,89 @@ mod tests {
     fn rejects_an_unsafe_arbitrary_property_value() {
         let p = parse_class("[mask-type:luminance;evil:1]");
         assert_ne!(p.utility, ARBITRARY_PROPERTY_SENTINEL);
+    }
+
+    #[test]
+    fn normalizes_a_binary_minus_with_no_surrounding_whitespace() {
+        assert_eq!(normalize_math_whitespace("calc(100%-10px)"), "calc(100% - 10px)");
+        assert_eq!(normalize_math_whitespace("calc(100%+10px)"), "calc(100% + 10px)");
+    }
+
+    #[test]
+    fn leaves_already_correctly_spaced_math_unchanged() {
+        assert_eq!(normalize_math_whitespace("calc(100% - 10px)"), "calc(100% - 10px)");
+    }
+
+    #[test]
+    fn does_not_touch_multiplication_or_division_which_never_need_spacing() {
+        assert_eq!(normalize_math_whitespace("calc(100%/2)"), "calc(100%/2)");
+        assert_eq!(normalize_math_whitespace("calc(100%*2)"), "calc(100%*2)");
+    }
+
+    #[test]
+    fn preserves_a_leading_unary_minus_instead_of_spacing_it_out() {
+        assert_eq!(normalize_math_whitespace("calc(-10px+5%)"), "calc(-10px + 5%)");
+    }
+
+    #[test]
+    fn preserves_a_unary_sign_right_after_an_open_paren_or_comma() {
+        assert_eq!(normalize_math_whitespace("calc((-10px+5%)*2)"), "calc((-10px + 5%)*2)");
+        assert_eq!(normalize_math_whitespace("min(-10px,5px)"), "min(-10px, 5px)");
+    }
+
+    #[test]
+    fn treats_a_sign_right_after_a_closing_paren_as_binary() {
+        assert_eq!(normalize_math_whitespace("calc((100%/2)-10px)"), "calc((100%/2) - 10px)");
+    }
+
+    #[test]
+    fn treats_a_sign_right_after_multiply_or_divide_as_unary() {
+        // "2*-3" means "2 * (-3)" — the sign is NOT a second binary operator.
+        assert_eq!(normalize_math_whitespace("calc(10px*-2)"), "calc(10px*-2)");
+        assert_eq!(normalize_math_whitespace("calc(10px/-2)"), "calc(10px/-2)");
+    }
+
+    #[test]
+    fn handles_nested_parens_and_multiple_operators() {
+        assert_eq!(
+            normalize_math_whitespace("calc((100%/2)-10px+1rem)"),
+            "calc((100%/2) - 10px + 1rem)",
+        );
+    }
+
+    #[test]
+    fn copies_var_calls_through_untouched_including_an_internal_hyphen() {
+        // The literal "-" inside "--sidebar-width" must NEVER be read as a
+        // binary operator and spaced out — that would corrupt the custom
+        // property name into invalid CSS.
+        assert_eq!(
+            normalize_math_whitespace("calc(var(--sidebar-width)-1rem)"),
+            "calc(var(--sidebar-width) - 1rem)",
+        );
+    }
+
+    #[test]
+    fn is_a_no_op_for_a_non_math_arbitrary_value() {
+        assert_eq!(normalize_math_whitespace("#6366f1"), "#6366f1");
+        assert_eq!(normalize_math_whitespace("1fr_2fr"), "1fr_2fr"); // underscore already converted upstream in real use; irrelevant here
+    }
+
+    #[test]
+    fn end_to_end_via_parse_class_min_max_and_clamp_all_normalize_too() {
+        assert_eq!(parse_class("w-[calc(100%-10px)]").value.as_deref(), Some("calc(100% - 10px)"));
+        assert_eq!(parse_class("w-[min(100%-10px,20rem)]").value.as_deref(), Some("min(100% - 10px, 20rem)"));
+        assert_eq!(parse_class("w-[max(100%-10px,20rem)]").value.as_deref(), Some("max(100% - 10px, 20rem)"));
+        assert_eq!(
+            parse_class("w-[clamp(10px,100%-10px,20rem)]").value.as_deref(),
+            Some("clamp(10px, 100% - 10px, 20rem)"),
+        );
+    }
+
+    #[test]
+    fn end_to_end_the_underscore_convention_still_works_unchanged() {
+        // Underscore->space runs BEFORE normalize_math_whitespace, so
+        // "100%_-_10px" is already "100% - 10px" by the time it gets there
+        // — same output as writing the space (or nothing at all) directly.
+        assert_eq!(parse_class("w-[calc(100%_-_10px)]").value.as_deref(), Some("calc(100% - 10px)"));
     }
 }

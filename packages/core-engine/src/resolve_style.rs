@@ -749,7 +749,9 @@ mod tests {
         let (style, warnings) = resolve_style_with_warnings("w-[calc(50%-0.5rem)]", &theme(), "light", false, W);
         assert!(style.get("width").is_none(), "an invalid native value must not be emitted at all");
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("calc(50%-0.5rem)"));
+        // normalize_math_whitespace (parser.rs) inserts the CSS-mandated
+        // spacing around the binary "-" before this ever reaches here.
+        assert!(warnings[0].contains("calc(50% - 0.5rem)"));
         assert!(warnings[0].contains("width"));
     }
 

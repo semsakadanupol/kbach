@@ -40,7 +40,8 @@ export function reduceConstantMath(raw: string): number | null {
   return null;
 }
 
-function stripCall(raw: string, name: string): string | null {
+/** Exported for `layoutCalc.ts`'s percentage-relative parsing, which needs this exact same "isolate a function call's inner text, honoring nested parens" extraction — a naive `[^)]+`-style regex breaks the moment a nested `(...)` appears before the real closing paren (`calc((100%/2)-10px)`). */
+export function stripCall(raw: string, name: string): string | null {
   if (!raw.startsWith(name)) return null;
   const afterName = raw.slice(name.length).trimStart();
   if (!afterName.startsWith('(') || !afterName.endsWith(')')) return null;

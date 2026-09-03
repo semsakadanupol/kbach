@@ -631,6 +631,18 @@ mod tests {
     }
 
     #[test]
+    fn builds_a_named_group_hover_rule_with_the_slash_escaped_in_the_selector() {
+        let theme = ThemeConfig::default();
+        let parsed = parse_class("group-hover/sidebar:opacity-100");
+        let decls = vec![decl("opacity", "1")];
+        let rule = build_rule(&parsed, &decls, &theme).unwrap();
+        assert_eq!(
+            rule.rule,
+            ".group\\/sidebar:hover .group-hover\\/sidebar\\:opacity-100 { opacity: 1 }",
+        );
+    }
+
+    #[test]
     fn builds_an_arbitrary_group_condition_rule_not_wrapped_in_has() {
         let theme = ThemeConfig::default();
         let parsed = parse_class("group-[.is-published]:block");

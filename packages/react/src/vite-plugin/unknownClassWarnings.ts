@@ -67,6 +67,14 @@ function stripModifierPrefix(token: string): string {
 // engine's "known utility" concept doesn't map cleanly onto "produces CSS".
 const MARKER_CLASSES = new Set(['group', 'peer']);
 
+/** `group`/`peer` exactly, or `group/sidebar`/`peer/field` — real Tailwind's named-group/peer syntax (see registry.rs's `split_named_group_suffix` for the modifier half of this feature). Mirrors `resolve_style.rs`'s own `is_marker_utility` exactly. */
+function isMarkerClass(base: string): boolean {
+  if (MARKER_CLASSES.has(base)) return true;
+  const slashIdx = base.lastIndexOf('/');
+  if (slashIdx === -1) return false;
+  return MARKER_CLASSES.has(base.slice(0, slashIdx)) && slashIdx < base.length - 1;
+}
+
 /**
  * Warns once per unique token when it's both unresolvable by Kbach and
  * absent from the project's own stylesheets. `isResolvable` is the caller's
@@ -87,7 +95,7 @@ export function warnIfUnknownClass(
   if (isResolvable || warnedTokens.has(token)) return;
 
   const base = stripModifierPrefix(token);
-  if (!base || projectCssClasses.has(base) || MARKER_CLASSES.has(base)) return;
+  if (!base || projectCssClasses.has(base) || isMarkerClass(base)) return;
 
   warnedTokens.add(token);
   const pos = findLineCol(code, token);

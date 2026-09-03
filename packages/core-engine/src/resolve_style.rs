@@ -53,6 +53,23 @@ use serde_json::{Map, Number, Value};
 /// shape alone, so these two need a manual exception.
 const MARKER_UTILITIES: &[&str] = &["group", "peer"];
 
+/// Whether `utility` is a (possibly NAMED) marker — `"group"`/`"peer"`
+/// exactly, or `"group/sidebar"`/`"peer/field"` (real Tailwind's named-
+/// group/peer syntax — see `registry.rs`'s own doc comment on
+/// `split_named_group_suffix` for the modifier half of this feature).
+/// `rsplit_once('/')` (not `split_once`) so a name containing its own `/`
+/// — vanishingly unlikely, but free to get right — still only strips the
+/// LAST one.
+fn is_marker_utility(utility: &str) -> bool {
+    if MARKER_UTILITIES.contains(&utility) {
+        return true;
+    }
+    match utility.rsplit_once('/') {
+        Some((base, name)) => MARKER_UTILITIES.contains(&base) && !name.is_empty(),
+        None => false,
+    }
+}
+
 /// Whether `parsed`'s BASE utility (ignoring modifiers and their current
 /// state entirely) is a real Kbach utility on ANY platform — the ground
 /// truth for "is this a typo", deliberately using `resolve_utility` (the
@@ -63,7 +80,7 @@ const MARKER_UTILITIES: &[&str] = &["group", "peer"];
 /// comment: "Explicitly deferred, not silently broken") — NOT a typo, and
 /// must never warn as one. Only a string that resolves NOWHERE at all is.
 fn is_recognized_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> bool {
-    MARKER_UTILITIES.contains(&parsed.utility.as_str()) || resolve_utility(parsed, theme).is_some()
+    is_marker_utility(&parsed.utility) || resolve_utility(parsed, theme).is_some()
 }
 
 /// The one typo-warning message, shared by both call sites below (an
@@ -800,6 +817,25 @@ mod tests {
     fn does_not_warn_for_group_or_peer_marker_classes() {
         let (_, warnings) = resolve_style_with_warnings("group peer", &theme(), "light", false, W);
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn does_not_warn_for_named_group_or_peer_marker_classes() {
+        let (_, warnings) = resolve_style_with_warnings("group/sidebar peer/field", &theme(), "light", false, W);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn still_warns_for_a_genuine_typo_that_merely_starts_with_group_or_peer() {
+        let (_, warnings) = resolve_style_with_warnings("groupp/sidebar", &theme(), "light", false, W);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("groupp/sidebar"));
+    }
+
+    #[test]
+    fn still_warns_for_a_bare_slash_with_no_name() {
+        let (_, warnings) = resolve_style_with_warnings("group/", &theme(), "light", false, W);
+        assert_eq!(warnings.len(), 1);
     }
 
     #[test]

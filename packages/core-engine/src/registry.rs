@@ -298,8 +298,67 @@ impl From<ModifierDef> for ResolvedModifier {
 /// chain — tries the static `MODIFIERS` table first (unchanged, zero
 /// regression risk for any modifier this engine already resolved), then
 /// falls through to `resolve_dynamic` for Phase 24's parameterized forms.
+///
+/// Named groups/peers (`group-hover/sidebar:opacity-100`, disambiguating
+/// which ancestor `group`/`peer` a nested one reacts to — real Tailwind
+/// since v3.3) are handled here rather than in every single group-/peer-
+/// arm above: `split_named_group_suffix` strips a trailing `/name` off
+/// BEFORE any of the normal resolution logic runs, resolves the rest
+/// completely normally (recursing back into this same function), then
+/// rewrites the resulting `.group`/`.peer` ancestor selector to
+/// `.group\/name`/`.peer\/name` afterward. One rewrite step covers every
+/// group-/peer- shape uniformly (the static table's `group-hover`/
+/// `group-focus`, the generalized `group-<pseudo>`, `group-has-[...]`,
+/// and `group-[...]` alike) instead of threading a name parameter through
+/// each of their own branches individually.
 pub fn resolve(name: &str) -> Option<ResolvedModifier> {
+    if let Some((base, group_name)) = split_named_group_suffix(name) {
+        let mut resolved = get_modifier(base).map(ResolvedModifier::from).or_else(|| resolve_dynamic(base))?;
+        resolved.ancestor_selector = resolved.ancestor_selector.map(|a| rename_group_or_peer_selector(&a, group_name));
+        return Some(resolved);
+    }
     get_modifier(name).map(ResolvedModifier::from).or_else(|| resolve_dynamic(name))
+}
+
+/// Splits `<group-or-peer-modifier>/<name>` into its two halves — e.g.
+/// `"group-hover/sidebar"` -> `Some(("group-hover", "sidebar"))`,
+/// `"group-has-[.active]/sidebar"` -> `Some(("group-has-[.active]",
+/// "sidebar"))`. The `/` is searched for AFTER the last `]` (or from the
+/// very start if there's no bracket at all) specifically so a `/`
+/// appearing INSIDE a bracket's own arbitrary content is never mistaken
+/// for the name separator — real Tailwind's own name always comes last,
+/// after any bracket. Gated behind a cheap `contains('/')` plus a
+/// `group`/`peer` prefix check first, so every OTHER modifier (the
+/// overwhelming majority of calls into `resolve`) pays only that one cheap
+/// check, never the rest of this function's work.
+fn split_named_group_suffix(name: &str) -> Option<(&str, &str)> {
+    if !name.contains('/') || !(name.starts_with("group") || name.starts_with("peer")) {
+        return None;
+    }
+    let search_from = name.rfind(']').map_or(0, |i| i + 1);
+    let slash_pos = search_from + name[search_from..].find('/')?;
+    let (base, rest) = name.split_at(slash_pos);
+    let group_name = &rest[1..];
+    if base.is_empty() || group_name.is_empty() {
+        return None;
+    }
+    Some((base, group_name))
+}
+
+/// Rewrites an already-resolved `.group...`/`.peer...` ancestor-selector
+/// fragment to target a NAMED group/peer instead of the bare class —
+/// every group-/peer- family modifier's `ancestor_selector` starts with
+/// exactly one of these two literal prefixes, so a plain `strip_prefix` is
+/// enough; the `/` is backslash-escaped since it's a literal character
+/// inside a CSS class selector otherwise reserved for other meanings.
+fn rename_group_or_peer_selector(ancestor: &str, group_name: &str) -> String {
+    if let Some(rest) = ancestor.strip_prefix(".group") {
+        format!(".group\\/{group_name}{rest}")
+    } else if let Some(rest) = ancestor.strip_prefix(".peer") {
+        format!(".peer\\/{group_name}{rest}")
+    } else {
+        ancestor.to_string()
+    }
 }
 
 /// Underscore -> space, the same multi-part-arbitrary-value convention
@@ -873,6 +932,67 @@ mod tests {
     fn resolve_returns_none_for_a_genuinely_unknown_modifier() {
         assert!(resolve("not-a-real-modifier-and-not-a-real-pseudo").is_none());
         assert!(resolve("totally-unknown").is_none());
+    }
+
+    #[test]
+    fn resolves_a_named_group_hover_from_the_static_table() {
+        let r = resolve("group-hover/sidebar").unwrap();
+        assert_eq!(r.ancestor_selector.as_deref(), Some(".group\\/sidebar:hover "));
+    }
+
+    #[test]
+    fn resolves_a_named_peer_focus_from_the_static_table() {
+        let r = resolve("peer-focus/field").unwrap();
+        assert_eq!(r.ancestor_selector.as_deref(), Some(".peer\\/field:focus ~ "));
+    }
+
+    #[test]
+    fn resolves_a_named_group_with_a_generalized_pseudo() {
+        // group-checked isn't one of the two hardcoded static entries
+        // (group-hover/group-focus) - goes through the dynamic
+        // strip_prefix("group-") + get_modifier path instead, and still
+        // gets renamed correctly.
+        let r = resolve("group-checked/item").unwrap();
+        assert_eq!(r.ancestor_selector.as_deref(), Some(".group\\/item:checked "));
+    }
+
+    #[test]
+    fn resolves_a_named_group_has_variant() {
+        let r = resolve("group-has-[.active]/sidebar").unwrap();
+        assert_eq!(r.ancestor_selector.as_deref(), Some(".group\\/sidebar:has(.active) "));
+    }
+
+    #[test]
+    fn resolves_a_named_arbitrary_group_condition() {
+        let r = resolve("group-[.is-published]/sidebar").unwrap();
+        assert_eq!(r.ancestor_selector.as_deref(), Some(".group\\/sidebar.is-published "));
+    }
+
+    #[test]
+    fn the_slash_inside_a_bracket_is_never_mistaken_for_the_name_separator() {
+        // The "/" inside "a[href='/x']" must stay part of the has-[...]
+        // condition itself - only a "/" AFTER the bracket names the group.
+        let r = resolve("group-has-[a[href='/x']]/sidebar").unwrap();
+        assert_eq!(r.ancestor_selector.as_deref(), Some(".group\\/sidebar:has(a[href='/x']) "));
+    }
+
+    #[test]
+    fn a_slash_with_no_group_or_peer_prefix_is_left_alone() {
+        // Not a group/peer-family modifier at all - never attempts the
+        // named-group split, resolves (or fails to) completely normally.
+        assert!(resolve("hover/sidebar").is_none());
+    }
+
+    #[test]
+    fn returns_none_when_the_base_before_the_slash_is_not_a_real_group_or_peer_modifier() {
+        assert!(resolve("group/sidebar").is_none()); // "group" alone is a UTILITY, not a modifier
+        assert!(resolve("group-not-real/sidebar").is_none());
+    }
+
+    #[test]
+    fn returns_none_for_an_empty_name_on_either_side_of_the_slash() {
+        assert!(resolve("group-hover/").is_none());
+        assert!(resolve("/sidebar").is_none());
     }
 
     #[test]

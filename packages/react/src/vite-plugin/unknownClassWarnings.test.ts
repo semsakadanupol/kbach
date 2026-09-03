@@ -58,6 +58,23 @@ describe('warnIfUnknownClass', () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  it('does not warn for a NAMED group/peer marker class (group/sidebar, peer/field)', () => {
+    warnIfUnknownClass('group/sidebar', 'App.tsx', '', false, new Set(), new Set());
+    warnIfUnknownClass('peer/field', 'App.tsx', '', false, new Set(), new Set());
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('still warns for a genuine typo that merely starts with group/peer', () => {
+    warnIfUnknownClass('groupp/sidebar', 'App.tsx', '', false, new Set(), new Set());
+    warnIfUnknownClass('group/', 'App.tsx', '', false, new Set(), new Set());
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('strips a named group modifier prefix (group-hover/sidebar:) before checking the base utility', () => {
+    warnIfUnknownClass('group-hover/sidebar:custom-card', 'App.tsx', '', false, new Set(['custom-card']), new Set());
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
   it('strips modifier prefixes before checking against project CSS classes', () => {
     warnIfUnknownClass('hover:dark:custom-card', 'App.tsx', '', false, new Set(['custom-card']), new Set());
     expect(warnSpy).not.toHaveBeenCalled();

@@ -631,6 +631,18 @@ mod tests {
     }
 
     #[test]
+    fn builds_an_arbitrary_group_condition_rule_not_wrapped_in_has() {
+        let theme = ThemeConfig::default();
+        let parsed = parse_class("group-[.is-published]:block");
+        let decls = vec![decl("display", "block")];
+        let rule = build_rule(&parsed, &decls, &theme).unwrap();
+        assert_eq!(
+            rule.rule,
+            ".group.is-published .group-\\[\\.is-published\\]\\:block { display: block }",
+        );
+    }
+
+    #[test]
     fn builds_a_has_variant_rule_with_its_bracket_selector_escaped_in_the_class_name() {
         let theme = ThemeConfig::default();
         let parsed = parse_class("has-[a:hover]:bg-red-6");

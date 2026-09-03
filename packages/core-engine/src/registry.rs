@@ -465,6 +465,23 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
     if let Some(inner) = bracket_content(name, "peer-has-") {
         return Some(ancestor_only(format!(".peer:has({}) ~ ", unescape(inner)), 24.6));
     }
+    // `group-[...]`/`peer-[...]` — the arbitrary-condition counterpart to
+    // `group-<known-pseudo>`/`peer-<known-pseudo>` below (order 25.0/26.0,
+    // matched here for the same reason: this is the SAME ".group<condition> "/
+    // ".peer<condition> ~ " mechanism, just with the condition written out
+    // directly instead of looked up from a known modifier name) — real
+    // Tailwind's `group-[.is-published]:block`/`peer-[.is-invalid]:block`,
+    // for any ancestor condition that isn't a plain pseudo-class Kbach
+    // already has a name for (an attribute selector, a compound class, a
+    // `:not(...)`, ...). Deliberately NOT wrapped in `:has(...)` the way
+    // `group-has-`/`peer-has-` are — this condition applies to the group/
+    // peer element ITSELF, not something it contains.
+    if let Some(inner) = bracket_content(name, "group-") {
+        return Some(ancestor_only(format!(".group{} ", unescape(inner)), 25.0));
+    }
+    if let Some(inner) = bracket_content(name, "peer-") {
+        return Some(ancestor_only(format!(".peer{} ~ ", unescape(inner)), 26.0));
+    }
     if let Some(inner) = bracket_content(name, "has-") {
         return Some(pseudo_only(format!(":has({})", unescape(inner)), 18.0));
     }
@@ -523,6 +540,17 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
     // "in-<name>" that's ALSO a real static modifier (e.g. a hypothetical
     // "in-range" — already registered above) resolves via the static table
     // first, since `resolve()` tries that before ever calling this function.
+    // `in-[...]` — the arbitrary-condition counterpart to `in-<known-pseudo>`
+    // just below, same reasoning as `group-[...]`/`peer-[...]` above: for
+    // any ancestor condition that isn't a plain pseudo-class already
+    // registered by name. Checked BEFORE the bare `strip_prefix` form
+    // below, not just alongside it — that block unconditionally `return`s
+    // the moment "in-" matches at all (even when its own `get_modifier`
+    // lookup finds nothing), so a bracket form checked AFTER it would be
+    // dead code for every "in-[...]" input, never actually reached.
+    if let Some(inner) = bracket_content(name, "in-") {
+        return Some(ancestor_only(format!(":where({}) ", unescape(inner)), 27.0));
+    }
     if let Some(rest) = name.strip_prefix("in-") {
         return get_modifier(rest).and_then(|def| def.pseudo).map(|p| ancestor_only(format!(":where({p}) "), 27.0));
     }
@@ -909,6 +937,30 @@ mod tests {
     #[test]
     fn returns_none_for_an_arbitrary_variant_that_is_just_a_bare_ampersand() {
         assert!(resolve("[&]").is_none());
+    }
+
+    #[test]
+    fn resolves_arbitrary_group_and_peer_conditions_not_wrapped_in_has() {
+        let group = resolve("group-[.is-published]").unwrap();
+        assert_eq!(group.ancestor_selector.as_deref(), Some(".group.is-published "));
+        let peer = resolve("peer-[.is-invalid]").unwrap();
+        assert_eq!(peer.ancestor_selector.as_deref(), Some(".peer.is-invalid ~ "));
+    }
+
+    #[test]
+    fn arbitrary_group_and_peer_conditions_still_coexist_with_their_has_counterparts() {
+        // "group-has-[...]" must keep resolving via ITS OWN arm, not get
+        // wrongly claimed by the newer, more general "group-[...]" one —
+        // bracket_content's exact-prefix-match already guarantees this
+        // (see this function's own doc comment), this just proves it.
+        let group_has = resolve("group-has-[.active]").unwrap();
+        assert_eq!(group_has.ancestor_selector.as_deref(), Some(".group:has(.active) "));
+    }
+
+    #[test]
+    fn resolves_an_arbitrary_in_condition_zero_specificity_ancestor_match() {
+        let r = resolve("in-[.is-open]").unwrap();
+        assert_eq!(r.ancestor_selector.as_deref(), Some(":where(.is-open) "));
     }
 
     #[test]

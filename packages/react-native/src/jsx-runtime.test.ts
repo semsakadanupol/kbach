@@ -310,6 +310,24 @@ describe('jsx-runtime (react-native)', () => {
       expect(mockResolveStyle).toHaveBeenCalledTimes(2);
     });
 
+    it('re-resolves on its own for an ARBITRARY min-[...]/max-[...] breakpoint too, not just named ones', async () => {
+      // Regression coverage: nativeModifierState already understood
+      // min-[...]/max-[...] once resolved once, but BREAKPOINT_MODIFIER_RE
+      // (the gate deciding whether to wrap in ReactiveElement at all) only
+      // matched the five named breakpoints — an arbitrary one would resolve
+      // correctly exactly once, then silently never react to a later width
+      // change (rotation, split-screen, ...) at all.
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex min-[500px]:flex-row' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        setMockWidth(900);
+      });
+      expect(mockResolveStyle).toHaveBeenCalledTimes(2);
+    });
+
     it('does not add any reactivity overhead for an element with no responsive class', async () => {
       const { jsx } = await import('./jsx-runtime');
       const el = jsx('View', { className: 'flex bg-blue-6' }, undefined);
@@ -756,6 +774,76 @@ describe('jsx-runtime (react-native)', () => {
     });
 
     it('does not add any reactivity overhead for an element using neither hover: nor focus:', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex bg-blue-6' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Same "reads straight off this element's own props, reacts via ordinary
+  // prop flow, no ReactiveElement wrapping needed" mechanism disabled:
+  // already uses above — data-[...]:/aria-[...]:/the static aria-*
+  // shortcuts are the parameterized/named extension of that same idea.
+  describe('data-[...]:/aria-[...]:/static aria-* shortcut modifiers', () => {
+    it('resolves aria-[key=value]: against the matching aria-* prop', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex aria-[expanded=true]:opacity-100', 'aria-expanded': false }, undefined);
+      const renderer = mount(el);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex', false);
+
+      act(() => {
+        renderer.update(
+          jsx('View', { className: 'flex aria-[expanded=true]:opacity-100', 'aria-expanded': true }, undefined) as any,
+        );
+      });
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex opacity-100', false);
+    });
+
+    it('resolves data-[key=value]: against the matching data-* prop', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex data-[state=open]:opacity-100', 'data-state': 'closed' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex', false);
+    });
+
+    it('resolves a bare data-[key]:/aria-[key]: as a truthy-presence check', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const present = jsx('View', { className: 'flex data-[loading]:opacity-50', 'data-loading': true }, undefined);
+      mount(present);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex opacity-50', false);
+
+      const absent = jsx('View', { className: 'flex data-[loading]:opacity-50' }, undefined);
+      mount(absent);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex', false);
+    });
+
+    it('resolves the static aria-* shortcuts (aria-expanded, aria-selected, ...)', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex aria-selected:bg-blue-8', 'aria-selected': true }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex bg-blue-8', false);
+    });
+
+    it('accepts the literal string "true" the same as a real boolean for a static aria-* shortcut', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'flex aria-checked:bg-blue-8', 'aria-checked': 'true' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex bg-blue-8', false);
+    });
+
+    it('requires every modifier on a chained token to hold, same as hover:focus: already requires both', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx(
+        'View',
+        { className: 'flex disabled:aria-expanded:opacity-50', disabled: true, 'aria-expanded': false },
+        undefined,
+      );
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex', false);
+    });
+
+    it('does not add any reactivity overhead for an element using none of these', async () => {
       const { jsx } = await import('./jsx-runtime');
       const el = jsx('View', { className: 'flex bg-blue-6' }, undefined);
       mount(el);

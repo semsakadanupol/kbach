@@ -41,6 +41,24 @@ function nativeModifierState(modifier: string, theme: ThemeConfig, colorScheme: 
     if (minWidth === undefined) return null;
     return width >= minWidth;
   }
+  // Arbitrary min-[500px]:/max-[30rem]: — the exact same width comparison
+  // the named breakpoints above already do, parsed out of the modifier's
+  // own bracket content instead of looked up from theme.screens by name.
+  // Mirrors resolve_style.rs's identical native_modifier_state extension —
+  // reuses reduceConstantMath (wrapped in a trivial calc(...), since that
+  // function only recognizes an actual calc/min/max/clamp call, not a bare
+  // value on its own) for the same px/rem parsing every other arbitrary
+  // length already goes through. A percentage/viewport-unit value stays
+  // unreducible (null) — no live layout to resolve it against at the point
+  // a modifier's state is decided, same as everywhere else on native.
+  if (modifier.startsWith('min-[') && modifier.endsWith(']')) {
+    const px = reduceConstantMath(`calc(${modifier.slice(5, -1).trim()})`);
+    return px === null ? null : width >= px;
+  }
+  if (modifier.startsWith('max-[') && modifier.endsWith(']')) {
+    const px = reduceConstantMath(`calc(${modifier.slice(5, -1).trim()})`);
+    return px === null ? null : width <= px;
+  }
   return null;
 }
 

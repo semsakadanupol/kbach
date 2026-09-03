@@ -94,11 +94,11 @@ fn typo_warning(token: &str) -> String {
     format!("[Kbach] \"{token}\" doesn't match any known Kbach utility — typo? (skipped)")
 }
 
-/// Whether a single modifier's condition currently holds, for the three
-/// modifier kinds native actually understands — `None` for anything else
-/// (hover/group/peer/aria/container/starting/...), which `resolve_style`
-/// below treats identically to "doesn't hold" (the whole chain is skipped),
-/// same as before this function existed. Reads from the shared
+/// Whether a single modifier's condition currently holds, for the modifier
+/// kinds native actually understands — `None` for anything else (hover/
+/// group/peer/aria/container/starting/...), which `resolve_style` below
+/// treats identically to "doesn't hold" (the whole chain is skipped), same
+/// as before this function existed. Reads from the shared
 /// `registry::resolve` table rather than re-deriving "is this dark/active/
 /// responsive" locally, so a new responsive breakpoint or a future change
 /// to what counts as "the active pseudo" never needs updating in two
@@ -115,6 +115,29 @@ fn native_modifier_state(modifier: &str, theme: &ThemeConfig, color_scheme: &str
     if def.is_responsive {
         let min_width = theme.screens.get(modifier)?;
         return Some(width >= *min_width);
+    }
+    // Arbitrary `min-[500px]:`/`max-[30rem]:` — the exact same width
+    // comparison the named sm/md/lg/xl/2xl tier above already does, just
+    // against a value parsed out of the modifier's own `media_query` text
+    // instead of looked up from `theme.screens` by name. `media_query` is
+    // always exactly `"(min-width: <value>)"`/`"(max-width: <value>)"` for
+    // these two (see registry.rs's own `bracket_content(name, "min-"/"max-")`
+    // arms) — reuses `calc::reduce_constant_math` (wrapped in a trivial
+    // `calc(...)` — that function only ever recognizes an actual calc/min/
+    // max/clamp call, not a bare value on its own) for the same px/rem
+    // parsing every OTHER arbitrary length already goes through, rather
+    // than writing a second unit parser. A percentage/viewport-unit/other
+    // breakpoint value stays unreducible here (`None`) for the same reason
+    // it's unreducible everywhere else on native: there's no live layout to
+    // resolve it against at the point a modifier's state is decided.
+    if let Some(mq) = &def.media_query {
+        let (is_min, value) = if let Some(v) = mq.strip_prefix("(min-width:") {
+            (true, v.strip_suffix(')')?)
+        } else {
+            (false, mq.strip_prefix("(max-width:")?.strip_suffix(')')?)
+        };
+        let px = crate::calc::reduce_constant_math(&format!("calc({})", value.trim()))?;
+        return Some(if is_min { width >= px } else { width <= px });
     }
     None
 }
@@ -539,6 +562,50 @@ mod tests {
 
         let wide = resolve_style("bg-blue-6 sm:bg-blue-8", &t, "light", false, 800.0);
         assert_eq!(wide.get("backgroundColor").unwrap(), "#1e40af");
+    }
+
+    #[test]
+    fn applies_an_arbitrary_min_width_breakpoint_the_same_way_named_ones_work() {
+        let mut t = theme();
+        t.colors.insert("blue-8".to_string(), ColorValue::Plain("#1e40af".to_string()));
+
+        let narrow = resolve_style("bg-blue-6 min-[500px]:bg-blue-8", &t, "light", false, 400.0);
+        assert_eq!(narrow.get("backgroundColor").unwrap(), "#2563eb");
+
+        // Real Tailwind's min-width semantics: AT the breakpoint counts as reached.
+        let at_breakpoint = resolve_style("bg-blue-6 min-[500px]:bg-blue-8", &t, "light", false, 500.0);
+        assert_eq!(at_breakpoint.get("backgroundColor").unwrap(), "#1e40af");
+
+        let wide = resolve_style("bg-blue-6 min-[500px]:bg-blue-8", &t, "light", false, 800.0);
+        assert_eq!(wide.get("backgroundColor").unwrap(), "#1e40af");
+    }
+
+    #[test]
+    fn applies_an_arbitrary_max_width_breakpoint_the_same_way_named_ones_work() {
+        let mut t = theme();
+        t.colors.insert("blue-8".to_string(), ColorValue::Plain("#1e40af".to_string()));
+
+        let wide = resolve_style("bg-blue-6 max-[30rem]:bg-blue-8", &t, "light", false, 900.0);
+        assert_eq!(wide.get("backgroundColor").unwrap(), "#2563eb");
+
+        // 30rem = 480px — AT the breakpoint still counts as matching (real CSS max-width semantics).
+        let at_breakpoint = resolve_style("bg-blue-6 max-[30rem]:bg-blue-8", &t, "light", false, 480.0);
+        assert_eq!(at_breakpoint.get("backgroundColor").unwrap(), "#1e40af");
+
+        let narrow = resolve_style("bg-blue-6 max-[30rem]:bg-blue-8", &t, "light", false, 300.0);
+        assert_eq!(narrow.get("backgroundColor").unwrap(), "#1e40af");
+    }
+
+    #[test]
+    fn an_arbitrary_breakpoint_with_an_unreducible_unit_never_resolves_on_native() {
+        // Percentages/viewport units have no live layout to resolve against
+        // at the point a modifier's state is decided on native (same reason
+        // resolve_style_with_warnings's own percentage-relative calc()
+        // handling exists at all) — stays unsupported here, same as before
+        // this feature existed, rather than silently misresolving.
+        let t = theme();
+        let r = resolve_style("bg-blue-6 min-[50vw]:bg-blue-8", &t, "light", false, 900.0);
+        assert_eq!(r.get("backgroundColor").unwrap(), "#2563eb");
     }
 
     #[test]

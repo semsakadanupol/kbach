@@ -90,6 +90,27 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('sm:flex', theme(), 'light', false, 10_000)).toEqual({});
   });
 
+  it('applies an arbitrary min-[...]/max-[...] breakpoint the same way named ones work', () => {
+    const t = theme();
+    expect(resolveStyleJs('bg-blue-6 min-[500px]:bg-blue-8', t, 'light', false, 400).backgroundColor).toBe('#2563eb');
+    // Real Tailwind's min-width semantics: AT the breakpoint counts as reached.
+    expect(resolveStyleJs('bg-blue-6 min-[500px]:bg-blue-8', t, 'light', false, 500).backgroundColor).toBe('#1e40af');
+    expect(resolveStyleJs('bg-blue-6 min-[500px]:bg-blue-8', t, 'light', false, 800).backgroundColor).toBe('#1e40af');
+
+    // 30rem = 480px — AT the breakpoint still counts as matching (real CSS max-width semantics).
+    expect(resolveStyleJs('bg-blue-6 max-[30rem]:bg-blue-8', t, 'light', false, 900).backgroundColor).toBe('#2563eb');
+    expect(resolveStyleJs('bg-blue-6 max-[30rem]:bg-blue-8', t, 'light', false, 480).backgroundColor).toBe('#1e40af');
+    expect(resolveStyleJs('bg-blue-6 max-[30rem]:bg-blue-8', t, 'light', false, 300).backgroundColor).toBe('#1e40af');
+  });
+
+  it('never resolves an arbitrary breakpoint with an unreducible unit', () => {
+    // Percentages/viewport units have no live layout to resolve against at
+    // the point a modifier's state is decided on native.
+    expect(resolveStyleJs('bg-blue-6 min-[50vw]:bg-blue-8', theme(), 'light', false, 900).backgroundColor).toBe(
+      '#2563eb',
+    );
+  });
+
   it('combines dark and responsive modifiers, requiring both to hold', () => {
     const t = theme({ screens: { md: 768 } });
     const resolves = (scheme: string, width: number) => resolveStyleJs('dark:md:bg-blue-8', t, scheme, false, width);

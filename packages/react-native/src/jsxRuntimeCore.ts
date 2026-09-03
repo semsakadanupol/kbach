@@ -94,20 +94,42 @@ function stripPercentRelativeCalcTokens(classStrRaw: string): string {
     .join(' ');
 }
 
-// hover:/focus:/disabled: — unlike dark:/active:/responsive, resolveStyle
-// (the Rust engine and its JS-fallback port alike) has no parameter slot
-// for these at all: its FFI signature (classString, themeJson, colorScheme,
-// pressed, width) is fixed, and widening it would mean regenerating the JNI
+// hover:/focus:/disabled:/data-[...]:/aria-[...]:/the static aria-*
+// shortcuts — unlike dark:/active:/responsive, resolveStyle (the Rust
+// engine and its JS-fallback port alike) has no parameter slot for these
+// at all: its FFI signature (classString, themeJson, colorScheme, pressed,
+// width) is fixed, and widening it would mean regenerating the JNI
 // TurboModule spec AND rebuilding the committed Android .so binary — see
 // README.md's "PREBUILT BINARY" section for why that's a separately
-// fragile process this deliberately avoids touching. Instead, all three are
-// resolved entirely HERE, above resolveStyle: each qualifying token is
-// rewritten (its hover:/focus:/disabled: name stripped from the modifier
-// chain) when that state currently holds, or dropped entirely when it
-// doesn't — so resolveStyle only ever sees classes built from modifiers it
-// already understands, the same "rewrite before it reaches resolveStyle"
-// approach `substituteDynamicTokens` already uses for `var(--x)`.
+// fragile process this deliberately avoids touching. Instead, all of these
+// are resolved entirely HERE, above resolveStyle: each qualifying token is
+// rewritten (its own qualifying modifier names stripped from the chain)
+// when every one currently holds, or dropped entirely when any doesn't —
+// so resolveStyle only ever sees classes built from modifiers it already
+// understands, the same "rewrite before it reaches resolveStyle" approach
+// `substituteDynamicTokens` already uses for `var(--x)`.
+//
+// data-[...]:/aria-[...]:/the static aria-* shortcuts specifically read
+// straight off the element's OWN props (`hostRest['data-key']`/
+// `hostRest['aria-key']`) — no ReactiveElement wrapping needed for these
+// EITHER, same reasoning `disabled:` already established: whatever passed
+// this element its `aria-expanded`/`data-state` prop re-renders it
+// naturally via ordinary React prop flow the moment that value changes, no
+// extra subscription required. Real Tailwind's web equivalent matches a
+// literal DOM attribute value via `[data-key="value"]`/`[aria-key="value"]`
+// — the native counterpart here is the element's own prop of the same
+// name, not a DOM attribute (RN has no DOM), which is as close an
+// analogue as a flat props object can get.
 const STATE_MODIFIER_NAMES = new Set(['hover', 'focus', 'disabled']);
+
+// The 9 static aria-* shortcuts registry.rs's own static MODIFIERS table
+// registers (`[aria-expanded="true"]` etc. on web) — kept in sync by hand
+// with that table, same as every other web/native parity pairing in this
+// file.
+const STATIC_ARIA_SHORTCUT_NAMES = new Set([
+  'aria-checked', 'aria-disabled', 'aria-expanded', 'aria-hidden',
+  'aria-pressed', 'aria-readonly', 'aria-required', 'aria-selected', 'aria-busy',
+]);
 
 interface ElementStates {
   hover: boolean;
@@ -128,8 +150,53 @@ interface ElementStates {
 // toggle — exactly the historical symptom this whole file's reactivity
 // mechanism exists to prevent, just triggered by chain ORDER instead of a
 // missing subscription. Applies to every one of this file's own modifier-
-// presence regexes below, not just the state ones.
-const STATE_MODIFIER_HINT_RE = /(^|\s|:)(hover|focus|disabled):/;
+// presence regexes below, not just the state ones. `data-\[`/`aria-\[`
+// deliberately don't try to match their own closing `]:` here — the
+// bracket content can contain almost anything (colons included, e.g.
+// `data-[state=open]:`), so this only checks the opening shape is present
+// SOMEWHERE and lets the real per-token parse below sort out the rest; a
+// false positive here just costs one wasted split, never a wrong result.
+const STATE_MODIFIER_HINT_RE =
+  /(^|\s|:)(hover|focus|disabled|aria-checked|aria-disabled|aria-expanded|aria-hidden|aria-pressed|aria-readonly|aria-required|aria-selected|aria-busy):|data-\[|aria-\[/;
+
+/** Strips `prefix` then a `[...]` bracket pair — same shape as registry.rs's own `bracket_content`, ported here for `data-[...]`/`aria-[...]` parsing. */
+function bracketContent(name: string, prefix: string): string | null {
+  if (!name.startsWith(prefix)) return null;
+  const rest = name.slice(prefix.length);
+  if (!rest.startsWith('[') || !rest.endsWith(']')) return null;
+  return rest.slice(1, -1);
+}
+
+/** `key=value` (or a bare `key`) inner content -> whether that condition currently holds against `hostRest`'s own prop of the same name — `data-[state=open]` reads `hostRest['data-state']`, `aria-[expanded=true]` reads `hostRest['aria-expanded']`. A bare key (no "="): truthy-presence check. With a value: string-compared, since the value as written in the class name is always text. */
+function evalAttrCondition(hostRest: Record<string, unknown>, attrPrefix: string, inner: string): boolean {
+  const eqIdx = inner.indexOf('=');
+  if (eqIdx === -1) return Boolean(hostRest[`${attrPrefix}${inner}`]);
+  const key = inner.slice(0, eqIdx);
+  const value = inner.slice(eqIdx + 1);
+  return String(hostRest[`${attrPrefix}${key}`]) === value;
+}
+
+/** Real boolean `true`, or (an aria-/data- prop sometimes arrives as a plain string rather than a real boolean) the literal string `"true"` — either counts as "yes" for a static aria-* shortcut. */
+function isAriaTruthy(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
+/**
+ * Resolves ONE modifier name's current truth for the "reads from this
+ * element's own state/props" family this file handles above resolveStyle
+ * — `null` for anything else (an ancestor/sibling/media modifier this
+ * function has no opinion on, left for `resolveStyle` itself to handle or
+ * not).
+ */
+function propBasedModifierState(name: string, states: ElementStates, hostRest: Record<string, unknown>): boolean | null {
+  if (STATE_MODIFIER_NAMES.has(name)) return states[name as keyof ElementStates];
+  if (STATIC_ARIA_SHORTCUT_NAMES.has(name)) return isAriaTruthy(hostRest[name]);
+  const dataInner = bracketContent(name, 'data-');
+  if (dataInner !== null) return evalAttrCondition(hostRest, 'data-', dataInner);
+  const ariaInner = bracketContent(name, 'aria-');
+  if (ariaInner !== null) return evalAttrCondition(hostRest, 'aria-', ariaInner);
+  return null;
+}
 
 /** Strips every name in `namesToStrip` from an already-split `[...modifiers, utility]` array (see `splitRespectingBrackets`), leaving the utility part and every other modifier untouched. Takes the pre-split parts rather than re-splitting the token itself — `substituteStateModifiers` (the only caller) already has them from its own presence check, and re-parsing the same token twice per call is wasted work on every render. */
 function stripModifiers(parts: string[], namesToStrip: Set<string>): string {
@@ -140,17 +207,18 @@ function stripModifiers(parts: string[], namesToStrip: Set<string>): string {
 
 /**
  * For each whitespace-separated token in `classStrRaw`: if it uses one or
- * more of hover:/focus:/disabled:, it's kept (with those specific modifier
- * names stripped from its chain) only when EVERY state it names currently
- * holds — dropped entirely otherwise, since RN's flat style object has no
- * cascade to let an unapplied rule simply lose a specificity fight the way
- * CSS would. A token using none of the three passes through unchanged.
+ * more of hover:/focus:/disabled:/data-[...]:/aria-[...]:/the static aria-*
+ * shortcuts, it's kept (with those specific modifiers stripped from its
+ * chain) only when EVERY one it names currently holds — dropped entirely
+ * otherwise, since RN's flat style object has no cascade to let an
+ * unapplied rule simply lose a specificity fight the way CSS would. A
+ * token using none of these passes through unchanged.
  *
  * Token ORDER is preserved (never reordered, only filtered) — this matters
  * because `resolveStyle` merges same-property declarations last-token-wins,
  * by the order they appear in the string it receives (same rule dark:/sm:/
  * active: already live under; this doesn't introduce a new merge rule, it's
- * the first time hover:/focus: get to participate in it, since they were
+ * the first time these modifiers get to participate in it, since they were
  * simply inert before this file supported them at all). Writing the base
  * class before its state variant — `"bg-red-6 hover:bg-blue-6"`, the
  * conventional order — resolves correctly once hovered (hover's color
@@ -158,20 +226,22 @@ function stripModifiers(parts: string[], namesToStrip: Set<string>): string {
  * This is the existing convention every other modifier here already
  * depends on, not a hover/focus-specific quirk.
  */
-function substituteStateModifiers(classStrRaw: string, states: ElementStates): string {
+function substituteStateModifiers(classStrRaw: string, states: ElementStates, hostRest: Record<string, unknown>): string {
   if (!STATE_MODIFIER_HINT_RE.test(classStrRaw)) return classStrRaw;
   const kept: string[] = [];
   for (const token of classStrRaw.split(/\s+/)) {
     if (!token) continue;
     const parts = splitRespectingBrackets(token);
     const modifiers = parts.slice(0, -1);
-    const required = modifiers.filter((m) => STATE_MODIFIER_NAMES.has(m));
+    const resolved = modifiers.map((m) => [m, propBasedModifierState(m, states, hostRest)] as const);
+    const required = resolved.filter(([, v]) => v !== null);
     if (required.length === 0) {
       kept.push(token);
       continue;
     }
-    if (required.every((m) => states[m as keyof ElementStates])) {
-      kept.push(stripModifiers(parts, STATE_MODIFIER_NAMES));
+    if (required.every(([, v]) => v === true)) {
+      const requiredNames = new Set(required.map(([m]) => m));
+      kept.push(stripModifiers(parts, requiredNames));
     }
   }
   return kept.join(' ');
@@ -204,17 +274,21 @@ function makeElement(
  * and correctly treats a `hover:`/`focus:`-qualified class as never-active
  * rather than always-active — see `processElement`'s own routing check for
  * why an element using either one is never routed through the plain path
- * to begin with.
+ * to begin with. `hostRest` is this element's own OTHER props (everything
+ * but `className`/`style`) — read fresh on every call for
+ * `data-[...]:`/`aria-[...]:`/the static aria-* shortcuts, same "always
+ * live via ordinary prop flow" reasoning `disabled` already relies on.
  */
 function resolvedStyleFor(
   resolveStyle: ResolveStyleFn,
   classStrRaw: string,
   userStyle: unknown,
   pressed: boolean,
+  hostRest: Record<string, unknown>,
   layoutOverrides?: Record<string, number | string>,
   states: ElementStates = { hover: false, focus: false, disabled: false },
 ): unknown {
-  const stateResolved = substituteStateModifiers(classStrRaw, states);
+  const stateResolved = substituteStateModifiers(classStrRaw, states, hostRest);
   const cleaned = stripPercentRelativeCalcTokens(substituteDynamicTokens(stateResolved));
   const resolved = resolveStyle(cleaned, pressed) as Record<string, unknown>;
   if (layoutOverrides) {
@@ -233,7 +307,15 @@ function resolvedStyleFor(
 // `(^|\s|:)`, not just `(^|\s)` — a modifier chained after another one
 // (e.g. "sm:dark:", "hover:focus:") is otherwise silently missed.
 const DARK_MODIFIER_RE = /(^|\s|:)dark:/;
-const BREAKPOINT_MODIFIER_RE = /(^|\s|:)(sm|md|lg|xl|2xl):/;
+// Named breakpoints (sm/md/lg/.../2xl) OR an arbitrary min-[...]:/max-[...]:
+// — both need this element to re-render on a width change (rotation,
+// split-screen, ...), same as dark: needs a re-render on a theme change.
+// Missing the arbitrary form here would be a real, silent bug: the class
+// would still resolve correctly once (nativeModifierState/
+// native_modifier_state both understand it now), just never react to a
+// LATER width change, since it'd never get wrapped in ReactiveElement at
+// all to begin with.
+const BREAKPOINT_MODIFIER_RE = /(^|\s|:)(sm|md|lg|xl|2xl):|(^|\s|:)(min|max)-\[[^\]]*\]:/;
 const HOVER_MODIFIER_RE = /(^|\s|:)hover:/;
 const FOCUS_MODIFIER_RE = /(^|\s|:)focus:/;
 
@@ -451,8 +533,8 @@ function ReactiveElement({
   const finalStyle =
     hostType === Pressable
       ? (state: PressableStateCallbackType) =>
-          resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed, layoutOverrides, states)
-      : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false, layoutOverrides, states);
+          resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed, hostRest, layoutOverrides, states)
+      : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false, hostRest, layoutOverrides, states);
 
   // className is put back on the props alongside the computed style — see
   // processElement's own doc comment on this same pattern for why.
@@ -523,8 +605,8 @@ function processElement(
   // the plain, static resolution it always had (pressed is always false).
   const finalStyle =
     type === Pressable
-      ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed, undefined, staticStates)
-      : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false, undefined, staticStates);
+      ? (state: PressableStateCallbackType) => resolvedStyleFor(resolveStyle, classStrRaw, userStyle, state.pressed, rest, undefined, staticStates)
+      : resolvedStyleFor(resolveStyle, classStrRaw, userStyle, false, rest, undefined, staticStates);
 
   return makeElement(isStaticChildren, type, { ...rest, className: classStrRaw, style: finalStyle }, key);
 }

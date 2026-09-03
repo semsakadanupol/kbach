@@ -384,6 +384,49 @@ fn container_responsive_only(order: f64) -> ResolvedModifier {
     ResolvedModifier { is_container_responsive: true, order, ..Default::default() }
 }
 
+/// Real Tailwind's `[&...]:` escape hatch — a raw CSS selector fragment as
+/// a modifier, for anything the specific parameterized forms below
+/// (`has-[...]`/`data-[...]`/`aria-[...]`/`nth-[...]`/`supports-[...]`/...)
+/// don't already have a name for. `&` marks where the base selector itself
+/// belongs: everything AFTER it is appended directly onto the selector
+/// (`[&:hover]` -> `:hover`, `[&>*]` -> `>*`, `[&::marker]` -> `::marker`,
+/// `[&.is-open]` -> `.is-open`); everything BEFORE it becomes an ancestor
+/// prefix instead (`[.dark_&]` -> `.dark ` prepended — same mechanism
+/// `group-hover:`'s `.group:hover ` prefix already uses). Both at once
+/// works too: `[.dark_&.is-open]` -> ancestor prefix `.dark ` AND suffix
+/// `.is-open` on the very same variant.
+///
+/// Requires EXACTLY one `&`. Zero means this isn't a real arbitrary
+/// variant at all (a bare `[...]` with no name and no `&` resolves
+/// nowhere, same as before this function existed); more than one makes
+/// the resulting selector shape ambiguous enough that it's simplest to
+/// leave unsupported rather than guess at which occurrence is "the" one.
+fn resolve_arbitrary_variant(inner: &str) -> Option<ResolvedModifier> {
+    let spaced = unescape(inner);
+    if spaced.matches('&').count() != 1 {
+        return None;
+    }
+    let amp_pos = spaced.find('&')?;
+    let before = &spaced[..amp_pos];
+    let after = &spaced[amp_pos + 1..];
+    if before.is_empty() && after.is_empty() {
+        return None; // "[&]" alone — no actual selector change, not a real variant
+    }
+
+    Some(ResolvedModifier {
+        ancestor_selector: (!before.is_empty()).then(|| before.to_string()),
+        pseudo: (!after.is_empty()).then(|| after.to_string()),
+        // Sits just after the other bracket-parameterized modifiers above
+        // (has-/not-/data-/aria- at 18.0-18.3, group-has-/peer-has- at
+        // 24.5-24.6) — this is the most general of the bunch, so it
+        // resolves last among them; a suffix-only variant (no ancestor
+        // prefix) keeps the plain-pseudo neighborhood's order, an
+        // ancestor-prefixed one keeps the ancestor neighborhood's.
+        order: if before.is_empty() { 18.4 } else { 24.7 },
+        ..Default::default()
+    })
+}
+
 /// Phase 24's parameterized modifiers — see this module's own top-level doc
 /// comment for the full list and reasoning. Order of the `if let` chain
 /// below matters only where one prefix is a literal substring of another
@@ -501,6 +544,14 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
         if matches!(bare, "sm" | "md" | "lg" | "xl" | "2xl") {
             return Some(container_responsive_only(45.2));
         }
+    }
+    // The generic `[&...]:` fallback — deliberately checked LAST: every
+    // named prefix above (`has-`, `data-`, `nth-`, ...) requires real text
+    // before its own `[`, so none of them could ever also match a BARE
+    // bracket starting at position 0 — there's no actual competition to
+    // order against, this just reads clearest as the final catch-all.
+    if let Some(inner) = bracket_content(name, "") {
+        return resolve_arbitrary_variant(inner);
     }
     None
 }
@@ -794,5 +845,78 @@ mod tests {
     fn resolve_returns_none_for_a_genuinely_unknown_modifier() {
         assert!(resolve("not-a-real-modifier-and-not-a-real-pseudo").is_none());
         assert!(resolve("totally-unknown").is_none());
+    }
+
+    #[test]
+    fn resolves_an_arbitrary_variant_pseudo_class_suffix() {
+        let r = resolve("[&:hover]").unwrap();
+        assert_eq!(r.pseudo.as_deref(), Some(":hover"));
+        assert_eq!(r.ancestor_selector, None);
+    }
+
+    #[test]
+    fn resolves_an_arbitrary_variant_pseudo_element_suffix() {
+        let r = resolve("[&::marker]").unwrap();
+        assert_eq!(r.pseudo.as_deref(), Some("::marker"));
+    }
+
+    #[test]
+    fn resolves_an_arbitrary_variant_child_combinator_suffix() {
+        let r = resolve("[&>*]").unwrap();
+        assert_eq!(r.pseudo.as_deref(), Some(">*"));
+    }
+
+    #[test]
+    fn resolves_an_arbitrary_variant_descendant_combinator_suffix_with_underscore_spacing() {
+        let r = resolve("[&_p]").unwrap();
+        assert_eq!(r.pseudo.as_deref(), Some(" p"));
+    }
+
+    #[test]
+    fn resolves_an_arbitrary_variant_compound_class_suffix() {
+        let r = resolve("[&.is-open]").unwrap();
+        assert_eq!(r.pseudo.as_deref(), Some(".is-open"));
+    }
+
+    #[test]
+    fn resolves_an_arbitrary_variant_ancestor_prefix() {
+        // "&" at the very end -> everything before it becomes an ancestor
+        // prefix, same mechanism group-hover's ".group:hover " uses.
+        let r = resolve("[.dark_&]").unwrap();
+        assert_eq!(r.ancestor_selector.as_deref(), Some(".dark "));
+        assert_eq!(r.pseudo, None);
+    }
+
+    #[test]
+    fn resolves_an_arbitrary_variant_with_both_an_ancestor_prefix_and_a_suffix() {
+        let r = resolve("[.dark_&.is-open]").unwrap();
+        assert_eq!(r.ancestor_selector.as_deref(), Some(".dark "));
+        assert_eq!(r.pseudo.as_deref(), Some(".is-open"));
+    }
+
+    #[test]
+    fn returns_none_for_an_arbitrary_variant_with_no_ampersand_at_all() {
+        // A bare bracket with no "&" isn't a real arbitrary variant (and
+        // isn't any other known bracket-parameterized form either).
+        assert!(resolve("[.foo]").is_none());
+    }
+
+    #[test]
+    fn returns_none_for_an_arbitrary_variant_with_more_than_one_ampersand() {
+        assert!(resolve("[&_&]").is_none());
+    }
+
+    #[test]
+    fn returns_none_for_an_arbitrary_variant_that_is_just_a_bare_ampersand() {
+        assert!(resolve("[&]").is_none());
+    }
+
+    #[test]
+    fn does_not_shadow_any_named_bracket_prefixed_modifier() {
+        // Every named form above requires real text before its own "[", so
+        // none of them could ever ALSO look like a bare "[&...]" — sanity
+        // check that adding the generic fallback didn't change any of these.
+        assert_eq!(resolve("has-[a:hover]").unwrap().pseudo.as_deref(), Some(":has(a:hover)"));
+        assert_eq!(resolve("data-[state=open]").unwrap().pseudo.as_deref(), Some("[data-state=\"open\"]"));
     }
 }

@@ -610,6 +610,27 @@ mod tests {
     }
 
     #[test]
+    fn builds_an_arbitrary_variant_rule_with_a_pseudo_class_suffix() {
+        let theme = ThemeConfig::default();
+        let parsed = parse_class("[&:hover]:bg-red-6");
+        let decls = vec![decl("background-color", "#ef4444")];
+        let rule = build_rule(&parsed, &decls, &theme).unwrap();
+        assert_eq!(
+            rule.rule,
+            ".\\[\\&\\:hover\\]\\:bg-red-6:hover { background-color: #ef4444 }",
+        );
+    }
+
+    #[test]
+    fn builds_an_arbitrary_variant_rule_with_an_ancestor_prefix() {
+        let theme = ThemeConfig::default();
+        let parsed = parse_class("[.dark_&]:bg-red-6");
+        let decls = vec![decl("background-color", "#ef4444")];
+        let rule = build_rule(&parsed, &decls, &theme).unwrap();
+        assert_eq!(rule.rule, ".dark .\\[\\.dark_\\&\\]\\:bg-red-6 { background-color: #ef4444 }");
+    }
+
+    #[test]
     fn builds_a_has_variant_rule_with_its_bracket_selector_escaped_in_the_class_name() {
         let theme = ThemeConfig::default();
         let parsed = parse_class("has-[a:hover]:bg-red-6");

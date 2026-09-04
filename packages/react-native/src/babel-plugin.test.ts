@@ -105,6 +105,54 @@ describe('babel-plugin (react-native) — kbach.config.js auto-application', () 
     expect(second.ast.program.body).toHaveLength(1);
   });
 
+  it('gives each file its OWN AST statement node, never the same shared reference', () => {
+    // Regression test for a real bundling failure: an earlier version
+    // cached and reused the SAME AST node across every file's pre() call.
+    // Babel mutates a node in place as its own file's transform runs
+    // (location info, scope bindings, ...), so sharing one instance
+    // across files corrupted it after the first one — Metro's dependency
+    // collector then rejected a LATER file's copy with "Invalid call at
+    // line <unknown>" for its require() call. Two structurally-identical
+    // but reference-DISTINCT nodes is the fix; asserting reference
+    // inequality is what actually catches a regression back to sharing.
+    dir = mkdtempSync(join(tmpdir(), 'kbach-babel-test-'));
+    writeFileSync(join(dir, 'kbach.config.js'), 'module.exports = {};');
+
+    const plugin = kbachBabelPlugin(undefined, { configRoot: dir });
+    const fileA = fakeFile(join(dir, 'A.tsx'));
+    const fileB = fakeFile(join(dir, 'B.tsx'));
+    plugin.pre(fileA);
+    plugin.pre(fileB);
+
+    expect(fileA.ast.program.body[0]).not.toBe(fileB.ast.program.body[0]);
+  });
+
+  it('does not inject the auto-apply statement into kbach.config.js itself', () => {
+    // A config file requiring its OWN absolute path (a real self-reference
+    // cycle in Metro's dependency graph) is nonsensical regardless of the
+    // shared-node bug above — this must never happen even once that's fixed.
+    dir = mkdtempSync(join(tmpdir(), 'kbach-babel-test-'));
+    writeFileSync(join(dir, 'kbach.config.js'), 'module.exports = {};');
+
+    const plugin = kbachBabelPlugin(undefined, { configRoot: dir });
+    const configFile = fakeFile(join(dir, 'kbach.config.js'));
+    plugin.pre(configFile);
+
+    expect(configFile.ast.program.body).toHaveLength(0);
+  });
+
+  it('still injects into an ordinary file even after kbach.config.js itself was skipped', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-babel-test-'));
+    writeFileSync(join(dir, 'kbach.config.js'), 'module.exports = {};');
+
+    const plugin = kbachBabelPlugin(undefined, { configRoot: dir });
+    plugin.pre(fakeFile(join(dir, 'kbach.config.js')));
+    const appFile = fakeFile(join(dir, 'App.tsx'));
+    plugin.pre(appFile);
+
+    expect(appFile.ast.program.body).toHaveLength(1);
+  });
+
   it('defaults configRoot to process.cwd() when no options are passed', () => {
     // No kbach.config.js at this repo's own package root — confirms the
     // default path is exercised (not just the configRoot override) without

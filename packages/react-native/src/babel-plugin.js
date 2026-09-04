@@ -125,32 +125,34 @@ module.exports = function kbachReactNativeBabelPlugin(_babel, options) {
       if (filename && filename.indexOf('node_modules') !== -1) return;
 
       // Metro/Expo's own internal polyfills (the Node.js-external-require
-      // shim, the assets-registry shim, `node:`/weak-ref virtualizations, …)
-      // are synthetic "virtual modules" with no real file on disk — Expo's
-      // own Metro config marks every one with a NUL byte in its ID (e.g.
-      // "\0polyfill:external-require", Rollup's/Metro's own convention for
-      // "this isn't a real file"). These never sit inside node_modules, so
-      // the check above doesn't catch them — and Metro places them
-      // directly in the bundle PRELUDE, entirely outside any
-      // `__d(...)`-wrapped module, where `require` isn't defined as a real
-      // function at all. Confirmed as a real, reproducible runtime crash
-      // (not a hypothetical): injecting this plugin's applyKbachConfig()
-      // require() call into that exact polyfill produced Expo's own
-      // "[runtime not ready]: ReferenceError: Property 'require' doesn't
-      // exist" at app startup, verified by exporting a real dev bundle and
-      // finding the offending, un-instrumented require() call sitting
-      // inside `withMetroMultiPlatform.js`'s own external-require polyfill
-      // — a file this plugin was never meant to touch at all.
+      // shim, the assets-registry shim, node:/weak-ref virtualizations, ...)
+      // are synthetic "virtual modules" with no real file on disk. Expo's
+      // own Metro config marks every one of these with an embedded NUL
+      // control character in its module ID (Rollup's/Metro's own
+      // convention for "this isn't a real file"). These never sit inside
+      // node_modules, so the check above doesn't catch them — and Metro
+      // places them directly in the bundle PRELUDE, entirely outside any
+      // wrapped module, where `require` isn't defined as a real function
+      // at all. Confirmed as a real, reproducible runtime crash (not a
+      // hypothetical): injecting this plugin's applyKbachConfig() require()
+      // call into that exact polyfill produced Expo's own "[runtime not
+      // ready]: ReferenceError: Property 'require' doesn't exist" at app
+      // startup, verified by exporting a real dev bundle and finding the
+      // offending, un-instrumented require() call sitting inside
+      // withMetroMultiPlatform.js's own external-require polyfill — a file
+      // this plugin was never meant to touch at all.
       //
-      // The NUL byte is NOT at the start of `filename`, so `startsWith`/
-      // `charCodeAt(0)` (what an earlier version of this check used) never
-      // matches — confirmed by actually logging Babel's real `filename` for
-      // this file, not assumed: Metro joins the project root onto the raw
-      // virtual module ID first, giving something like
-      // "<projectRoot>\\ polyfill:external-require" — the NUL sits
-      // in the MIDDLE, after the trailing path separator. `indexOf`
-      // anywhere in the string is what actually catches it.
-      if (filename && filename.indexOf('\0') !== -1) return;
+      // The control character is NOT at the start of `filename`, so
+      // `startsWith`/`charCodeAt(0)` (what an earlier version of this
+      // check used) never matches — confirmed by actually logging Babel's
+      // real `filename` for this file, not assumed: Metro joins the
+      // project root onto the raw virtual module ID first, so the control
+      // character ends up in the MIDDLE of the full string, right after
+      // the trailing path separator, not at index 0. A search anywhere in
+      // the string (rather than just its start) is what actually catches
+      // it — see this file's own test suite for the exact filename shape
+      // this was verified against.
+      if (filename && filename.indexOf(String.fromCharCode(0)) !== -1) return;
 
       const comments = file.ast.comments || (file.ast.comments = []);
       const alreadySet = comments.some((c) => /@jsxImportSource|@jsxRuntime/.test(c.value));

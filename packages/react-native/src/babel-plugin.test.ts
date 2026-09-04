@@ -38,6 +38,27 @@ describe('babel-plugin (react-native) — jsxImportSource pragma', () => {
     plugin.pre(file);
     expect(file.ast.comments).toHaveLength(1);
   });
+
+  it('does not touch a Metro/Expo virtual module (a NUL byte embedded mid-path)', () => {
+    // Regression test for a real runtime crash: Expo's own Metro config
+    // marks internal polyfills (the Node.js-external-require shim, etc.)
+    // with a synthetic "\0polyfill:..." virtual module ID, which Metro
+    // then joins onto the project root before passing it to Babel as
+    // `filename` — so the real value looks like
+    // "<projectRoot>\\\0polyfill:external-require", NUL embedded in the
+    // MIDDLE of the string, confirmed by actually logging Babel's real
+    // `filename` for this exact file rather than assumed. Never inside
+    // node_modules, so the OTHER exclusion check doesn't catch it either.
+    // Metro places these directly in the bundle prelude, outside any
+    // wrapped module, where injecting our require()-based auto-apply
+    // statement produced "[runtime not ready]: ReferenceError: Property
+    // 'require' doesn't exist" at app startup.
+    const plugin = kbachBabelPlugin();
+    const file = fakeFile('/app/\0polyfill:external-require');
+    plugin.pre(file);
+    expect(file.ast.comments).toHaveLength(0);
+    expect(file.ast.program.body).toHaveLength(0);
+  });
 });
 
 describe('babel-plugin (react-native) — kbach.config.js auto-application', () => {
@@ -139,6 +160,17 @@ describe('babel-plugin (react-native) — kbach.config.js auto-application', () 
     plugin.pre(configFile);
 
     expect(configFile.ast.program.body).toHaveLength(0);
+  });
+
+  it('does not inject the auto-apply statement into a virtual module even when kbach.config.js exists', () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-babel-test-'));
+    writeFileSync(join(dir, 'kbach.config.js'), 'module.exports = {};');
+
+    const plugin = kbachBabelPlugin(undefined, { configRoot: dir });
+    const file = fakeFile(join(dir, '\0polyfill:external-require'));
+    plugin.pre(file);
+
+    expect(file.ast.program.body).toHaveLength(0);
   });
 
   it('still injects into an ordinary file even after kbach.config.js itself was skipped', () => {

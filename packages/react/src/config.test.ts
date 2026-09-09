@@ -115,6 +115,49 @@ describe('resolveKbachConfig', () => {
     const theme = resolveKbachConfig({ extend: { colors: { surface: { light: '#fff', dark: '#000' } } } });
     expect(theme.colors.surface).toEqual({ light: '#fff', dark: '#000' });
   });
+
+  it('a color named on both sides of the grouped "dark" block becomes a mode-aware { light, dark } entry', () => {
+    const theme = resolveKbachConfig({
+      extend: { colors: { surface: 'gray-2', dark: { surface: 'gray-11' } } },
+    });
+    expect(theme.colors.surface).toEqual({ light: defaultTheme.colors['gray-2'], dark: defaultTheme.colors['gray-11'] });
+  });
+
+  it('a color named only outside the grouped "dark" block stays a plain, mode-independent string', () => {
+    const theme = resolveKbachConfig({
+      extend: { colors: { brand: '#ff6b35', surface: 'gray-2', dark: { surface: 'gray-11' } } },
+    });
+    expect(theme.colors.brand).toBe('#ff6b35');
+  });
+
+  it('a color named only under the grouped "dark" block (no matching light value) is skipped entirely', () => {
+    const theme = resolveKbachConfig({ extend: { colors: { dark: { onlyDark: 'gray-11' } } } });
+    expect(theme.colors.onlyDark).toBeUndefined();
+  });
+
+  it('the grouped "dark" block does not touch a color already written as its own { light, dark } pair', () => {
+    const theme = resolveKbachConfig({
+      extend: { colors: { surface: { light: '#fff', dark: '#000' }, dark: { surface: 'gray-11' } } },
+    });
+    expect(theme.colors.surface).toEqual({ light: '#fff', dark: '#000' });
+  });
+
+  it('the grouped "dark" block resolves its own opacity/alias references against itself and the palette, not the light side', () => {
+    const theme = resolveKbachConfig({
+      extend: {
+        colors: {
+          brand: '#ff6b35',
+          brandSoft: 'brand/30',
+          dark: { brand: '#ff8c5a', brandSoft: 'brand/30' },
+        },
+      },
+    });
+    expect(theme.colors.brand).toEqual({ light: '#ff6b35', dark: '#ff8c5a' });
+    expect((theme.colors.brandSoft as { light: string }).light).toBe('rgba(255,107,53,0.3)');
+    // brandSoft's "brand" reference INSIDE the dark block resolves to the
+    // dark block's OWN "#ff8c5a", not the light side's "#ff6b35".
+    expect((theme.colors.brandSoft as { dark: string }).dark).toBe('rgba(255,140,90,0.3)');
+  });
 });
 
 describe('applyKbachConfig', () => {

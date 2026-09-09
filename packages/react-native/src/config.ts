@@ -1,20 +1,23 @@
 import { defaultTheme, setTheme } from './theme';
-import type { ContainerConfig, ThemeConfig } from './theme';
+import type { ColorEntry, ContainerConfig, ThemeConfig } from './theme';
 import { resyncDomWithActiveTheme } from './darkModeStore';
 
 /**
  * A `kbach.config.js`-style theme customization — same shape as
- * @kbach/react's `KbachConfig`, minus mode-aware `{ light, dark }` color
- * entries in `extend.colors` specifically: aliasing/opacity math here only
- * ever operates on plain hex (`brand: 'blue-6'`, `brandSoft: 'brand/30'`),
- * matching `jsEngine/resolvers/color.ts`'s `lookupHex`'s own Plain-only
- * convention — a reference to an EXISTING color that happens to be
- * mode-aware (`theme.colors` can hold those now, for `useColors()`; see
- * `theme.ts`'s own `ColorEntry` doc comment) just doesn't resolve as an
- * alias, falling through to "literal CSS value" the same way an unknown
- * name would. A config object goes in, a resolved `ThemeConfig` comes out,
- * via one PURE function (`resolveKbachConfig`) — no plugins, no
- * live-update store, nothing to keep "in sync."
+ * @kbach/react's `KbachConfig`, minus @kbach/react's own PER-COLOR
+ * `{ light, dark }` object form in `extend.colors` specifically (real
+ * mode-aware colors here are written via the grouped `dark` key instead —
+ * see `KbachConfig.extend.colors`'s own doc comment below): aliasing/
+ * opacity math on an individual color value here only ever operates on
+ * plain hex (`brand: 'blue-6'`, `brandSoft: 'brand/30'`), matching
+ * `jsEngine/resolvers/color.ts`'s `lookupHex`'s own Plain-only convention
+ * — a reference to an EXISTING color that happens to be mode-aware
+ * (`theme.colors` can hold those, for `useColors()`; see `theme.ts`'s own
+ * `ColorEntry` doc comment) just doesn't resolve as an alias, falling
+ * through to "literal CSS value" the same way an unknown name would. A
+ * config object goes in, a resolved `ThemeConfig` comes out, via one PURE
+ * function (`resolveKbachConfig`) — no plugins, no live-update store,
+ * nothing to keep "in sync."
  */
 export interface KbachConfig {
   darkMode?: ThemeConfig['darkMode'];
@@ -36,8 +39,23 @@ export interface KbachConfig {
      * '#ff6b35', brandSoft: 'brand/30' }` — `brandSoft` resolves to
      * `brand`'s own value at 30% opacity). A string that doesn't match any
      * known color name is treated as a literal CSS value instead.
+     *
+     * `dark` is a reserved key, not a color name: a parallel map of
+     * dark-mode overrides for any of the OTHER names in this same object —
+     * `{ surface: 'gray-2', card: 'white', dark: { surface: 'gray-11',
+     * card: 'gray-9' } }` makes `surface`/`card` mode-aware
+     * (`{ light, dark }` entries in the resolved theme), while `brand`
+     * (never mentioned under `dark`) stays a plain, mode-independent
+     * color. A name under `dark` with no matching top-level (light) entry
+     * is skipped — mode-aware colors need both sides written out, and
+     * inventing a "light" value out of nowhere would be worse than just
+     * not creating the entry at all. References inside `dark` resolve
+     * against the built-in palette and OTHER entries within `dark` itself
+     * (not against the light-side custom colors) — the same
+     * "self-contained, ordering-independent-of-the-other-side" resolution
+     * the light side already gets, just mirrored.
      */
-    colors?: Record<string, string>;
+    colors?: { [colorName: string]: string | Record<string, string> | undefined; dark?: Record<string, string> };
     spacing?: Record<string, number>;
     screens?: Record<string, number>;
     /**
@@ -81,19 +99,51 @@ function resolveColorEntry(value: string, lookup: (name: string) => string | und
   return opacity === undefined ? base : applyOpacityToHex(base, opacity);
 }
 
-function resolveColors(extend: Record<string, string>, existing: Record<string, import('./theme').ColorEntry>): Record<string, string> {
-  const resolved: Record<string, string> = {};
+/**
+ * Resolves every color in `extend.colors` — the plain (light/mode-
+ * independent) entries first, then `dark`'s entries (if present) the exact
+ * same way, each side resolving purely against ITSELF plus `existing` (the
+ * built-in palette) — see `KbachConfig.extend.colors`'s own doc comment
+ * for the full "dark is a reserved key, not a color name" reasoning. A
+ * name is only mode-aware in the returned theme when it appears on BOTH
+ * sides; a `dark`-only name is skipped (no light value to pair it with).
+ */
+function resolveColors(
+  extend: { [colorName: string]: string | Record<string, string> | undefined; dark?: Record<string, string> },
+  existing: Record<string, ColorEntry>,
+): Record<string, ColorEntry> {
+  const { dark: darkExtend, ...lightExtend } = extend;
+
   // A mode-aware EXISTING entry (theme.colors can hold those now, for
   // useColors()) is treated as "not found" for aliasing purposes — see
   // this module's own doc comment for why.
-  const lookup = (name: string): string | undefined => {
-    const found = resolved[name] ?? existing[name];
+  const resolvedLight: Record<string, string> = {};
+  const lookupLight = (name: string): string | undefined => {
+    const found = resolvedLight[name] ?? existing[name];
     return typeof found === 'string' ? found : undefined;
   };
-  for (const [name, value] of Object.entries(extend)) {
-    resolved[name] = resolveColorEntry(value, lookup);
+  for (const [name, value] of Object.entries(lightExtend)) {
+    if (typeof value !== 'string') continue; // guards against a stray non-string value under a name other than "dark"
+    resolvedLight[name] = resolveColorEntry(value, lookupLight);
   }
-  return resolved;
+
+  const result: Record<string, ColorEntry> = { ...resolvedLight };
+  if (darkExtend) {
+    const resolvedDark: Record<string, string> = {};
+    const lookupDark = (name: string): string | undefined => {
+      const found = resolvedDark[name] ?? existing[name];
+      return typeof found === 'string' ? found : undefined;
+    };
+    for (const [name, value] of Object.entries(darkExtend)) {
+      resolvedDark[name] = resolveColorEntry(value, lookupDark);
+    }
+    for (const [name, darkValue] of Object.entries(resolvedDark)) {
+      const lightValue = resolvedLight[name];
+      if (lightValue === undefined) continue;
+      result[name] = { light: lightValue, dark: darkValue };
+    }
+  }
+  return result;
 }
 
 /** Merges a `KbachConfig` into `defaultTheme` — a pure function, no side effects. */

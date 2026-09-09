@@ -54,6 +54,51 @@ describe('resolveKbachConfig', () => {
     expect(theme.colors.accent).toBe('red');
   });
 
+  it('a color named on both sides of "dark" becomes a mode-aware { light, dark } entry', () => {
+    const theme = resolveKbachConfig({
+      extend: { colors: { surface: 'gray-2', dark: { surface: 'gray-11' } } },
+    });
+    expect(theme.colors.surface).toEqual({ light: defaultTheme.colors['gray-2'], dark: defaultTheme.colors['gray-11'] });
+  });
+
+  it('a color named only outside "dark" stays a plain, mode-independent string', () => {
+    const theme = resolveKbachConfig({
+      extend: { colors: { brand: '#ff6b35', surface: 'gray-2', dark: { surface: 'gray-11' } } },
+    });
+    expect(theme.colors.brand).toBe('#ff6b35');
+  });
+
+  it('a color named only under "dark" (no matching light value) is skipped entirely', () => {
+    const theme = resolveKbachConfig({ extend: { colors: { dark: { onlyDark: 'gray-11' } } } });
+    expect(theme.colors.onlyDark).toBeUndefined();
+  });
+
+  it('"dark" resolves its own opacity/alias references against itself and the palette, not the light side', () => {
+    const theme = resolveKbachConfig({
+      extend: {
+        colors: {
+          brand: '#ff6b35',
+          brandSoft: 'brand/30',
+          dark: { brand: '#ff8c5a', brandSoft: 'brand/30' },
+        },
+      },
+    });
+    expect(theme.colors.brand).toEqual({ light: '#ff6b35', dark: '#ff8c5a' });
+    // Light's own brandSoft still resolves against light's own brand.
+    expect((theme.colors.brandSoft as { light: string }).light).toBe('rgba(255,107,53,0.3)');
+    // brandSoft's "brand" reference INSIDE dark resolves to dark's OWN
+    // "#ff8c5a", not the light side's "#ff6b35" — each side is
+    // self-contained.
+    expect((theme.colors.brandSoft as { dark: string }).dark).toBe('rgba(255,140,90,0.3)');
+  });
+
+  it('a built-in palette reference inside "dark" resolves the same as it does on the light side', () => {
+    const theme = resolveKbachConfig({
+      extend: { colors: { surface: 'white', dark: { surface: 'gray-11' } } },
+    });
+    expect((theme.colors.surface as { dark: string }).dark).toBe(defaultTheme.colors['gray-11']);
+  });
+
   it('darkMode overrides the strategy', () => {
     expect(resolveKbachConfig({ darkMode: 'class' }).darkMode).toBe('class');
   });

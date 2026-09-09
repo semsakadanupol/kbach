@@ -46,8 +46,25 @@ export interface KbachConfig {
      * already-defined-above) is treated as a literal CSS value instead
      * (`accent: 'red'` — REAL CSS `red`, since there's no color named "red"
      * to alias), never an error either way.
+     *
+     * `dark` is a reserved key, not a color name — a SECOND way to write a
+     * mode-aware color, as a group instead of per-color: `{ surface:
+     * 'gray-2', card: 'white', dark: { surface: 'gray-11', card: 'gray-9' } }`
+     * makes `surface`/`card` mode-aware, while a name never mentioned under
+     * `dark` (like a hypothetical always-the-same `brand` here) stays a
+     * plain, mode-independent color. Equivalent to writing `surface: {
+     * light: 'gray-2', dark: 'gray-11' }` directly — pick whichever reads
+     * better for your config: per-color pairs when only a couple of colors
+     * are mode-aware, the grouped block when most of them are and writing
+     * "light"/"dark" twice per line would be repetitive. A name under
+     * `dark` with no matching top-level (light) entry is skipped — mode-
+     * aware colors need both sides written out. References inside `dark`
+     * resolve against the built-in palette and OTHER entries within `dark`
+     * itself (not the light-side custom colors, and not a light-side color
+     * already written as a `{ light, dark }` pair) — self-contained, the
+     * same way the light side already resolves independently of it.
      */
-    colors?: Record<string, ColorEntry | string>;
+    colors?: { [colorName: string]: ColorEntry | string | Record<string, string> | undefined; dark?: Record<string, string> };
     spacing?: Record<string, number>;
     screens?: Record<string, number>;
     /** Named font stacks, e.g. `{ display: '"Cal Sans", sans-serif' }` — adds to (or overrides one of) `defaultTheme.fontFamily`'s three names. */
@@ -84,16 +101,52 @@ function resolveColorEntry(
     : { light: applyOpacityToHex(base.light, opacity), dark: applyOpacityToHex(base.dark, opacity) };
 }
 
-function resolveColors(extend: Record<string, ColorEntry | string>, existing: Record<string, ColorEntry>): Record<string, ColorEntry> {
+/**
+ * Resolves every color in `extend.colors` — the light/per-color entries
+ * first (unchanged from before the grouped `dark` key existed: still
+ * accepts a plain string OR an explicit `{ light, dark }` pair), then
+ * `dark`'s entries (if present) as their OWN self-contained pass, each
+ * resolving purely against ITSELF plus `existing` (the built-in palette,
+ * plain-string entries only — see `KbachConfig.extend.colors`'s own doc
+ * comment). A name is only made mode-aware BY the grouped block when it
+ * appears on both sides; a `dark`-only name is skipped (no light value to
+ * pair it with), and a light-side name already written as its own
+ * `{ light, dark }` pair is left untouched by the grouped block entirely.
+ */
+function resolveColors(
+  extend: { [colorName: string]: ColorEntry | string | Record<string, string> | undefined; dark?: Record<string, string> },
+  existing: Record<string, ColorEntry>,
+): Record<string, ColorEntry> {
+  const { dark: darkExtend, ...lightExtend } = extend;
+
   const resolved: Record<string, ColorEntry> = {};
   const lookup = (name: string) => resolved[name] ?? existing[name];
   // Object.entries preserves declaration order, so an alias resolves
   // correctly as long as it's written AFTER the color it references —
   // the natural order anyone would write it in, and simpler to reason
   // about than old-kbach's depth-limited chain-walker.
-  for (const [name, value] of Object.entries(extend)) {
-    resolved[name] = resolveColorEntry(value, lookup);
+  for (const [name, value] of Object.entries(lightExtend)) {
+    if (typeof value === 'object' && value !== null && !('light' in value) && !('dark' in value)) continue; // a stray non-ColorEntry object under a name other than "dark" — ignore rather than crash
+    resolved[name] = resolveColorEntry(value as ColorEntry | string, lookup);
   }
+
+  if (darkExtend) {
+    const resolvedDark: Record<string, string> = {};
+    const lookupDark = (name: string): string | undefined => {
+      const found = resolvedDark[name] ?? existing[name];
+      return typeof found === 'string' ? found : undefined;
+    };
+    for (const [name, value] of Object.entries(darkExtend)) {
+      const entry = resolveColorEntry(value, lookupDark);
+      resolvedDark[name] = typeof entry === 'string' ? entry : entry.dark; // dark-block values are always plain strings going in; typeof-string going out unless a bad reference resolved to something else
+    }
+    for (const [name, darkValue] of Object.entries(resolvedDark)) {
+      const lightEntry = resolved[name];
+      if (lightEntry === undefined || typeof lightEntry !== 'string') continue; // no matching plain light value — skip (also skips a name already written as its own {light,dark} pair)
+      resolved[name] = { light: lightEntry, dark: darkValue };
+    }
+  }
+
   return resolved;
 }
 

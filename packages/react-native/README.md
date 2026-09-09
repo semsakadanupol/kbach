@@ -332,6 +332,20 @@ dark mode — this palette's own convention is 1 = lightest, 12 = darkest, so
 that's the same visual weight relative to its own background, no manual
 `colors.blue[isDark ? 7 : 6]` needed.
 
+**TypeScript error on a custom color?** `colors.brand` (any custom color
+from `kbach.config.js`) types as `string | ColorScale`, not plain `string`
+— `colors` serves both a flat color AND a shade family (`colors.blue`)
+through the same object, and TypeScript can't statically tell which one a
+given name is (your config is plain runtime JS, not a type declaration).
+If that union causes an error somewhere expecting a real `string` (a
+native style prop, a chart library), use `colors.get('brand')` instead —
+same value, typed as plain `string`:
+
+```tsx
+colors.brand;           // string | ColorScale — errors if assigned to a `string`-typed prop
+colors.get('brand');    // string — same value, always typed correctly
+```
+
 ---
 
 ## Reference

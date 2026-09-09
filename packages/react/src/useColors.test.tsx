@@ -133,4 +133,17 @@ describe('useColors', () => {
     expect(colors.doesNotExist[0]).toBeUndefined();
     expect(colors.blue[99]).toBeUndefined();
   });
+
+  it('get() returns the same value as dot access, typed as a plain string', async () => {
+    const { useColors } = await import('./useColors');
+    const colors = render(() => useColors());
+    const white: string = colors.get('white'); // no TS cast needed — this is the point
+    expect(white).toBe(colors.white);
+  });
+
+  it('get() falls back to the name itself, unresolved, for an unknown color', async () => {
+    const { useColors } = await import('./useColors');
+    const colors = render(() => useColors());
+    expect(colors.get('red')).toBe('red');
+  });
 });

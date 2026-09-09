@@ -20,6 +20,22 @@ export type ColorsAPI = {
 } & {
   /** Applies an opacity (0–100) to any color string this hook can return. */
   readonly alpha: (color: string, opacity?: number) => string;
+  /**
+   * Same lookup dot/bracket access does (`colors.get('brand')` ===
+   * `colors.brand`), typed as plain `string` instead of `string |
+   * ColorScale` — use this whenever the result goes somewhere that expects
+   * a real `string` (a native style prop, a chart library) and hits a type
+   * error otherwise. The wider union on every OTHER property here isn't a
+   * bug: a flat custom color (`brand`) and a shade-family prefix (`blue`)
+   * are served by the exact same object, and TypeScript has no way to
+   * statically know which one any given key names — `kbach.config.js`'s
+   * colors are plain runtime JS, not a type declaration this package could
+   * inspect ahead of time. A name with no matching theme entry falls back
+   * to the name itself, unresolved — the same "not a known color name ->
+   * literal value" convention `kbach.config.js`'s own color aliasing
+   * already uses (see `config.ts`'s `resolveColorEntry`), never an error.
+   */
+  readonly get: (name: string) => string;
 };
 
 function parseHexRgb(hex: string): [number, number, number] | null {
@@ -83,11 +99,14 @@ function makeColorsProxy(theme: ThemeConfig, isDark: boolean): ColorsAPI {
     });
   }
 
-  return new Proxy({ alpha } as unknown as ColorsAPI, {
+  const get = (name: string): string => resolveNamed(name) ?? name;
+
+  return new Proxy({ alpha, get } as unknown as ColorsAPI, {
     get(_, prop) {
       const key = String(prop);
       if (key === 'then') return undefined;
       if (key === 'alpha') return alpha;
+      if (key === 'get') return get;
       const direct = resolveNamed(key);
       if (direct !== undefined) return direct;
       if (!cache.has(key)) cache.set(key, makeFamilyProxy(key));
@@ -114,6 +133,7 @@ function makeColorsProxy(theme: ThemeConfig, isDark: boolean): ColorsAPI {
  * colors.blue[6];        // "#2563eb" — static, same value in both modes
  * colors.blue['6/50'];   // same, at 50% opacity
  * colors.brand;          // resolves per isDark if defined as { light, dark }
+ * colors.get('brand');   // same value as colors.brand, typed as plain `string`
  * ```
  */
 export function useColors(): ColorsAPI {

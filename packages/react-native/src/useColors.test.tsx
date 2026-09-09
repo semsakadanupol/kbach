@@ -105,4 +105,19 @@ describe('useColors (react-native)', () => {
     expect(colors.doesNotExist[0]).toBeUndefined();
     expect(colors.blue[99]).toBeUndefined();
   });
+
+  it('get() returns the same value as dot access, typed as a plain string', async () => {
+    mockAppearance(false);
+    const { useColors } = await setupTheme({ brand: '#ff6b35' });
+    const colors = render(() => useColors());
+    const brand: string = colors.get('brand'); // no TS cast needed — this is the point
+    expect(brand).toBe(colors.brand);
+  });
+
+  it('get() falls back to the name itself, unresolved, for an unknown color', async () => {
+    mockAppearance(false);
+    const { useColors } = await setupTheme({});
+    const colors = render(() => useColors());
+    expect(colors.get('red')).toBe('red');
+  });
 });

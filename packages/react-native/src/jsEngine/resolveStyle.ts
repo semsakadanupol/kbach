@@ -28,6 +28,7 @@
 import { parseClass } from './parser';
 import { resolveUtilityNative } from './resolveUtilityNative';
 import { reduceConstantMath } from './calc';
+import { substituteModeAwareColorToken } from './resolvers/color';
 import type { ThemeConfig } from '../theme';
 import type { StyleObject } from '../nativeBridge';
 
@@ -209,7 +210,12 @@ export function resolveStyleJsWithWarnings(
   // class wins" convention as everywhere else in this engine.
   const transformOps = new Map<string, string | number>();
 
-  for (const token of classString.split(/\s+/).filter(Boolean)) {
+  for (const rawToken of classString.split(/\s+/).filter(Boolean)) {
+    // A mode-aware color name (`bg-surface`) is rewritten to the ONE hex
+    // value matching `colorScheme` here, before parsing — see
+    // `substituteModeAwareColorToken`'s own doc comment. A token naming no
+    // mode-aware color passes through unchanged.
+    const token = substituteModeAwareColorToken(rawToken, theme, colorScheme);
     const parsed = parseClass(token);
     const allModifiersHold = parsed.modifiers.every(
       (m) => nativeModifierState(m, theme, colorScheme, pressed, width) === true,

@@ -61,6 +61,15 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('dark:bg-blue-8', t, 'dark', false, W).backgroundColor).toBe('#1e40af');
   });
 
+  it('a plain class naming a mode-aware color resolves to the current scheme\'s side', () => {
+    // Regression: a color made mode-aware via kbach.config.js's grouped
+    // `dark: {}` block (config.ts) used to silently resolve to NOTHING at
+    // all here — see substituteModeAwareColorToken's own doc comment.
+    const t = theme({ colors: { surface: { light: '#f9fafb', dark: '#111827' } } });
+    expect(resolveStyleJs('bg-surface', t, 'light', false, W).backgroundColor).toBe('#f9fafb');
+    expect(resolveStyleJs('bg-surface', t, 'dark', false, W).backgroundColor).toBe('#111827');
+  });
+
   it('applies the active modifier only when pressed', () => {
     const t = theme();
     expect(resolveStyleJs('active:bg-blue-8', t, 'light', false, W)).toEqual({});

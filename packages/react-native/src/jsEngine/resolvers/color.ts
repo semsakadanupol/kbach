@@ -13,15 +13,68 @@
  * `theme.colors` can also hold `{ light, dark }` entries (for
  * `useColors()` — see `theme.ts`'s own `ColorEntry` doc comment): a
  * mode-aware entry used directly in a utility CLASS name simply doesn't
- * resolve here, same as it wouldn't in the Rust engine either.
+ * resolve here, same as it wouldn't in the Rust engine either — by the time
+ * a class reaches this lookup, `substituteModeAwareColorToken` below has
+ * already rewritten any mode-aware color NAME to a plain hex value.
  */
-import type { ThemeConfig } from '../../theme';
+import type { ColorEntry, ThemeConfig } from '../../theme';
 import type { ParsedClass } from '../parser';
 
 // Only used within this file — not part of the jsEngine's public surface.
 function lookupHex(theme: ThemeConfig, key: string): string | null {
   const entry = theme.colors[key];
   return typeof entry === 'string' ? entry : null;
+}
+
+// The only prefixes a mode-aware color name is recognized under — mirrors
+// resolvers/color.rs's identical MODE_AWARE_COLOR_PREFIXES constant exactly
+// (see that file's own doc comment for why this list is shared/load-bearing
+// rather than duplicated ad hoc per call site).
+const MODE_AWARE_COLOR_PREFIXES = ['bg-', 'text-', 'border-'] as const;
+
+/** Mirrors resolvers/color.rs's `find_mode_aware_color`. */
+function findModeAwareColor(base: string, theme: ThemeConfig): { prefix: string; light: string; dark: string } | null {
+  const important = base.startsWith('!') ? '!' : '';
+  const rest = important ? base.slice(1) : base;
+  for (const prefix of MODE_AWARE_COLOR_PREFIXES) {
+    if (!rest.startsWith(prefix)) continue;
+    const value = rest.slice(prefix.length);
+    const entry: ColorEntry | undefined = theme.colors[value];
+    if (typeof entry === 'object' && entry !== null) {
+      return { prefix: `${important}${prefix}`, light: entry.light, dark: entry.dark };
+    }
+  }
+  return null;
+}
+
+/**
+ * Native's counterpart to the web engine's class-string-level mode-aware
+ * expansion (`expand_mode_aware_color_classes` in resolvers/color.rs, used
+ * by @kbach/react's/the web build's CSS-generation path only) — this
+ * jsEngine has no such pre-pass at all today, so a plain `bg-surface` (where
+ * `surface` is a `{ light, dark }` theme color, e.g. from a `kbach.config.js`
+ * grouped `dark: {}` block — see `config.ts`'s own doc comment) used to
+ * resolve to NOTHING here, dropped silently with no warning. Mirrors
+ * `resolve_style.rs`'s `substitute_mode_aware_color_token` exactly: rewrites
+ * the color NAME to the single hex matching the CURRENT `colorScheme`
+ * directly in place, since (unlike web's static, build-time CSS, which must
+ * cover both states in one stylesheet) this engine already knows which mode
+ * is active at resolve time — no light/dark PAIR needed, and no reason to
+ * ever compute the side that isn't active. An explicit `dark:` (or any
+ * other) modifier already on the token is left exactly as-is; only the
+ * color name itself is substituted — `nativeModifierState`
+ * (resolveStyle.ts) still separately decides whether the token applies at
+ * all.
+ */
+export function substituteModeAwareColorToken(token: string, theme: ThemeConfig, colorScheme: string): string {
+  const segments = token.split(':');
+  const base = segments.pop() ?? token;
+  const modifierPrefix = segments.length > 0 ? `${segments.join(':')}:` : '';
+
+  const found = findModeAwareColor(base, theme);
+  if (found === null) return token;
+  const hex = colorScheme === 'dark' ? found.dark : found.light;
+  return `${modifierPrefix}${found.prefix}[${hex}]`;
 }
 
 function hexToRgb(hex: string): [number, number, number] | null {

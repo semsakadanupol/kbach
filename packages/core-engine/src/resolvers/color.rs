@@ -3,11 +3,15 @@ use crate::parser::ParsedClass;
 use crate::theme::{ColorValue, ThemeConfig};
 
 /// Looks up a named theme color as a plain hex string. Mode-aware colors
-/// ({ light, dark }) are only ever resolved via `expand_mode_aware_color_classes`
-/// BEFORE tokenizing — by the time a class reaches this lookup, a mode-aware
-/// name has already been expanded into a literal light/dark class pair, so
-/// finding one here directly means it was used some other way this engine
-/// doesn't support; treated as unresolvable rather than guessing a mode.
+/// ({ light, dark }) are only ever resolved BEFORE tokenizing — via
+/// `expand_mode_aware_color_classes` on web, or `substitute_mode_aware_color_token`
+/// on native (both in this file) — so by the time a class reaches this
+/// lookup, a mode-aware name has already been rewritten to a plain hex
+/// value, on both engines. Finding one here directly means it was used some
+/// other way neither pre-pass covers (e.g. a `ring-`/`decoration-` color, or
+/// one with an inline `/N` opacity suffix — see those functions' own doc
+/// comments for the exact prefixes/shapes they recognize); treated as
+/// unresolvable rather than guessing a mode.
 pub(super) fn lookup_hex<'a>(theme: &'a ThemeConfig, key: &str) -> Option<&'a str> {
     match theme.colors.get(key)? {
         ColorValue::Plain(hex) => Some(hex.as_str()),
@@ -268,18 +272,80 @@ fn expand_token(token: &str, theme: &ThemeConfig) -> String {
     }
 }
 
-fn expand_base(base: &str, theme: &ThemeConfig) -> Option<(String, String)> {
+// The only prefixes a mode-aware color name is recognized under, on either
+// engine — shared by `find_mode_aware_color` so web's expansion and native's
+// substitution (below) can never drift on which utilities support this.
+const MODE_AWARE_COLOR_PREFIXES: [&str; 3] = ["bg-", "text-", "border-"];
+
+/// Finds a `bg-`/`text-`/`border-` (optionally `!`-important-prefixed) class
+/// base that names a mode-aware theme color, returning the prefix (with the
+/// `!` preserved) plus both hex sides — shared by `expand_base` (web, needs
+/// both) and `substitute_mode_aware_color_token` (native, picks one) so
+/// neither can drift from the other on which prefixes/markers are
+/// recognized.
+fn find_mode_aware_color<'a>(base: &'a str, theme: &'a ThemeConfig) -> Option<(String, &'a str, &'a str)> {
     let (important, rest) = match base.strip_prefix('!') {
         Some(r) => ("!", r),
         None => ("", base),
     };
-    for prefix in ["bg-", "text-", "border-"] {
+    for prefix in MODE_AWARE_COLOR_PREFIXES {
         let Some(value) = rest.strip_prefix(prefix) else { continue };
         if let Some(ColorValue::ModeAware { light, dark }) = theme.colors.get(value) {
-            return Some((format!("{important}{prefix}[{light}]"), format!("{important}{prefix}[{dark}]")));
+            return Some((format!("{important}{prefix}"), light.as_str(), dark.as_str()));
         }
     }
     None
+}
+
+fn expand_base(base: &str, theme: &ThemeConfig) -> Option<(String, String)> {
+    let (prefix, light, dark) = find_mode_aware_color(base, theme)?;
+    Some((format!("{prefix}[{light}]"), format!("{prefix}[{dark}]")))
+}
+
+/// Native's counterpart to `expand_mode_aware_color_classes` — used by
+/// `resolve_style_with_warnings` (the shared native/JNI + JS-fallback
+/// runtime entry point), never by the web/CSS-generation path. Web must
+/// emit a stylesheet valid for BOTH light and dark up front, at build time,
+/// with no "current mode" to consult, hence the light/dark class PAIR
+/// `expand_mode_aware_color_classes` produces. Native resolves fresh on
+/// every call with a known, single active `color_scheme` already in hand
+/// (see that parameter on `resolve_style_with_warnings`), so there's never
+/// a reason to compute the side that isn't active — this substitutes the
+/// ONE matching hex directly in place instead.
+///
+/// An explicit `dark:` (or any other) modifier already written on the token
+/// is left exactly as-is, including on a mode-aware color (`dark:bg-surface`)
+/// — this only ever swaps which hex the color NAME resolves to, never which
+/// modifiers gate the token; `native_modifier_state` still decides
+/// separately whether the token applies at all. That means a token like
+/// `dark:bg-surface` in light mode still substitutes (to `dark:bg-[<light
+/// hex>]`, matching `color_scheme`) even though the `dark:` modifier will
+/// go on to filter the whole token out regardless — harmless, since the
+/// substituted hex is never actually used in that case.
+///
+/// Before this existed, a plain `bg-surface` (or any mode-aware color used
+/// directly in a class name) silently resolved to nothing at all on
+/// native/Expo Go — `lookup_hex`'s `ColorValue::Plain`-only match returned
+/// `None` for a `ModeAware` entry with no substitute ever attempted, so the
+/// whole declaration was dropped with no warning. Confirmed as a real,
+/// reported regression: a `kbach.config.js` using the grouped `dark: {}`
+/// block (see `@kbach/react-native`'s `config.ts`) turns a color into
+/// exactly this `ModeAware` shape, and a plain `bg-<name>` class — the only
+/// way most apps ever use a color — is the natural, expected way to consume
+/// it; it should never have needed a separate `useColors()` call just
+/// because the color happened to be mode-aware.
+pub fn substitute_mode_aware_color_token(token: &str, theme: &ThemeConfig, color_scheme: &str) -> String {
+    let mut segments: Vec<&str> = token.split(':').collect();
+    let base = segments.pop().unwrap_or(token);
+    let modifier_prefix = if segments.is_empty() { String::new() } else { format!("{}:", segments.join(":")) };
+
+    match find_mode_aware_color(base, theme) {
+        Some((prefix, light, dark)) => {
+            let hex = if color_scheme == "dark" { dark } else { light };
+            format!("{modifier_prefix}{prefix}[{hex}]")
+        }
+        None => token.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -480,6 +546,53 @@ mod tests {
         let theme = theme_with_colors();
         let expanded = expand_mode_aware_color_classes("hover:dark:bg-surface", &theme);
         assert_eq!(expanded, "hover:dark:bg-[#111827]");
+    }
+
+    #[test]
+    fn native_substitution_picks_the_light_hex_in_light_mode() {
+        let theme = theme_with_colors();
+        assert_eq!(substitute_mode_aware_color_token("bg-surface", &theme, "light"), "bg-[#f9fafb]");
+    }
+
+    #[test]
+    fn native_substitution_picks_the_dark_hex_in_dark_mode() {
+        let theme = theme_with_colors();
+        assert_eq!(substitute_mode_aware_color_token("bg-surface", &theme, "dark"), "bg-[#111827]");
+    }
+
+    #[test]
+    fn native_substitution_preserves_a_stacked_modifier_prefix() {
+        let theme = theme_with_colors();
+        assert_eq!(substitute_mode_aware_color_token("hover:dark:text-surface", &theme, "dark"), "hover:dark:text-[#111827]");
+    }
+
+    #[test]
+    fn native_substitution_preserves_an_important_marker() {
+        let theme = theme_with_colors();
+        assert_eq!(substitute_mode_aware_color_token("!bg-surface", &theme, "dark"), "!bg-[#111827]");
+    }
+
+    #[test]
+    fn native_substitution_leaves_a_plain_color_class_unchanged() {
+        let theme = theme_with_colors();
+        assert_eq!(substitute_mode_aware_color_token("bg-blue-6", &theme, "dark"), "bg-blue-6");
+    }
+
+    #[test]
+    fn native_substitution_leaves_a_non_color_class_unchanged() {
+        let theme = theme_with_colors();
+        assert_eq!(substitute_mode_aware_color_token("flex-1", &theme, "dark"), "flex-1");
+    }
+
+    #[test]
+    fn native_substitution_still_swaps_an_explicit_dark_modifier_to_match_the_current_scheme() {
+        // An explicit `dark:bg-surface` in LIGHT mode still substitutes to
+        // the light hex (matching `color_scheme`, not the `dark:` written on
+        // the token) — harmless, since `native_modifier_state` filters this
+        // whole token out in light mode regardless; see this function's own
+        // doc comment.
+        let theme = theme_with_colors();
+        assert_eq!(substitute_mode_aware_color_token("dark:bg-surface", &theme, "light"), "dark:bg-[#f9fafb]");
     }
 
     #[test]

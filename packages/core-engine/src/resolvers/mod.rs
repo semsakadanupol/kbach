@@ -22,7 +22,7 @@ mod typography;
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
 
-pub use color::expand_mode_aware_color_classes;
+pub use color::{expand_mode_aware_color_classes, substitute_mode_aware_color_token};
 
 /// Looks up the `@keyframes` name + body for an `animate-*` utility's value
 /// (e.g. `"spin"` -> `("kb-spin", "from { ... } to { ... }")`) — consulted

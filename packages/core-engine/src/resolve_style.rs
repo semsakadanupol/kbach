@@ -39,7 +39,7 @@
 use crate::calc::reduce_constant_math;
 use crate::parser::{parse_class, ParsedClass};
 use crate::registry::{self, DarkScheme};
-use crate::resolvers::{resolve_utility, resolve_utility_native};
+use crate::resolvers::{resolve_utility, resolve_utility_native, substitute_mode_aware_color_token};
 use crate::theme::ThemeConfig;
 use serde_json::{Map, Number, Value};
 
@@ -352,8 +352,19 @@ pub fn resolve_style_with_warnings(
     // everywhere else in this engine.
     let mut transform_ops: Map<String, Value> = Map::new();
 
-    for token in class_string.split_whitespace() {
-        let parsed = parse_class(token);
+    for raw_token in class_string.split_whitespace() {
+        // A mode-aware color name (`bg-surface`, where `surface` is a
+        // `{ light, dark }` theme color) is rewritten to the ONE hex value
+        // matching `color_scheme` here, before parsing — see
+        // `substitute_mode_aware_color_token`'s own doc comment for why
+        // native does this differently from web's light/dark PAIR
+        // expansion. A token naming no mode-aware color passes through
+        // unchanged (and unallocated — `Cow` would save the copy in that,
+        // the common, case, but every token here is re-derived into a fresh
+        // `ParsedClass` immediately after regardless, so the extra
+        // allocation is not worth the complexity).
+        let token = substitute_mode_aware_color_token(raw_token, theme, color_scheme);
+        let parsed = parse_class(&token);
 
         let all_modifiers_hold = parsed
             .modifiers
@@ -366,7 +377,7 @@ pub fn resolve_style_with_warnings(
             // than only catching it half the time depending on runtime
             // dark-mode/breakpoint state.
             if !is_recognized_utility(&parsed, theme) {
-                warnings.push(typo_warning(token));
+                warnings.push(typo_warning(&token));
             }
             continue;
         }
@@ -384,7 +395,7 @@ pub fn resolve_style_with_warnings(
             // and never needs the web dispatcher called again just to
             // confirm what a successful native resolve already proves.
             if !is_recognized_utility(&parsed, theme) {
-                warnings.push(typo_warning(token));
+                warnings.push(typo_warning(&token));
             }
             continue;
         };
@@ -532,6 +543,25 @@ mod tests {
 
         let dark = resolve_style("dark:bg-blue-8", &t, "dark", false, W);
         assert_eq!(dark.get("backgroundColor").unwrap(), "#1e40af");
+    }
+
+    #[test]
+    fn a_plain_class_naming_a_mode_aware_color_resolves_to_the_current_schemes_side() {
+        // Regression: a color made mode-aware via kbach.config.js's grouped
+        // `dark: {}` block (@kbach/react-native's config.ts) used to
+        // silently resolve to NOTHING at all here — see
+        // `substitute_mode_aware_color_token`'s own doc comment.
+        let mut t = theme();
+        t.colors.insert(
+            "surface".to_string(),
+            ColorValue::ModeAware { light: "#f9fafb".to_string(), dark: "#111827".to_string() },
+        );
+
+        let light = resolve_style("bg-surface", &t, "light", false, W);
+        assert_eq!(light.get("backgroundColor").unwrap(), "#f9fafb");
+
+        let dark = resolve_style("bg-surface", &t, "dark", false, W);
+        assert_eq!(dark.get("backgroundColor").unwrap(), "#111827");
     }
 
     #[test]

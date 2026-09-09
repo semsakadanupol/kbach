@@ -74,13 +74,19 @@ scope native itself excludes.
 
 Gets you the full native engine instead of the JS fallback.
 
-1. Add the babel plugin:
+1. Add the babel plugin — a fresh Expo project's generated `babel.config.js`
+   uses the function form below (`api.cache(true)`), not a plain exported
+   object; add the plugin to the array **inside** the returned config,
+   keep everything else as-is:
 
    ```js
    // babel.config.js
-   module.exports = {
-     presets: ['babel-preset-expo'],
-     plugins: ['@kbach/react-native/babel-plugin'],
+   module.exports = function (api) {
+     api.cache(true);
+     return {
+       presets: ['babel-preset-expo'],
+       plugins: ['@kbach/react-native/babel-plugin'], // <- add this line
+     };
    };
    ```
 

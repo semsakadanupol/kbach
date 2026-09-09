@@ -7,38 +7,58 @@ resolved to a `StyleSheet`-ready style object instead of injected CSS.
 > Beta. Native is Android-only (no iOS bridge yet). Ships a prebuilt native
 > module — no Rust toolchain or manual native wiring required.
 
-## Install
+## Contents
+
+- [1. Install](#1-install)
+- [2. Set up your project](#2-set-up-your-project) — pick the ONE section matching how you run your app
+- [3. Configure your theme (`kbach.config.js`)](#3-configure-your-theme-kbachconfigjs)
+- [4. Dark mode](#4-dark-mode)
+- [5. Modifiers on native](#5-modifiers-on-native)
+- [6. Reading colors as values](#6-reading-colors-as-values)
+- [Reference](#reference): [arbitrary math](#arbitrary-math-calc-clamp-min-max) · [unknown-class warnings](#unknown-class-warnings-typo-detection) · [dynamic tokens](#dynamic-tokens) · [monorepo installs](#monorepo-installs-npmyarnpnpm-workspaces)
+
+---
+
+## 1. Install
 
 ```sh
 npm install @kbach/react-native
 ```
 
-Then, pick the one section below that matches how you're actually running
-the app — each is a genuinely different setup, not layered options:
+## 2. Set up your project
 
-- **React Native CLI** (`npx react-native ...`) → [React Native CLI](#react-native-cli)
-- **Expo, using Expo Go** (`npx expo start`, scanning the QR code in the Expo
-  Go app) → [Expo Go](#expo-go) — nothing to configure at all
-- **Expo, using a dev client or a bare/prebuilt project** (`npx expo run:android`,
-  or EAS Build) → [Expo (dev client / prebuild)](#expo-dev-client--prebuild)
-- **Expo Web** (`npx expo start --web`, or any `react-native-web` target) →
-  [Expo Web](#expo-web) — also nothing to configure
+Each subsection below is a **complete, standalone setup** for one way of
+running an RN/Expo app — read only the one that matches you, not all four.
+
+| How you run your app | Read |
+| :-- | :-- |
+| `npx react-native ...` (React Native CLI) | [React Native CLI](#react-native-cli) |
+| `npx expo start`, scanning the QR code in the **Expo Go** app | [Expo Go](#expo-go) — nothing to configure |
+| `npx expo run:android`, a dev client, or EAS Build | [Expo (dev client / prebuild)](#expo-dev-client--prebuild) |
+| `npx expo start --web`, or any `react-native-web` target | [Expo Web](#expo-web) — nothing to configure |
 
 ### React Native CLI
 
-```js
-// babel.config.js
-module.exports = {
-  presets: ['module:@react-native/babel-preset'],
-  plugins: ['@kbach/react-native/babel-plugin'],
-};
-```
+1. Add the babel plugin:
 
-Rebuild the Android app afterward so Gradle picks up the native module.
+   ```js
+   // babel.config.js
+   module.exports = {
+     presets: ['module:@react-native/babel-preset'],
+     plugins: ['@kbach/react-native/babel-plugin'],
+   };
+   ```
+
+2. Rebuild the Android app (`npx react-native run-android`) so Gradle picks
+   up the native module.
+3. Continue to [Configure your theme](#3-configure-your-theme-kbachconfigjs) (optional, but almost always what you want next).
 
 ### Expo Go
 
-Works out of the box — no prebuild, no dev client, nothing to configure.
+**Nothing to configure at all.** Skip straight to
+[Configure your theme](#3-configure-your-theme-kbachconfigjs) — or just
+start writing `className` right away using the defaults.
+
 Expo Go can't load third-party native code, so this falls back to a pure-JS
 engine automatically. Covers layout, spacing, border/radius, plain colors,
 font-weight, text-transform/decoration, line-height, letter-spacing,
@@ -52,32 +72,37 @@ scope native itself excludes.
 
 ### Expo (dev client / prebuild)
 
-Gets you the full native engine instead of the JS fallback:
+Gets you the full native engine instead of the JS fallback.
 
-```js
-// babel.config.js
-module.exports = {
-  presets: ['babel-preset-expo'],
-  plugins: ['@kbach/react-native/babel-plugin'],
-};
-```
+1. Add the babel plugin:
 
-```sh
-npx expo prebuild
-npx expo run:android
-```
+   ```js
+   // babel.config.js
+   module.exports = {
+     presets: ['babel-preset-expo'],
+     plugins: ['@kbach/react-native/babel-plugin'],
+   };
+   ```
 
-Requires the New Architecture enabled (`"newArchEnabled": true` in
-`app.json`, on by default in current Expo SDKs). EAS Build works the same
-way, no extra config.
+2. Confirm the New Architecture is enabled — `"newArchEnabled": true` in
+   `app.json` (on by default in current Expo SDKs).
+3. Prebuild and run:
+
+   ```sh
+   npx expo prebuild
+   npx expo run:android
+   ```
+
+   EAS Build works the same way, no extra config.
+4. Continue to [Configure your theme](#3-configure-your-theme-kbachconfigjs) (optional, but almost always what you want next).
 
 ### Expo Web
 
-Works out of the box — resolves through the same real-CSS engine
+**Nothing to configure at all.** Resolves through the same real-CSS engine
 `@kbach/react` uses on the DOM, with the FULL modifier set (`group-hover:`,
 `peer-hover:`, container queries, `has-[...]:`, etc.) — everything real
 Tailwind supports. Native supports a smaller, explicitly-scoped subset; see
-"Modifiers on native" below for exactly what that covers.
+[Modifiers on native](#5-modifiers-on-native) for exactly what that covers.
 
 **Static rendering (SSR) caveat:** `dark:`/responsive classes on content
 that's part of the initial pre-rendered HTML resolve against the *server*,
@@ -91,89 +116,122 @@ useEffect(() => setMounted(true), []);
 <View className={mounted ? 'bg-gray-1 dark:bg-gray-12' : 'bg-gray-1'} />;
 ```
 
-### Monorepo installs (npm/yarn/pnpm workspaces)
+## 3. Configure your theme (`kbach.config.js`)
 
-If your app lives in a monorepo where `@kbach/react-native` is a workspace
-package (a `file:`/`link:` dependency, or hoisted rather than nested), watch
-for **two physical copies of `react-native`/`react`** ending up in your
-dependency tree — one this package would otherwise resolve up to from its
-own directory, and a different one your app's own files resolve to. Metro
-walks `node_modules` hierarchically per-file, so it can silently hand two
-different files two different copies of the *same* module, each with its
-own separate module state.
+This step is **optional** — every class already works against a built-in
+default palette/spacing/breakpoint scale with no config file at all. Add a
+`kbach.config.js` when you want your own color names, custom spacing, or
+extra breakpoints.
 
-This isn't hypothetical: it's the root cause of a real dark-mode bug this
-package shipped and fixed — `useColorScheme()`/`Appearance` in one copy
-never saw changes made through the other, so an explicit theme toggle
-appeared to do nothing. The fix is a Metro config override that forces a
-single instance, **required in your app**, not something this package can
-do on your behalf from inside `node_modules`:
+1. Create a **`kbach.config.js` file at your project root** (same folder as
+   `package.json` — the one you run `expo start`/`react-native start` from):
+
+   ```js
+   // kbach.config.js
+   module.exports = {
+     extend: {
+       colors: {
+         brand: '#ff6b35',
+       },
+     },
+   };
+   ```
+
+2. That's it — **no import, no `applyKbachConfig()` call needed.** If you
+   completed step 2 above (the babel plugin is installed), it detects
+   `kbach.config.js` automatically and applies it before your app's first
+   render. You only need to call `applyKbachConfig()`/`resolveKbachConfig()`
+   yourself if you're changing the theme again at *runtime* (e.g. loading a
+   different config after login) — see the exports below.
+3. Use it: `<View className="bg-brand" />`.
+
+> **Common mistake:** `kbach.config.js` is a plain **JavaScript** file, not
+> JSON — an object key containing a hyphen (`surface-dim`) must be quoted
+> as a string (`'surface-dim': '#121318'`), or it's invalid JS syntax and
+> the whole config file fails to load. Any key that's a valid identifier
+> (letters/digits/underscore, e.g. `brand`, `surface2`) can stay unquoted.
+
+### `extend.colors`
+
+Every value is either a literal color, or a **reference** to another color
+name (optionally with an opacity suffix):
 
 ```js
-// metro.config.js
-const path = require('path');
-// React Native CLI: const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
-// Expo:              const { getDefaultConfig } = require('expo/metro-config');
-
-const projectRoot = __dirname;
-const workspaceRoot = path.resolve(projectRoot, '../..'); // -> your monorepo root
-
-const config = getDefaultConfig(projectRoot);
-config.watchFolders = [workspaceRoot];
-
-const forcedSingleInstance = {
-  'react-native': path.resolve(projectRoot, 'node_modules/react-native'),
-  react: path.resolve(projectRoot, 'node_modules/react'),
-};
-const defaultResolveRequest = config.resolver.resolveRequest;
-config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (Object.prototype.hasOwnProperty.call(forcedSingleInstance, moduleName)) {
-    return { type: 'sourceFile', filePath: require.resolve(forcedSingleInstance[moduleName]) };
-  }
-  return defaultResolveRequest
-    ? defaultResolveRequest(context, moduleName, platform)
-    : context.resolveRequest(context, moduleName, platform);
-};
-
-module.exports = config; // (React Native CLI: mergeConfig(getDefaultConfig(projectRoot), config))
+colors: {
+  brand: '#ff6b35',           // literal hex
+  accent: 'orange-5',         // references a BUILT-IN palette color
+  accentSoft: 'orange-5/50',  // ...at 50% opacity
+  brandSoft: 'brand/30',      // references a color defined EARLIER in this object, at 30% opacity
+  danger: 'red',              // not a known color name -> used as a literal CSS value
+}
 ```
 
-A single, non-monorepo `npm install` never hits this — only relevant if your
-app and `@kbach/react-native` share a workspace root.
+**Mode-aware colors** (a different value per light/dark) — two equivalent
+ways to write one:
 
-## Modifiers on native
+```js
+// Per-color pair — good for one or two mode-aware colors
+colors: {
+  surface: { light: 'gray-2', dark: 'gray-11' },
+}
 
-Native has no CSS selector/cascade engine, so only a fixed, explicitly
-supported set of modifiers actually applies — everything else (`group-*:`,
-`peer-*:`, `has-[...]:`, `aria-*:`, `data-*:`, container queries, ...)
-parses without error but never takes effect. Supported today:
+// Grouped "dark" block — good when MOST of your colors are mode-aware
+colors: {
+  surface: 'gray-2',
+  card: 'white',
+  dark: {
+    surface: 'gray-11',
+    card: 'gray-9',
+  },
+}
+```
 
-- **`dark:`** — reacts to the OS/app color scheme, see "Dark mode" below.
-- **`sm:`/`md:`/`lg:`/`xl:`/`2xl:`** — reacts to `useWindowDimensions()`
-  crossing the matching `theme.screens` breakpoint (rotation/resize/fold).
-- **`active:`** — `Pressable`'s own press state, via its style-callback API.
-- **`hover:`** — tracked via `onHoverIn`/`onHoverOut`, which RN only ever
-  fires on a platform with real pointer input (iOS 13+/Android/macOS/
-  Windows via a mouse/trackpad/Apple Pencil hover) — inert (never fires) on
-  a touch-only device, the same way real Tailwind's `hover:` already
-  degrades on a touch-only *browser*. Composing it onto any host type is
-  harmless even where it never fires.
-- **`focus:`** — tracked via `onFocus`/`onBlur` (keyboard/external-keyboard/
-  TV-remote/tab navigation, and `TextInput` focus).
-- **`disabled:`** — reads the element's own `disabled` prop directly; no
-  event tracking needed, since a prop change already re-renders normally.
-- Any combination of the above chained on one class (`sm:dark:bg-blue-8`,
-  `hover:focus:opacity-100`) requires every named condition to hold at once
-  — chain order never matters (`dark:sm:` and `sm:dark:` are equivalent).
+Both produce the same result: `bg-surface` (no `dark:` prefix needed)
+automatically resolves to the right shade for the current mode. `dark` is a
+reserved key here, not a color name — a color never mentioned under `dark`
+stays a plain, mode-independent color. A name written under `dark` with no
+matching top-level entry is skipped (mode-aware colors need both sides).
 
-`group-hover:`/`peer-hover:` and friends are NOT implemented on native —
-doing so needs a React Context bridge (propagating an ancestor's hover/
-press/focus state down to descendants, since there's no `.group`/`.peer`
-selector relationship to lean on) that doesn't exist today. If you need
-group/peer-style coordination on native right now, lift the shared state
-into a parent component yourself and pass it down as an explicit prop.
+### `extend.spacing` / `extend.screens` / `extend.fontFamily` / `extend.container`
 
-## Dark mode
+```js
+module.exports = {
+  extend: {
+    spacing: { 128: 512 },                              // p-128 -> 512
+    screens: { '3xl': 1920 },                            // 3xl:flex-row
+    fontFamily: { display: '"Cal Sans", sans-serif' },   // font-display
+    container: { center: true, padding: '2rem' },
+  },
+};
+```
+
+### `theme` (replace instead of extend)
+
+`theme.colors`/`theme.spacing`/`theme.screens`/`theme.fontFamily` **replace**
+the built-in defaults entirely instead of adding to them — use this only if
+you want to drop the default palette/scale altogether:
+
+```js
+module.exports = {
+  theme: {
+    colors: { brand: '#ff6b35' }, // ONLY color available now — the default 22-family palette is gone
+  },
+};
+```
+
+### `darkMode`
+
+```js
+module.exports = {
+  darkMode: 'attribute', // 'attribute' (default) | 'class' | 'media'
+};
+```
+
+Controls how Expo Web reflects dark mode in the DOM; has no effect on real
+native, which always resolves `dark:` from a live parameter (see
+[Dark mode](#4-dark-mode) below).
+
+## 4. Dark mode
 
 **Zero setup, on every platform this package supports** — real native
 *and* Expo Web. Unlike [`@kbach/react`](https://www.npmjs.com/package/@kbach/react),
@@ -218,7 +276,39 @@ itself, so nothing changes for apps that don't opt in. Prefer wiring your
 own storage manually instead? `setGlobalThemeMode()` before your first
 render still works exactly as before.
 
-## Reading colors as values
+## 5. Modifiers on native
+
+Native has no CSS selector/cascade engine, so only a fixed, explicitly
+supported set of modifiers actually applies — everything else (`group-*:`,
+`peer-*:`, `has-[...]:`, `aria-*:`, `data-*:`, container queries, ...)
+parses without error but never takes effect. Supported today:
+
+- **`dark:`** — reacts to the OS/app color scheme, see [Dark mode](#4-dark-mode).
+- **`sm:`/`md:`/`lg:`/`xl:`/`2xl:`** — reacts to `useWindowDimensions()`
+  crossing the matching `theme.screens` breakpoint (rotation/resize/fold).
+- **`active:`** — `Pressable`'s own press state, via its style-callback API.
+- **`hover:`** — tracked via `onHoverIn`/`onHoverOut`, which RN only ever
+  fires on a platform with real pointer input (iOS 13+/Android/macOS/
+  Windows via a mouse/trackpad/Apple Pencil hover) — inert (never fires) on
+  a touch-only device, the same way real Tailwind's `hover:` already
+  degrades on a touch-only *browser*. Composing it onto any host type is
+  harmless even where it never fires.
+- **`focus:`** — tracked via `onFocus`/`onBlur` (keyboard/external-keyboard/
+  TV-remote/tab navigation, and `TextInput` focus).
+- **`disabled:`** — reads the element's own `disabled` prop directly; no
+  event tracking needed, since a prop change already re-renders normally.
+- Any combination of the above chained on one class (`sm:dark:bg-blue-8`,
+  `hover:focus:opacity-100`) requires every named condition to hold at once
+  — chain order never matters (`dark:sm:` and `sm:dark:` are equivalent).
+
+`group-hover:`/`peer-hover:` and friends are NOT implemented on native —
+doing so needs a React Context bridge (propagating an ancestor's hover/
+press/focus state down to descendants, since there's no `.group`/`.peer`
+selector relationship to lean on) that doesn't exist today. If you need
+group/peer-style coordination on native right now, lift the shared state
+into a parent component yourself and pass it down as an explicit prop.
+
+## 6. Reading colors as values
 
 For anywhere you need a real color, not a `className` — a chart prop, a
 native shadow color:
@@ -231,23 +321,18 @@ colors.blue[6];       // '#2563eb' — static, same value in both modes
 colors.blue['6/50'];  // same, at 50% opacity
 ```
 
-Any color can be defined in the theme as a plain string (static) or a
-`{ light, dark }` pair — fully manual, resolved per the current dark-mode
-state:
-
-```ts
-setTheme({
-  ...defaultTheme,
-  colors: { ...defaultTheme.colors, brand: { light: '#2563eb', dark: '#93c5fd' } },
-});
-```
-
 A shade-family lookup (`colors.blue[n]`) auto-mirrors to shade `13 - n` in
 dark mode — this palette's own convention is 1 = lightest, 12 = darkest, so
 that's the same visual weight relative to its own background, no manual
 `colors.blue[isDark ? 7 : 6]` needed.
 
-## Arbitrary math: `calc()`, `clamp()`, `min()`, `max()`
+---
+
+## Reference
+
+Deeper/less-common material — you likely won't need this on your first pass.
+
+### Arbitrary math: `calc()`, `clamp()`, `min()`, `max()`
 
 ```tsx
 <View className="p-[calc(16px+8px)]" />       // -> padding: 24
@@ -298,7 +383,7 @@ into three broken tokens before `calc()` is ever even recognized. Write
 `w-[calc(100%_-_3rem)]` (underscores) instead — this is exactly what the
 unknown-class warning below is for: it'll tell you when this happens.
 
-## Unknown-class warnings (typo detection)
+### Unknown-class warnings (typo detection)
 
 ```tsx
 <View className="flexx-center" /> // real Kbach classes never have to guess — a typo warns
@@ -314,9 +399,8 @@ once per unique message) instead of silently doing nothing — the same
 signal `@kbach/react`'s Vite plugin already gives you at build time on
 web, just at resolve time here instead. A real utility this engine simply
 doesn't support on native yet (`grid-cols-3`, `scale-150`, `blur`, ...)
-never warns — that's an intentional, documented platform gap (see
-`resolve_style.rs`'s own doc comment), not a typo, so it stays silent the
-same way it always has.
+never warns — that's an intentional, documented platform gap, not a typo,
+so it stays silent the same way it always has.
 
 Not available in Expo Go's pure-JS fallback engine today — that engine has
 no web-shaped resolver to check "is this a real Kbach utility at all"
@@ -325,7 +409,7 @@ distinguish a genuine typo from a real-but-native-unsupported class
 without a much larger port. A real dev-client/CLI build always gets this
 check.
 
-## Dynamic tokens
+### Dynamic tokens
 
 The native counterpart to a real CSS custom property — `var(--x)` already
 works in a `className` on Expo Web with zero help from this package (real
@@ -348,9 +432,59 @@ every element using it repaints instantly via the browser's own CSS engine,
 no React re-render involved. On native, the className is substituted with
 the token's current value before every resolve, and an element referencing
 a token re-renders/repaints on its own when that token changes (same
-subscription mechanism `dark:` and `sm:`/`md:`/... already use — see
-`jsxRuntimeCore.ts`'s own doc comments). An unregistered token name falls
-through to the same native invalid-value warning above.
+subscription mechanism `dark:` and `sm:`/`md:`/... already use). An
+unregistered token name falls through to the same native invalid-value
+warning above.
+
+### Monorepo installs (npm/yarn/pnpm workspaces)
+
+If your app lives in a monorepo where `@kbach/react-native` is a workspace
+package (a `file:`/`link:` dependency, or hoisted rather than nested), watch
+for **two physical copies of `react-native`/`react`** ending up in your
+dependency tree — one this package would otherwise resolve up to from its
+own directory, and a different one your app's own files resolve to. Metro
+walks `node_modules` hierarchically per-file, so it can silently hand two
+different files two different copies of the *same* module, each with its
+own separate module state.
+
+This isn't hypothetical: it's the root cause of a real dark-mode bug this
+package shipped and fixed — `useColorScheme()`/`Appearance` in one copy
+never saw changes made through the other, so an explicit theme toggle
+appeared to do nothing. The fix is a Metro config override that forces a
+single instance, **required in your app**, not something this package can
+do on your behalf from inside `node_modules`:
+
+```js
+// metro.config.js
+const path = require('path');
+// React Native CLI: const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+// Expo:              const { getDefaultConfig } = require('expo/metro-config');
+
+const projectRoot = __dirname;
+const workspaceRoot = path.resolve(projectRoot, '../..'); // -> your monorepo root
+
+const config = getDefaultConfig(projectRoot);
+config.watchFolders = [workspaceRoot];
+
+const forcedSingleInstance = {
+  'react-native': path.resolve(projectRoot, 'node_modules/react-native'),
+  react: path.resolve(projectRoot, 'node_modules/react'),
+};
+const defaultResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (Object.prototype.hasOwnProperty.call(forcedSingleInstance, moduleName)) {
+    return { type: 'sourceFile', filePath: require.resolve(forcedSingleInstance[moduleName]) };
+  }
+  return defaultResolveRequest
+    ? defaultResolveRequest(context, moduleName, platform)
+    : context.resolveRequest(context, moduleName, platform);
+};
+
+module.exports = config; // (React Native CLI: mergeConfig(getDefaultConfig(projectRoot), config))
+```
+
+A single, non-monorepo `npm install` never hits this — only relevant if your
+app and `@kbach/react-native` share a workspace root.
 
 ## License
 

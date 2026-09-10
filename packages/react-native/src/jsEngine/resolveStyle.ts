@@ -168,6 +168,14 @@ function rnStyleValue(property: string, value: string): { value: string | number
     return { value, warning: null };
   }
 
+  // `auto` is a real RN/Yoga value for margin (auto margins — `mx-auto`),
+  // width/height, inset, and flex-basis — pass it through rather than
+  // failing the numeric coercion below and dropping it. Mirrors
+  // resolve_style.rs.
+  if (value === 'auto') {
+    return { value: 'auto', warning: null };
+  }
+
   let px: number | null = null;
   if (value.endsWith('px')) {
     const n = Number(value.slice(0, -2));

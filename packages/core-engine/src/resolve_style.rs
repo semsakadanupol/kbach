@@ -288,6 +288,17 @@ fn rn_style_value(property: &str, value: &str) -> (Option<Value>, Option<String>
         return (Some(Value::String(value.to_string())), None);
     }
 
+    // `auto` is a real RN/Yoga value for the dimensional properties this
+    // resolver produces it for — `margin*` (auto margins, i.e. `mx-auto`),
+    // `width`/`height`, `inset`/`top`/etc., `flex-basis`. Pass it straight
+    // through; RN harmlessly ignores it on a property that doesn't take it.
+    // Checked BEFORE the numeric coercion below, which would otherwise fail
+    // to parse it and drop the declaration with a (wrong) "not a valid
+    // native value" warning.
+    if value == "auto" {
+        return (Some(Value::String("auto".to_string())), None);
+    }
+
     let px = if let Some(px) = value.strip_suffix("px") {
         px.parse::<f64>().ok()
     } else if let Some(rem) = value.strip_suffix("rem") {
@@ -718,6 +729,22 @@ mod tests {
         assert_eq!(resolve_style("aspect-[16/10]", &t, "light", false, W).get("aspectRatio").unwrap(), 1.6);
         // `aspect-auto` has no numeric form — dropped, leaving aspectRatio unset.
         assert!(resolve_style("aspect-auto", &t, "light", false, W).get("aspectRatio").is_none());
+    }
+
+    #[test]
+    fn auto_passes_through_for_margin_width_and_inset_instead_of_being_dropped() {
+        let t = theme();
+        // `mx-auto` -> real RN auto margins; must NOT warn/drop.
+        let mx = resolve_style("mx-auto", &t, "light", false, W);
+        assert_eq!(mx.get("marginLeft").unwrap(), "auto");
+        assert_eq!(mx.get("marginRight").unwrap(), "auto");
+        assert!(!mx.contains_key("__kbachWarnings"));
+
+        assert_eq!(resolve_style("w-auto", &t, "light", false, W).get("width").unwrap(), "auto");
+        assert_eq!(resolve_style("mt-auto", &t, "light", false, W).get("marginTop").unwrap(), "auto");
+
+        let (_, warnings) = resolve_style_with_warnings("mx-auto", &t, "light", false, W);
+        assert!(warnings.is_empty());
     }
 
     #[test]

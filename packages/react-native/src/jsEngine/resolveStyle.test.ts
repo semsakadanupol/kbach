@@ -330,6 +330,16 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('w-screen', theme(), 'light', false, W).width).toBeUndefined();
   });
 
+  it('passes `auto` through for margin/width instead of dropping it', () => {
+    // `mx-auto` -> real RN auto margins.
+    const mx = resolveStyleJsWithWarnings('mx-auto', theme(), 'light', false, W);
+    expect(mx.style.marginLeft).toBe('auto');
+    expect(mx.style.marginRight).toBe('auto');
+    expect(mx.warnings).toEqual([]);
+    expect(resolveStyleJs('w-auto', theme(), 'light', false, W).width).toBe('auto');
+    expect(resolveStyleJs('mt-auto', theme(), 'light', false, W).marginTop).toBe('auto');
+  });
+
   it('does not resolve grid/filter/web-only-transform utilities on native', () => {
     expect(resolveStyleJs('grid-cols-3', theme(), 'light', false, W)).toEqual({});
     // scale-150/rotate-45/translate-x-4 used to be in this list too, before

@@ -263,6 +263,27 @@ fn is_plain_percentage(value: &str) -> bool {
 /// never dropped, since this validation is specifically about RN's numeric
 /// style fields, the one place a free-text CSS value can't just work as-is.
 fn rn_style_value(property: &str, value: &str) -> (Option<Value>, Option<String>) {
+    // `aspect-ratio` is a CSS ratio (`3 / 4`, `16/9`, `1.5`) on the web
+    // side, but RN's New-Architecture prop parser only reliably accepts a
+    // plain NUMBER for `aspectRatio` — a ratio STRING silently fails to
+    // apply on Fabric, collapsing the element. Reduce it to `a / b` here.
+    // `auto` has no numeric form and means "no constraint" anyway, so it's
+    // simply dropped (leaving `aspectRatio` unset).
+    if property == "aspect-ratio" {
+        if value.trim() == "auto" {
+            return (None, None);
+        }
+        let n = match value.split('/').map(str::trim).collect::<Vec<_>>().as_slice() {
+            [a] => a.parse::<f64>().ok(),
+            [a, b] => match (a.parse::<f64>(), b.parse::<f64>()) {
+                (Ok(a), Ok(b)) if b != 0.0 => Some(a / b),
+                _ => None,
+            },
+            _ => None,
+        };
+        return (n.and_then(Number::from_f64).map(Value::Number), None);
+    }
+
     if !NUMERIC_LENGTH_PROPS.contains(&property) {
         return (Some(Value::String(value.to_string())), None);
     }
@@ -686,6 +707,17 @@ mod tests {
 
         let dark = resolve_style("bg-surface", &t, "dark", false, W);
         assert_eq!(dark.get("backgroundColor").unwrap(), "#111827");
+    }
+
+    #[test]
+    fn aspect_ratio_resolves_to_a_number_not_a_css_ratio_string() {
+        let t = theme();
+        // Fabric's aspectRatio prop parser wants a number, not "3 / 4".
+        assert_eq!(resolve_style("aspect-[3/4]", &t, "light", false, W).get("aspectRatio").unwrap(), 0.75);
+        assert_eq!(resolve_style("aspect-square", &t, "light", false, W).get("aspectRatio").unwrap(), 1.0);
+        assert_eq!(resolve_style("aspect-[16/10]", &t, "light", false, W).get("aspectRatio").unwrap(), 1.6);
+        // `aspect-auto` has no numeric form — dropped, leaving aspectRatio unset.
+        assert!(resolve_style("aspect-auto", &t, "light", false, W).get("aspectRatio").is_none());
     }
 
     #[test]

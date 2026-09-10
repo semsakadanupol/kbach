@@ -316,11 +316,13 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('end-4', t, 'light', false, W).insetInlineEnd).toBe('16px');
   });
 
-  it('resolves aspect-auto and an arbitrary aspect ratio, not just square/video', () => {
-    expect(resolveStyleJs('aspect-auto', theme(), 'light', false, W).aspectRatio).toBe('auto');
-    expect(resolveStyleJs('aspect-[3/4]', theme(), 'light', false, W).aspectRatio).toBe('3/4');
-    expect(resolveStyleJs('aspect-square', theme(), 'light', false, W).aspectRatio).toBe('1 / 1');
-    expect(resolveStyleJs('aspect-video', theme(), 'light', false, W).aspectRatio).toBe('16 / 9');
+  it('resolves aspect ratios to a number, not a CSS ratio string (Fabric prop parser)', () => {
+    expect(resolveStyleJs('aspect-[3/4]', theme(), 'light', false, W).aspectRatio).toBe(0.75);
+    expect(resolveStyleJs('aspect-square', theme(), 'light', false, W).aspectRatio).toBe(1);
+    expect(resolveStyleJs('aspect-video', theme(), 'light', false, W).aspectRatio).toBeCloseTo(16 / 9);
+    expect(resolveStyleJs('aspect-[16/10]', theme(), 'light', false, W).aspectRatio).toBe(1.6);
+    // aspect-auto has no numeric form — dropped, aspectRatio left unset.
+    expect(resolveStyleJs('aspect-auto', theme(), 'light', false, W).aspectRatio).toBeUndefined();
   });
 
   it('resolves full but not screen sizing on native', () => {

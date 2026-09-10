@@ -147,6 +147,23 @@ function isPlainPercentage(value: string): boolean {
  * RN's style object.
  */
 function rnStyleValue(property: string, value: string): { value: string | number | null; warning: string | null } {
+  // `aspect-ratio` -> a plain number (RN's New-Architecture prop parser
+  // won't apply a CSS ratio string like "3 / 4"). Mirrors resolve_style.rs.
+  if (property === 'aspect-ratio') {
+    if (value.trim() === 'auto') return { value: null, warning: null };
+    const parts = value.split('/').map((s) => s.trim());
+    let n: number | null = null;
+    if (parts.length === 1) {
+      const a = Number(parts[0]);
+      n = Number.isFinite(a) ? a : null;
+    } else if (parts.length === 2) {
+      const a = Number(parts[0]);
+      const b = Number(parts[1]);
+      n = Number.isFinite(a) && Number.isFinite(b) && b !== 0 ? a / b : null;
+    }
+    return { value: n, warning: null };
+  }
+
   if (!NUMERIC_LENGTH_PROPS.has(property)) {
     return { value, warning: null };
   }

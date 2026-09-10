@@ -686,7 +686,9 @@ describe('jsx-runtime (react-native)', () => {
       act(() => {
         renderer.root.findByType('View' as any).props.onHoverIn({});
       });
-      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex bg-red-6', false);
+      // The satisfied `hover:` becomes a `_kbon:` specificity marker rather
+      // than being stripped to nothing — see substituteStateModifiers.
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex _kbon:bg-red-6', false);
 
       act(() => {
         renderer.root.findByType('View' as any).props.onHoverOut({});
@@ -705,7 +707,7 @@ describe('jsx-runtime (react-native)', () => {
         renderer.root.findByType('View' as any).props.onHoverIn(event);
       });
       expect(userOnHoverIn).toHaveBeenCalledWith(event);
-      expect(mockResolveStyle).toHaveBeenLastCalledWith('bg-red-6', false);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('_kbon:bg-red-6', false);
     });
 
     it('drops a focus: token until onFocus fires, and restores it on onBlur', async () => {
@@ -717,7 +719,7 @@ describe('jsx-runtime (react-native)', () => {
       act(() => {
         renderer.root.findByType('View' as any).props.onFocus({});
       });
-      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex ring-2', false);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex _kbon:ring-2', false);
 
       act(() => {
         renderer.root.findByType('View' as any).props.onBlur({});
@@ -739,26 +741,27 @@ describe('jsx-runtime (react-native)', () => {
       act(() => {
         renderer.root.findByType('View' as any).props.onFocus({});
       });
-      expect(mockResolveStyle).toHaveBeenLastCalledWith('bg-red-6', false);
+      // Two satisfied modifiers -> two `_kbon:` markers, so a chained
+      // `hover:focus:` token still outweighs a single-modifier one.
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('_kbon:_kbon:bg-red-6', false);
     });
 
-    it('preserves source order for a base class plus its hover: variant on the same property', async () => {
-      // substituteStateModifiers only ever filters tokens, never reorders
-      // them — resolveStyle merges same-property declarations last-token-
-      // wins by string order (same rule dark:/sm:/active: already rely on),
-      // so writing the base class BEFORE its hover: variant (the
-      // conventional order) is what makes the hover color correctly win
-      // once hovered. This locks in that the ordering is preserved, not
-      // reshuffled, now that hover:/focus: can participate in it at all.
+    it('a satisfied hover: variant wins over a plain class for the same property regardless of order', async () => {
+      // substituteStateModifiers rewrites the satisfied `hover:` to a
+      // `_kbon:` specificity marker (never reorders tokens), and
+      // resolveStyle resolves the collision on "more modifiers wins" — so
+      // the hover color wins once hovered whether it's written before OR
+      // after the base class. (Before this, only base-then-variant order
+      // worked, since it was pure last-token-wins.)
       const { jsx } = await import('./jsx-runtime');
-      const el = jsx('View', { className: 'bg-red-6 hover:bg-blue-6' }, undefined);
+      const el = jsx('View', { className: 'hover:bg-blue-6 bg-red-6' }, undefined);
       const renderer = mount(el);
       expect(mockResolveStyle).toHaveBeenLastCalledWith('bg-red-6', false);
 
       act(() => {
         renderer.root.findByType('View' as any).props.onHoverIn({});
       });
-      expect(mockResolveStyle).toHaveBeenLastCalledWith('bg-red-6 bg-blue-6', false);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('_kbon:bg-blue-6 bg-red-6', false);
     });
 
     it('does not wrap in ReactiveElement for disabled: alone, and reacts via ordinary prop flow', async () => {
@@ -770,7 +773,7 @@ describe('jsx-runtime (react-native)', () => {
       act(() => {
         renderer.update(jsx('View', { className: 'flex disabled:opacity-50', disabled: true }, undefined) as any);
       });
-      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex opacity-50', false);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex _kbon:opacity-50', false);
     });
 
     it('does not add any reactivity overhead for an element using neither hover: nor focus:', async () => {
@@ -797,7 +800,7 @@ describe('jsx-runtime (react-native)', () => {
           jsx('View', { className: 'flex aria-[expanded=true]:opacity-100', 'aria-expanded': true }, undefined) as any,
         );
       });
-      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex opacity-100', false);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex _kbon:opacity-100', false);
     });
 
     it('resolves data-[key=value]: against the matching data-* prop', async () => {
@@ -811,7 +814,7 @@ describe('jsx-runtime (react-native)', () => {
       const { jsx } = await import('./jsx-runtime');
       const present = jsx('View', { className: 'flex data-[loading]:opacity-50', 'data-loading': true }, undefined);
       mount(present);
-      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex opacity-50', false);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex _kbon:opacity-50', false);
 
       const absent = jsx('View', { className: 'flex data-[loading]:opacity-50' }, undefined);
       mount(absent);
@@ -822,14 +825,14 @@ describe('jsx-runtime (react-native)', () => {
       const { jsx } = await import('./jsx-runtime');
       const el = jsx('View', { className: 'flex aria-selected:bg-blue-8', 'aria-selected': true }, undefined);
       mount(el);
-      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex bg-blue-8', false);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex _kbon:bg-blue-8', false);
     });
 
     it('accepts the literal string "true" the same as a real boolean for a static aria-* shortcut', async () => {
       const { jsx } = await import('./jsx-runtime');
       const el = jsx('View', { className: 'flex aria-checked:bg-blue-8', 'aria-checked': 'true' }, undefined);
       mount(el);
-      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex bg-blue-8', false);
+      expect(mockResolveStyle).toHaveBeenLastCalledWith('flex _kbon:bg-blue-8', false);
     });
 
     it('requires every modifier on a chained token to hold, same as hover:focus: already requires both', async () => {

@@ -128,10 +128,30 @@ describe('resolveStyleJs', () => {
     expect(resolves('dark', 900).backgroundColor).toBe('#1e40af');
   });
 
-  it('a later dark variant overrides a preceding base declaration on the same property', () => {
+  it('a dark variant overrides a plain class for the same property regardless of source order', () => {
     const t = theme();
-    expect(resolveStyleJs('bg-blue-6 dark:bg-blue-8', t, 'dark', false, W).backgroundColor).toBe('#1e40af');
-    expect(resolveStyleJs('bg-blue-6 dark:bg-blue-8', t, 'light', false, W).backgroundColor).toBe('#2563eb');
+    // Both orders resolve to blue-8 in dark mode — the more-specific token
+    // wins the collision, not whichever comes last. Mirrors
+    // resolve_style.rs's own order-independence test.
+    for (const order of ['bg-blue-6 dark:bg-blue-8', 'dark:bg-blue-8 bg-blue-6']) {
+      expect(resolveStyleJs(order, t, 'dark', false, W).backgroundColor).toBe('#1e40af');
+      expect(resolveStyleJs(order, t, 'light', false, W).backgroundColor).toBe('#2563eb');
+    }
+  });
+
+  it('two equal-specificity classes still resolve by source order', () => {
+    const t = theme();
+    expect(resolveStyleJs('bg-blue-6 bg-blue-8', t, 'light', false, W).backgroundColor).toBe('#1e40af');
+    expect(resolveStyleJs('bg-blue-8 bg-blue-6', t, 'light', false, W).backgroundColor).toBe('#2563eb');
+    expect(resolveStyleJs('dark:bg-blue-6 dark:bg-blue-8', t, 'dark', false, W).backgroundColor).toBe('#1e40af');
+  });
+
+  it('the _kbon state-hold marker counts toward specificity like dark: does', () => {
+    const t = theme();
+    // jsxRuntimeCore substitutes _kbon: for a satisfied hover:/focus:/aria-*.
+    for (const order of ['_kbon:bg-blue-8 bg-blue-6', 'bg-blue-6 _kbon:bg-blue-8']) {
+      expect(resolveStyleJs(order, t, 'light', false, W).backgroundColor).toBe('#1e40af');
+    }
   });
 
   it('resolves spacing, radius, and font size as numbers, not strings', () => {

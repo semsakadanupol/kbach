@@ -307,6 +307,13 @@ parses without error but never takes effect. Supported today:
   `hover:focus:opacity-100`) requires every named condition to hold at once
   — chain order never matters (`dark:sm:` and `sm:dark:` are equivalent).
 
+**Class order doesn't matter for a variant vs a base class.** When two
+classes set the same property, the one with more active modifiers wins
+regardless of which you write first — `dark:bg-black bg-white` and
+`bg-white dark:bg-black` both render black in dark mode, matching how
+Tailwind behaves on the web. Two equally-specific classes (`bg-white
+bg-black`, or two `dark:` classes) still go last-one-wins.
+
 `group-hover:`/`peer-hover:` and friends are NOT implemented on native —
 doing so needs a React Context bridge (propagating an ancestor's hover/
 press/focus state down to descendants, since there's no `.group`/`.peer`

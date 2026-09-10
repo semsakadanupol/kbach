@@ -34,7 +34,18 @@ import type { StyleObject } from '../nativeBridge';
 
 const RESPONSIVE_BREAKPOINTS = new Set(['sm', 'md', 'lg', 'xl', '2xl']);
 
+/**
+ * `jsxRuntimeCore.ts`'s stand-in for an already-satisfied prop-based state
+ * modifier (`hover:`/`focus:`/`disabled:`/`aria-*`/`data-*`), one per
+ * satisfied modifier — mirrors `resolve_style.rs`'s `STATE_HOLD_MARKER`
+ * exactly. Counts toward a token's specificity here (see `tokenSpecificity`)
+ * so a satisfied `hover:bg-x` beats a plain `bg-y` regardless of source
+ * order, the same as `dark:` does.
+ */
+const STATE_HOLD_MARKER = '_kbon';
+
 function nativeModifierState(modifier: string, theme: ThemeConfig, colorScheme: string, pressed: boolean, width: number): boolean | null {
+  if (modifier === STATE_HOLD_MARKER) return true;
   if (modifier === 'dark') return colorScheme === 'dark';
   if (modifier === 'active') return pressed;
   if (RESPONSIVE_BREAKPOINTS.has(modifier)) {
@@ -197,18 +208,22 @@ export function resolveStyleJsWithWarnings(
   const warnings: string[] = [];
   let shadowOffset: { width?: number; height?: number } | null = null;
   // Accumulates transform-op-* markers into RN's ordered `transform` array
-  // at the end — RN's style system has no cascade for this the way CSS
-  // custom properties do, so unlike every other declaration here (applied
-  // to `style` immediately, last write wins by plain key collision)
-  // transform ops need to be collected first and assembled in
-  // TRANSFORM_OP_ORDER once the whole class string has been processed.
-  // Still "last write wins" per op, and still fully source-order-sensitive
-  // overall: transform-op-none (from the transform-none utility) clears
-  // this accumulator the moment it's encountered, so
-  // "scale-150 transform-none" ends up with no transform at all while
-  // "transform-none scale-150" keeps the scale — same left-to-right "later
-  // class wins" convention as everywhere else in this engine.
+  // at the end — assembled in TRANSFORM_OP_ORDER once the whole class
+  // string has been processed. Per op, the same specificity rule the rest
+  // of `style` follows applies (a dark:rotate-* beats a plain rotate-*
+  // either order), last-write per op for equal specificity.
+  // transform-op-none (from transform-none) is the exception: it clears the
+  // whole accumulator the moment it's seen, regardless of specificity.
   const transformOps = new Map<string, string | number>();
+  // Highest specificity (satisfied-modifier count) seen so far for each
+  // output key — a later token only overwrites a key it's at least as
+  // specific as, so `dark:bg-black bg-white` and `bg-white dark:bg-black`
+  // both end up black in dark mode. Ties fall back to source order. Mirrors
+  // resolve_style.rs's `key_specificity`/`transform_specificity`; missing
+  // === 0, so plain (unmodified) tokens keep pure last-wins among
+  // themselves.
+  const keySpecificity = new Map<string, number>();
+  const transformSpecificity = new Map<string, number>();
 
   for (const rawToken of classString.split(/\s+/).filter(Boolean)) {
     // A mode-aware color name (`bg-surface`) is rewritten to the ONE hex
@@ -225,32 +240,53 @@ export function resolveStyleJsWithWarnings(
     const decls = resolveUtilityNative(parsed, theme);
     if (decls === null) continue;
 
+    // Every modifier here is satisfied (checked just above) — its count is
+    // the token's specificity, same metric as resolve_style.rs's
+    // `token_specificity`.
+    const spec = parsed.modifiers.length;
+
     for (const d of decls) {
       if (d.property.startsWith('__')) {
         // divide/space markers — no RN child-combinator equivalent, out of scope.
         continue;
       }
       if (d.property === 'shadow-offset-x' || d.property === 'shadow-offset-y') {
+        // One nested `{width, height}` key — treat as a single unit for
+        // specificity, same as resolve_style.rs.
+        if (spec < (keySpecificity.get('shadowOffset') ?? 0)) continue;
         const n = Number(d.value);
         if (!Number.isFinite(n)) continue;
         if (shadowOffset === null) shadowOffset = {};
         shadowOffset[d.property === 'shadow-offset-x' ? 'width' : 'height'] = n;
+        keySpecificity.set('shadowOffset', spec);
         continue;
       }
       if (d.property === 'transform-op-none') {
+        // Reset directive — clears every op regardless of what set it, and
+        // resets the ceiling; deliberately stays source-order-sensitive.
         transformOps.clear();
+        transformSpecificity.clear();
         continue;
       }
       const opKey = TRANSFORM_OP_KEYS.get(d.property);
       if (opKey !== undefined) {
+        if (spec < (transformSpecificity.get(opKey) ?? 0)) continue;
         const { value, warning } = rnStyleValue(d.property, d.value);
         if (warning !== null) warnings.push(warning);
-        if (value !== null) transformOps.set(opKey, value);
+        if (value !== null) {
+          transformOps.set(opKey, value);
+          transformSpecificity.set(opKey, spec);
+        }
         continue;
       }
+      const key = kebabToCamel(d.property);
+      if (spec < (keySpecificity.get(key) ?? 0)) continue;
       const { value, warning } = rnStyleValue(d.property, d.value);
       if (warning !== null) warnings.push(warning);
-      if (value !== null) style[kebabToCamel(d.property)] = value;
+      if (value !== null) {
+        style[key] = value;
+        keySpecificity.set(key, spec);
+      }
     }
   }
 

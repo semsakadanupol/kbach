@@ -198,33 +198,52 @@ function propBasedModifierState(name: string, states: ElementStates, hostRest: R
   return null;
 }
 
-/** Strips every name in `namesToStrip` from an already-split `[...modifiers, utility]` array (see `splitRespectingBrackets`), leaving the utility part and every other modifier untouched. Takes the pre-split parts rather than re-splitting the token itself — `substituteStateModifiers` (the only caller) already has them from its own presence check, and re-parsing the same token twice per call is wasted work on every render. */
-function stripModifiers(parts: string[], namesToStrip: Set<string>): string {
+/**
+ * `resolve_style.rs`'s `STATE_HOLD_MARKER` — every prop-based state
+ * modifier (`hover:`, `focus:`, `disabled:`, a `data-[...]:` or `aria-[...]:`
+ * condition, a static `aria-*` shortcut) this file confirms holds
+ * is REPLACED (not removed) by one of these in the token it hands
+ * `resolveStyle`, so the count of narrowing modifiers — a token's
+ * specificity — survives. `resolveStyle`'s two engines (native JNI and the
+ * Expo Go JS fallback) both treat `_kbon` as an unconditionally-satisfied
+ * modifier that counts toward specificity, so a satisfied `hover:bg-x`
+ * beats a plain `bg-y` regardless of which comes first in the string —
+ * the same way `dark:` already does.
+ */
+const STATE_HOLD_MARKER = '_kbon';
+
+/**
+ * Rewrites an already-split `[...modifiers, utility]` array (see
+ * `splitRespectingBrackets`): each modifier named in `namesToReplace`
+ * becomes `STATE_HOLD_MARKER`, every other modifier and the utility are
+ * left untouched. Replacing rather than deleting keeps the token's
+ * modifier COUNT intact so `resolveStyle` can still weigh its specificity
+ * against a plain class for the same property. Takes the pre-split parts
+ * rather than re-splitting the token — `substituteStateModifiers` (the
+ * only caller) already has them from its own presence check.
+ */
+function markSatisfiedStateModifiers(parts: string[], namesToReplace: Set<string>): string {
   const utility = parts[parts.length - 1] ?? '';
-  const modifiers = parts.slice(0, -1).filter((m) => !namesToStrip.has(m));
+  const modifiers = parts.slice(0, -1).map((m) => (namesToReplace.has(m) ? STATE_HOLD_MARKER : m));
   return [...modifiers, utility].join(':');
 }
 
 /**
  * For each whitespace-separated token in `classStrRaw`: if it uses one or
  * more of hover:/focus:/disabled:/data-[...]:/aria-[...]:/the static aria-*
- * shortcuts, it's kept (with those specific modifiers stripped from its
- * chain) only when EVERY one it names currently holds — dropped entirely
- * otherwise, since RN's flat style object has no cascade to let an
- * unapplied rule simply lose a specificity fight the way CSS would. A
- * token using none of these passes through unchanged.
+ * shortcuts, it's kept (with those specific modifiers rewritten to
+ * `STATE_HOLD_MARKER`) only when EVERY one it names currently holds —
+ * dropped entirely otherwise, since RN's flat style object has no cascade
+ * to let an unapplied rule simply lose a specificity fight the way CSS
+ * would. A token using none of these passes through unchanged.
  *
- * Token ORDER is preserved (never reordered, only filtered) — this matters
- * because `resolveStyle` merges same-property declarations last-token-wins,
- * by the order they appear in the string it receives (same rule dark:/sm:/
- * active: already live under; this doesn't introduce a new merge rule, it's
- * the first time these modifiers get to participate in it, since they were
- * simply inert before this file supported them at all). Writing the base
- * class before its state variant — `"bg-red-6 hover:bg-blue-6"`, the
- * conventional order — resolves correctly once hovered (hover's color
- * comes second, so it wins); writing it the other way around inverts that.
- * This is the existing convention every other modifier here already
- * depends on, not a hover/focus-specific quirk.
+ * Token ORDER is preserved (never reordered, only filtered). Same-property
+ * collisions are resolved by `resolveStyle` on "more satisfied modifiers
+ * wins, ties by source order" — so `hover:bg-blue-6` beats a plain
+ * `bg-red-6` whichever way round they're written, since the `_kbon` marker
+ * this leaves in its place still counts as one narrowing modifier (see
+ * `STATE_HOLD_MARKER`). Two equally-specific tokens (`bg-red-6 bg-blue-6`,
+ * or `hover:bg-a focus:bg-b` while both hold) still go last-token-wins.
  */
 function substituteStateModifiers(classStrRaw: string, states: ElementStates, hostRest: Record<string, unknown>): string {
   if (!STATE_MODIFIER_HINT_RE.test(classStrRaw)) return classStrRaw;
@@ -241,7 +260,7 @@ function substituteStateModifiers(classStrRaw: string, states: ElementStates, ho
     }
     if (required.every(([, v]) => v === true)) {
       const requiredNames = new Set(required.map(([m]) => m));
-      kept.push(stripModifiers(parts, requiredNames));
+      kept.push(markSatisfiedStateModifiers(parts, requiredNames));
     }
   }
   return kept.join(' ');

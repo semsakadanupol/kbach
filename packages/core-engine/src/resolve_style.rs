@@ -24,12 +24,16 @@
 //! selector/pseudo-state/ancestor system exists here to apply them with.
 //! Explicitly deferred, not silently broken.
 //!
-//! Properties are inserted into the output map in token order, last write
-//! wins on a key collision — there's no CSS-cascade/specificity system
-//! here. So `"bg-blue-6 dark:bg-blue-8"` correctly resolves to blue-8 in
-//! dark mode, but the reverse order would not; callers are expected to
-//! write base classes before their `dark:`/`active:`/responsive variant,
-//! same as normal Tailwind authoring convention.
+//! Same-property collisions resolve on a small specificity model that
+//! stands in for the CSS cascade native doesn't have (see
+//! `token_specificity`): a token with MORE satisfied modifiers wins over
+//! one with fewer, regardless of which is written first, so
+//! `"bg-blue-6 dark:bg-blue-8"` and `"dark:bg-blue-8 bg-blue-6"` BOTH
+//! resolve to blue-8 in dark mode. Two equally-specific tokens
+//! (`"bg-blue-6 bg-blue-8"`, or two `dark:` classes) still fall back to
+//! last-token-wins by source order. `transform-none` is the one deliberate
+//! exception — a reset directive that clears everything above it in source
+//! order regardless of specificity.
 //!
 //! Named leading/tracking keywords and truncation are excluded at the
 //! resolver level (see resolve_utility_native's docs) — everything that
@@ -42,6 +46,19 @@ use crate::registry::{self, DarkScheme};
 use crate::resolvers::{resolve_utility, resolve_utility_native, substitute_mode_aware_color_token};
 use crate::theme::ThemeConfig;
 use serde_json::{Map, Number, Value};
+use std::collections::HashMap;
+
+/// Synthetic modifier `jsxRuntimeCore.ts` substitutes in for each
+/// prop-based state modifier (`hover:`/`focus:`/`disabled:`/`aria-*`/
+/// `data-*`) that currently HOLDS, one per satisfied modifier — so those
+/// still contribute to a token's specificity here (see
+/// `token_specificity`), the same way `dark:`/`sm:`/`active:` already do,
+/// even though this engine resolves them a completely different way (a
+/// live React prop read, before the class string ever reaches this
+/// function). `native_modifier_state` treats it as unconditionally
+/// satisfied — `jsxRuntimeCore.ts` only ever emits it for a state it has
+/// already confirmed holds, and drops the whole token otherwise.
+pub const STATE_HOLD_MARKER: &str = "_kbon";
 
 /// Bare classes with no styling meaning of their own — they exist purely as
 /// selector-target markers (`group-hover:` matches `.group:hover .child`,
@@ -91,7 +108,15 @@ fn is_recognized_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> bool {
 /// why: it would need the full web dispatcher as its "is this a typo"
 /// ground truth, which this jsEngine directory doesn't have a port of).
 fn typo_warning(token: &str) -> String {
-    format!("[Kbach] \"{token}\" doesn't match any known Kbach utility — typo? (skipped)")
+    // Strip any `_kbon:` markers `jsxRuntimeCore.ts` substituted in for a
+    // satisfied `hover:`/`focus:`/... so the message names the class the
+    // developer actually wrote (`hover:flexx`, not `_kbon:flexx`).
+    let display: String = token
+        .split(':')
+        .filter(|seg| *seg != STATE_HOLD_MARKER)
+        .collect::<Vec<_>>()
+        .join(":");
+    format!("[Kbach] \"{display}\" doesn't match any known Kbach utility — typo? (skipped)")
 }
 
 /// Whether a single modifier's condition currently holds, for the modifier
@@ -105,6 +130,11 @@ fn typo_warning(token: &str) -> String {
 /// places — see registry.rs's own module doc for the tier scheme this
 /// reads from.
 fn native_modifier_state(modifier: &str, theme: &ThemeConfig, color_scheme: &str, pressed: bool, width: f64) -> Option<bool> {
+    // `jsxRuntimeCore.ts`'s stand-in for an already-satisfied prop-based
+    // state modifier — see `STATE_HOLD_MARKER`'s own doc comment.
+    if modifier == STATE_HOLD_MARKER {
+        return Some(true);
+    }
     let def = registry::resolve(modifier)?;
     if let Some(DarkScheme::Dark) = def.dark_scheme {
         return Some(color_scheme == "dark");
@@ -327,6 +357,21 @@ const TRANSFORM_OP_KEYS: &[(&str, &str)] = &[
 const TRANSFORM_OP_ORDER: &[&str] =
     &["translateX", "translateY", "rotate", "rotateX", "rotateY", "rotateZ", "skewX", "skewY", "scaleX", "scaleY"];
 
+/// A token's specificity — how many satisfied modifiers it carries
+/// (`dark:`, `sm:`, `active:`, `min-[…]:`, or a `_kbon` stand-in for a
+/// satisfied `hover:`/`focus:`/`aria-*`/`data-*`; every one of them holds
+/// by the time this is read, since the caller has already gated on
+/// `all_modifiers_hold`). Used to make a same-property collision resolve by
+/// "more specific wins" rather than pure source order: `dark:bg-black
+/// bg-white` and `bg-white dark:bg-black` both end up black in dark mode.
+/// Web gets this for free from `css.rs`'s per-modifier `order` tiers +
+/// stylesheet sort; native has no cascade, so it's reconstructed here.
+/// Ties (equal count) still fall back to source order — last token wins,
+/// exactly as before.
+fn token_specificity(parsed: &ParsedClass) -> usize {
+    parsed.modifiers.len()
+}
+
 pub fn resolve_style_with_warnings(
     class_string: &str,
     theme: &ThemeConfig,
@@ -338,19 +383,25 @@ pub fn resolve_style_with_warnings(
     let mut warnings = Vec::new();
     // Accumulates `transform-op-*` markers (`transform::native_resolve`)
     // into RN's ordered `transform` array at the end — RN's style system has
-    // no cascade for this the way CSS custom properties do, so unlike every
-    // other declaration here (inserted into `style` immediately, last write
-    // wins by plain key collision) transform ops need to be collected first
-    // and assembled in `TRANSFORM_OP_ORDER` once the whole class string has
-    // been processed. Still "last write wins" per op (a later `scale-x-*`
-    // on the same element overwrites an earlier one via the `insert` below)
-    // and still fully source-order-sensitive overall: `transform-op-none`
-    // (from the `transform-none` utility) clears this accumulator the
-    // moment it's encountered, so `"scale-150 transform-none"` ends up with
-    // no transform at all while `"transform-none scale-150"` keeps the
-    // scale — same left-to-right "later class wins" convention as
-    // everywhere else in this engine.
+    // no cascade for this the way CSS custom properties do, so transform ops
+    // need to be collected first and assembled in `TRANSFORM_OP_ORDER` once
+    // the whole class string has been processed. Per op, the same
+    // specificity rule the rest of `style` follows applies (a `dark:rotate-*`
+    // beats a plain `rotate-*` either order), falling back to last-write per
+    // op for equal specificity. `transform-op-none` (from `transform-none`)
+    // is the exception: it clears the whole accumulator the moment it's
+    // seen, regardless of specificity — `"scale-150 transform-none"` ends up
+    // with no transform while `"transform-none scale-150"` keeps the scale.
     let mut transform_ops: Map<String, Value> = Map::new();
+    // Highest specificity seen so far for each output key (`style` key,
+    // `"shadowOffset"`, or a transform op key) — a later token only
+    // overwrites a key it's at least as specific as. See
+    // `token_specificity`. `unwrap_or(0)` on lookup treats "never written"
+    // and "written at specificity 0" the same, which is correct: an
+    // unmodified token should always be able to set, then be overwritten
+    // by, another unmodified token (plain source order).
+    let mut key_specificity: HashMap<String, usize> = HashMap::new();
+    let mut transform_specificity: HashMap<&str, usize> = HashMap::new();
 
     for raw_token in class_string.split_whitespace() {
         // A mode-aware color name (`bg-surface`, where `surface` is a
@@ -382,6 +433,8 @@ pub fn resolve_style_with_warnings(
             continue;
         }
 
+        let spec = token_specificity(&parsed);
+
         let Some(decls) = resolve_utility_native(&parsed, theme) else {
             // Not resolvable on native — either a genuine typo, or a real
             // utility this native engine just doesn't support yet (e.g.
@@ -411,6 +464,14 @@ pub fn resolve_style_with_warnings(
             // so this is the one place that reassembles them into the
             // nested object RN actually expects.
             if d.property == "shadow-offset-x" || d.property == "shadow-offset-y" {
+                // `shadowOffset` is built from two synthetic props into one
+                // nested `{width, height}` — treat it as a single key for
+                // specificity: a lower-specificity token can't touch EITHER
+                // axis once a higher one has set the offset. Equal
+                // specificity still merges (one token's x + another's y).
+                if spec < *key_specificity.get("shadowOffset").unwrap_or(&0) {
+                    continue;
+                }
                 let axis = if d.property == "shadow-offset-x" { "width" } else { "height" };
                 let n = d.value.parse::<f64>().ok().and_then(Number::from_f64);
                 if let Some(n) = n {
@@ -418,21 +479,37 @@ pub fn resolve_style_with_warnings(
                     if let Value::Object(obj) = entry {
                         obj.insert(axis.to_string(), Value::Number(n));
                     }
+                    key_specificity.insert("shadowOffset".to_string(), spec);
                 }
                 continue;
             }
             if d.property == "transform-op-none" {
+                // A reset directive — clears every accumulated op regardless
+                // of the specificity that set them, and resets the ceiling
+                // so later ops of any specificity can rebuild. This one
+                // stays deliberately source-order-sensitive (like `!important`
+                // or `all: unset`, order-dependence is inherent to "undo
+                // everything above me").
                 transform_ops.clear();
+                transform_specificity.clear();
                 continue;
             }
             if let Some((_, op_key)) = TRANSFORM_OP_KEYS.iter().find(|(prop, _)| *prop == d.property) {
+                if spec < *transform_specificity.get(op_key).unwrap_or(&0) {
+                    continue;
+                }
                 let (value, warning) = rn_style_value(&d.property, &d.value);
                 if let Some(warning) = warning {
                     warnings.push(warning);
                 }
                 if let Some(value) = value {
                     transform_ops.insert(op_key.to_string(), value);
+                    transform_specificity.insert(op_key, spec);
                 }
+                continue;
+            }
+            let key = kebab_to_camel(&d.property);
+            if spec < *key_specificity.get(&key).unwrap_or(&0) {
                 continue;
             }
             let (value, warning) = rn_style_value(&d.property, &d.value);
@@ -440,7 +517,8 @@ pub fn resolve_style_with_warnings(
                 warnings.push(warning);
             }
             if let Some(value) = value {
-                style.insert(kebab_to_camel(&d.property), value);
+                key_specificity.insert(key.clone(), spec);
+                style.insert(key, value);
             }
         }
     }
@@ -543,6 +621,52 @@ mod tests {
 
         let dark = resolve_style("dark:bg-blue-8", &t, "dark", false, W);
         assert_eq!(dark.get("backgroundColor").unwrap(), "#1e40af");
+    }
+
+    #[test]
+    fn a_modifier_variant_beats_a_plain_class_for_the_same_prop_regardless_of_source_order() {
+        // Regression: native had no cascade, so `dark:bg-black bg-white`
+        // (variant written FIRST) resolved to white in dark mode — pure
+        // last-token-wins. Now a more-specific token wins a same-property
+        // collision no matter the order, matching web.
+        let mut t = theme();
+        t.colors.insert("black".to_string(), ColorValue::Plain("#000000".to_string()));
+        t.colors.insert("white".to_string(), ColorValue::Plain("#ffffff".to_string()));
+
+        for order in ["dark:bg-black bg-white", "bg-white dark:bg-black"] {
+            let dark = resolve_style(order, &t, "dark", false, W);
+            assert_eq!(dark.get("backgroundColor").unwrap(), "#000000", "dark, `{order}`");
+            let light = resolve_style(order, &t, "light", false, W);
+            assert_eq!(light.get("backgroundColor").unwrap(), "#ffffff", "light, `{order}`");
+        }
+    }
+
+    #[test]
+    fn two_equal_specificity_classes_still_resolve_by_source_order() {
+        let mut t = theme();
+        t.colors.insert("black".to_string(), ColorValue::Plain("#000000".to_string()));
+        t.colors.insert("white".to_string(), ColorValue::Plain("#ffffff".to_string()));
+
+        assert_eq!(resolve_style("bg-black bg-white", &t, "light", false, W).get("backgroundColor").unwrap(), "#ffffff");
+        assert_eq!(resolve_style("bg-white bg-black", &t, "light", false, W).get("backgroundColor").unwrap(), "#000000");
+        assert_eq!(
+            resolve_style("dark:bg-black dark:bg-white", &t, "dark", false, W).get("backgroundColor").unwrap(),
+            "#ffffff",
+        );
+    }
+
+    #[test]
+    fn the_state_hold_marker_counts_toward_specificity() {
+        // `jsxRuntimeCore.ts` emits `_kbon:` for a satisfied hover:/focus:/
+        // aria-*/data-* — it must beat a plain class the same way `dark:` does.
+        let mut t = theme();
+        t.colors.insert("black".to_string(), ColorValue::Plain("#000000".to_string()));
+        t.colors.insert("white".to_string(), ColorValue::Plain("#ffffff".to_string()));
+
+        for order in ["_kbon:bg-black bg-white", "bg-white _kbon:bg-black"] {
+            let out = resolve_style(order, &t, "light", false, W);
+            assert_eq!(out.get("backgroundColor").unwrap(), "#000000", "`{order}`");
+        }
     }
 
     #[test]

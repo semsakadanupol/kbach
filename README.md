@@ -13,9 +13,10 @@ separate bindings for web and React Native.
 | [`@kbach/react`](packages/react)                     | Web bindings — Vite plugin, static CSS generation, React hooks.   |
 | [`@kbach/react-native`](packages/react-native)       | React Native bindings — native (Android), Expo Web, and Expo Go. |
 
-Each package's own README has install and usage instructions — this file
-only indexes them; see [`new-kbach plan.md`](new-kbach%20plan.md) for the
-cross-package architecture.
+Each package's own README has a short install-and-go guide.
+[`AGENTS.md`](AGENTS.md) is the full reference — how to use both packages
+and how the engine works underneath; see [`new-kbach plan.md`](new-kbach%20plan.md)
+for the original cross-package design notes.
 
 ## Development
 

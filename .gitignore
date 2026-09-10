@@ -52,3 +52,14 @@ old-kbach/
 # type-hints file here (see vite-plugin/classNameHints.ts) — regenerated on
 # every dev-server/build start, not meant to be committed or edited by hand.
 .kbach/
+
+# Kept local, out of the pushed repo (by choice):
+#   .claude/   — Claude Code session/tooling state, per-machine
+#   .vscode/   — personal editor settings
+#   .github/   — CI config; not maintained here
+#   apps/      — local dev/integration sandboxes; not part of the published packages
+# All still present on disk, just not tracked.
+.claude/
+.vscode/
+.github/
+apps/

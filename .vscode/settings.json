@@ -1,8 +1,0 @@
-{
-  "java.compile.nullAnalysis.mode": "automatic",
-  "files.exclude": {
-    "**/.kbach": true
-  },
-  "dependi.npm.lockFileEnabled": false,
-  "java.configuration.updateBuildConfiguration": "disabled"
-}

@@ -26,14 +26,8 @@ npx turbo run lint test build
 ```
 
 Building `packages/core-engine` requires a Rust toolchain with the
-`wasm32-unknown-unknown` target and `wasm-pack` installed — see
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the exact setup a
-fresh machine needs.
-
-`apps/native-sandbox` and `apps/expo-sandbox` are excluded from npm
-workspaces (see their own `metro.config.js` doc comments for why) and need
-their own `npm install` from inside each directory, plus an Android/Java
-toolchain for native builds.
+`wasm32-unknown-unknown` target and `wasm-pack` installed. Rebuilding the
+Android `.so` additionally needs `cargo-ndk` and the Android NDK.
 
 ### ⚠️ The Android native module is a PREBUILT BINARY — it will NOT
 ### rebuild itself from a Rust change

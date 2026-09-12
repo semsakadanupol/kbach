@@ -1,6 +1,6 @@
 {
   "name": "@kbach/react",
-  "version": "1.0.0-beta.20",
+  "version": "1.0.0-beta.21",
   "description": "A utility-first styling engine for React, powered by a real Rust/WASM core — Tailwind CSS v4 feature parity with Kbach's own color palette.",
   "keywords": [
     "css",
@@ -72,7 +72,7 @@
     "generate:colors": "node ../core-engine/scripts/generate-palette.mjs src/generatedPalette.ts"
   },
   "dependencies": {
-    "@kbach/core-engine": "1.0.0-beta.11"
+    "@kbach/core-engine": "1.0.0-beta.12"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",

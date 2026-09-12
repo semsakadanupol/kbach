@@ -158,12 +158,21 @@ export function extractClassStrings(rawCode: string): string[] {
   while ((m = simpleRe.exec(code)) !== null) pushTokens(m[2]!, found);
 
   // 2. JSX expression block: className={...} — brace-tracking for nested {}.
-  const jsxExprRe = /(?:className|kb)=\{/g;
+  // `\b` anchors both patterns below to a whole identifier — without it,
+  // "kb"/"cn" match as bare substrings of any longer minified identifier
+  // (e.g. "...arkb={" or "reactCn("), and a stray huge minified/vendor file
+  // under an `include` dir could otherwise produce thousands of spurious
+  // matches. MAX_BLOCK_SCAN_LEN caps the manual depth-scan walk per match so
+  // a malformed/never-closing match can't walk to EOF of a large file —
+  // bounds each match's cost regardless of file size or match count.
+  const MAX_BLOCK_SCAN_LEN = 20_000;
+  const jsxExprRe = /\b(?:className|kb)=\{/g;
   while ((m = jsxExprRe.exec(code)) !== null) {
     let depth = 1;
     let i = m.index + m[0].length;
+    const scanEnd = Math.min(code.length, i + MAX_BLOCK_SCAN_LEN);
     let block = '';
-    while (i < code.length && depth > 0) {
+    while (i < scanEnd && depth > 0) {
       const ch = code[i];
       if (ch === '{') depth++;
       else if (ch === '}') { if (--depth === 0) break; }
@@ -171,16 +180,17 @@ export function extractClassStrings(rawCode: string): string[] {
       i++;
     }
     jsxExprRe.lastIndex = i + 1;
-    pushClassLikeStrings(block, found);
+    if (depth === 0) pushClassLikeStrings(block, found);
   }
 
   // 3. clsx / cn / classnames / cx / kb() call — paren-depth tracking.
-  const classComposerCallRe = /(?:clsx|cn|classnames|cx|kb)\(/g;
+  const classComposerCallRe = /\b(?:clsx|cn|classnames|cx|kb)\(/g;
   while ((m = classComposerCallRe.exec(code)) !== null) {
     let depth = 1;
     let i = m.index + m[0].length;
+    const scanEnd = Math.min(code.length, i + MAX_BLOCK_SCAN_LEN);
     let block = '';
-    while (i < code.length && depth > 0) {
+    while (i < scanEnd && depth > 0) {
       const ch = code[i];
       if (ch === '(') depth++;
       else if (ch === ')') { if (--depth === 0) break; }
@@ -188,7 +198,7 @@ export function extractClassStrings(rawCode: string): string[] {
       i++;
     }
     classComposerCallRe.lastIndex = i + 1;
-    pushClassLikeStrings(block, found);
+    if (depth === 0) pushClassLikeStrings(block, found);
   }
 
   // 4. Any other template literal in the file — catches one assigned to a

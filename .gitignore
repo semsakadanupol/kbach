@@ -4,6 +4,11 @@ coverage/
 .turbo/
 *.tsbuildinfo
 
+# Local secrets — never commit.
+.env
+.env.*
+!.env.example
+
 # apps/next-sandbox (Next.js build output + its auto-generated type-hints file)
 .next/
 next-env.d.ts

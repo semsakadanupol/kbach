@@ -33,6 +33,13 @@ use jni::JNIEnv;
 /// arguments to Rust `String`s (malformed/non-UTF8 treated as empty rather
 /// than panicking across the FFI boundary), calls `resolve`, and marshals
 /// the result back to a `jstring`.
+///
+/// `resolve` runs inside `catch_unwind`: a Rust panic unwinding across an
+/// `extern "system"` boundary is undefined behavior and, in practice, aborts
+/// the host Android app. Every panic reachable from `resolve` today is only
+/// in `#[cfg(test)]` code, but this is cheap insurance against the next
+/// resolver landing a reachable `.unwrap()` — a caught panic degrades to an
+/// empty string instead of taking the whole app down.
 fn marshal(
     env: &mut JNIEnv,
     class_string: JString,
@@ -42,7 +49,8 @@ fn marshal(
     let class_string: String = env.get_string(&class_string).map(|s| s.into()).unwrap_or_default();
     let theme_json: String = env.get_string(&theme_json).map(|s| s.into()).unwrap_or_default();
 
-    let result = resolve(&class_string, &theme_json);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| resolve(&class_string, &theme_json)))
+        .unwrap_or_default();
 
     match env.new_string(result) {
         Ok(s) => s.into_raw(),
@@ -64,6 +72,7 @@ pub extern "system" fn Java_com_kbachnative_KbachModule_nativeGenerateCss(
 /// raw boolean, and a raw double — no string marshaling needed for either)
 /// — kept separate rather than widening `marshal` itself, since
 /// `generateCss` above needs to keep its existing 2-arg signature unchanged.
+/// Also `catch_unwind`s `resolve` — see `marshal`'s doc comment for why.
 fn marshal3(
     env: &mut JNIEnv,
     class_string: JString,
@@ -77,7 +86,10 @@ fn marshal3(
     let theme_json: String = env.get_string(&theme_json).map(|s| s.into()).unwrap_or_default();
     let color_scheme: String = env.get_string(&color_scheme).map(|s| s.into()).unwrap_or_default();
 
-    let result = resolve(&class_string, &theme_json, &color_scheme, pressed != 0, width);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        resolve(&class_string, &theme_json, &color_scheme, pressed != 0, width)
+    }))
+    .unwrap_or_default();
 
     match env.new_string(result) {
         Ok(s) => s.into_raw(),

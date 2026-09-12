@@ -86,6 +86,28 @@ describe('extractClassStrings', () => {
     const code = `<a className="p-4" href="https://example.com">link</a>`;
     expect(extractClassStrings(code)).toEqual(expect.arrayContaining(['p-4']));
   });
+
+  it('does not match "kb(" or "cn(" as a tail-substring of a longer identifier', () => {
+    const code = `const arkb=(x) => x; const reactCn=(x) => x; arkb('bg-blue-6'); reactCn('p-4');`;
+    expect(extractClassStrings(code)).toEqual([]);
+  });
+
+  it('still matches a real kb() call right after an unrelated identifier ending the same letters', () => {
+    const code = `const arkb = 1; kb('bg-blue-6');`;
+    expect(extractClassStrings(code)).toEqual(expect.arrayContaining(['bg-blue-6']));
+  });
+
+  it('does not hang or blow the stack on a huge never-closing className expression block', () => {
+    const code = `<div className={${'{'.repeat(200_000)}`;
+    expect(() => extractClassStrings(code)).not.toThrow();
+    expect(extractClassStrings(code)).toEqual([]);
+  });
+
+  it('does not hang or blow the stack on a huge never-closing composer call', () => {
+    const code = `cn(${'('.repeat(200_000)}`;
+    expect(() => extractClassStrings(code)).not.toThrow();
+    expect(extractClassStrings(code)).toEqual([]);
+  });
 });
 
 describe('scanUsedTags', () => {

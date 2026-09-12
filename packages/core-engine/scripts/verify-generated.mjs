@@ -12,7 +12,7 @@
 //
 // Usage: node verify-generated.mjs
 
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { readFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { basename, dirname, join } from 'path';
@@ -61,6 +61,52 @@ try {
   }
 } finally {
   rmSync(tmpDir, { recursive: true, force: true });
+}
+
+// --- Android .so drift check --------------------------------------------
+// The prebuilt JNI binaries below have no text/generator counterpart above
+// (they're what previously went stale for days relative to resolve_style.rs
+// with nothing catching it — see build-android-if-available.mjs's own doc
+// comment). Best-effort: rebuilds them into a temp dir with cargo-ndk and
+// byte-compares against what's committed. A machine without the NDK/
+// cargo-ndk (this repo's own CI today, which has no Android toolchain set
+// up) can't run this check at all — it skips with a warning rather than
+// failing, same philosophy as build-android-if-available.mjs. On any
+// machine that DOES have the toolchain, this now actually catches drift
+// instead of relying on remembering to run `npm run build:android` by hand.
+const soTargets = [
+  { ndkTarget: 'arm64-v8a', committed: 'packages/react-native/android/src/main/jniLibs/arm64-v8a/libkbach_core_engine.so' },
+  { ndkTarget: 'x86_64', committed: 'packages/react-native/android/src/main/jniLibs/x86_64/libkbach_core_engine.so' },
+];
+
+const soTmpDir = join(tmpDir, 'android-so');
+mkdirSync(soTmpDir, { recursive: true });
+const coreEngineDir = join(repoRoot, 'packages', 'core-engine');
+const ndkArgs = ['ndk', ...soTargets.flatMap(({ ndkTarget }) => ['-t', ndkTarget]), '-o', soTmpDir, 'build', '--release', '--lib'];
+const ndkResult = spawnSync('cargo', ndkArgs, { cwd: coreEngineDir, stdio: 'pipe' });
+
+if (ndkResult.status !== 0) {
+  console.warn(
+    '\n⚠ Skipping Android .so drift check — cargo-ndk/the Android NDK isn\'t available in ' +
+      'this environment. Run `npm run build:android -w @kbach/core-engine` on a machine with ' +
+      'the toolchain (`cargo install cargo-ndk`, ANDROID_NDK_HOME, and the ' +
+      'aarch64-linux-android/x86_64-linux-android Rust targets) to verify by hand.\n',
+  );
+} else {
+  for (const { ndkTarget, committed } of soTargets) {
+    const committedPath = join(repoRoot, committed);
+    const freshPath = join(soTmpDir, ndkTarget, 'libkbach_core_engine.so');
+    const committedBytes = readFileSync(committedPath);
+    const freshBytes = readFileSync(freshPath);
+
+    if (!committedBytes.equals(freshBytes)) {
+      failed = true;
+      console.error(`\n✗ ${committed} is out of date with the current core-engine source.`);
+      console.error(`  Regenerate it: npm run build:android -w @kbach/core-engine\n`);
+    } else {
+      console.log(`✓ ${committed} is up to date`);
+    }
+  }
 }
 
 if (failed) {

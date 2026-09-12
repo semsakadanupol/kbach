@@ -89,14 +89,22 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
 /// which units can combine, but since everything reducible here already
 /// collapses to the same px basis, plain float arithmetic is exactly
 /// equivalent without needing to track units through the tree at all.
+/// Caps `factor()` recursion depth (nested parens, or a chain of unary `-`).
+/// A crafted arbitrary value like `w-[calc(` + `(`×N + `1px` + `)`×N + `)]`
+/// would otherwise recurse N deep with no limit — on Android that's a native
+/// stack overflow, which aborts the host app rather than unwinding as a
+/// catchable panic. No real-world calc() nests anywhere near this deep.
+const MAX_CALC_DEPTH: usize = 64;
+
 struct Evaluator<'a> {
     bytes: &'a [u8],
     pos: usize,
+    depth: usize,
 }
 
 impl<'a> Evaluator<'a> {
     fn new(s: &'a str) -> Self {
-        Evaluator { bytes: s.as_bytes(), pos: 0 }
+        Evaluator { bytes: s.as_bytes(), pos: 0, depth: 0 }
     }
 
     fn parse_expr_to_end(mut self) -> Option<f64> {
@@ -155,6 +163,16 @@ impl<'a> Evaluator<'a> {
     }
 
     fn factor(&mut self) -> Option<f64> {
+        if self.depth >= MAX_CALC_DEPTH {
+            return None;
+        }
+        self.depth += 1;
+        let result = self.factor_inner();
+        self.depth -= 1;
+        result
+    }
+
+    fn factor_inner(&mut self) -> Option<f64> {
         match self.peek()? {
             b'(' => {
                 self.pos += 1;
@@ -292,5 +310,13 @@ mod tests {
     fn returns_none_for_malformed_calc_syntax() {
         assert_eq!(reduce_constant_math("calc(16px+)"), None);
         assert_eq!(reduce_constant_math("calc(16px+8px"), None); // unbalanced parens caught by strip_call's suffix check
+    }
+
+    #[test]
+    fn does_not_stack_overflow_on_pathologically_nested_parens() {
+        let opens = "(".repeat(100_000);
+        let closes = ")".repeat(100_000);
+        let expr = format!("calc({opens}1px{closes})");
+        assert_eq!(reduce_constant_math(&expr), None);
     }
 }

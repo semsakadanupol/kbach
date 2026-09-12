@@ -277,6 +277,70 @@ describe('jsx-runtime (react-native)', () => {
     });
   });
 
+  describe('mode-aware color reactivity (a plain bg-<name> with no "dark:" text at all)', () => {
+    // Regression: a theme color declared as `{ light, dark }` (kbach.config.js's
+    // grouped `dark: {}` block) resolves correctly on first render via a
+    // PLAIN class like `bg-surface` — no `dark:` modifier needed at all —
+    // but nothing in that class string's own text says "this needs to react
+    // to a theme toggle". Before this fix, such an element silently froze at
+    // whichever color was active on mount, everywhere except wherever it
+    // happened to be incidentally re-rendered for some unrelated reason
+    // (confirmed via a real-device report: a theme toggle only visibly took
+    // effect on whichever tab was open when it was pressed).
+    beforeEach(async () => {
+      const { setTheme } = await import('./theme');
+      setTheme({
+        colors: { surface: { light: '#f9fafb', dark: '#111827' } },
+        spacing: {},
+        screens: {},
+        fontFamily: { sans: '', serif: '', mono: '' },
+        darkMode: 'attribute',
+        container: {},
+      });
+    });
+
+    afterEach(async () => {
+      const { setTheme, defaultTheme } = await import('./theme');
+      setTheme(defaultTheme);
+    });
+
+    it('wraps a plain mode-aware-color class in ReactiveElement and re-resolves it on a theme toggle', async () => {
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'bg-surface' }, undefined);
+
+      const renderer = mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        toggleGlobalDarkMode();
+      });
+
+      expect(mockResolveStyle).toHaveBeenCalledTimes(2);
+      expect(renderer.root.findByType('View' as any).props.style).toMatchObject({ dark: true });
+    });
+
+    it('does not add reactivity overhead for a color naming an ordinary (non-mode-aware) theme entry', async () => {
+      const { setTheme } = await import('./theme');
+      setTheme({
+        colors: { 'blue-6': '#2563eb' },
+        spacing: {},
+        screens: {},
+        fontFamily: { sans: '', serif: '', mono: '' },
+        darkMode: 'attribute',
+        container: {},
+      });
+      const { jsx } = await import('./jsx-runtime');
+      const el = jsx('View', { className: 'bg-blue-6' }, undefined);
+      mount(el);
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        toggleGlobalDarkMode();
+      });
+      expect(mockResolveStyle).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // Same shape as the dark: suite above, for the sibling bug flagged in
   // jsxRuntimeCore.ts's own doc comments: an already-mounted host component
   // doesn't repaint just because a live width parameter changed, so a

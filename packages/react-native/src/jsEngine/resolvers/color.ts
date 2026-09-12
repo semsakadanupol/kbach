@@ -77,6 +77,31 @@ export function substituteModeAwareColorToken(token: string, theme: ThemeConfig,
   return `${modifierPrefix}${found.prefix}[${hex}]`;
 }
 
+/**
+ * Cheap, `colorScheme`-INDEPENDENT check: does any token in `classString`
+ * name a mode-aware theme color via a plain `bg-`/`text-`/`border-` class,
+ * with no `dark:` (or any other) modifier anywhere in the string? Despite
+ * living in this jsEngine directory (mirroring `findModeAwareColor` above,
+ * which IS Expo-Go-fallback-only), this particular function is imported
+ * directly by jsxRuntimeCore.ts and used for EVERY native entry point (real
+ * native module, WASM, and this JS fallback alike) — see that file's own
+ * `usesModeAwareColor` doc comment for why: without this signal,
+ * jsxRuntimeCore.ts can only detect "needs to react to a theme toggle"
+ * syntactically (a literal `dark:` in the class string), and a mode-aware
+ * color referenced by its plain name looks identical to an ordinary
+ * always-the-same-color class until you already know the theme — which this
+ * answers directly, without needing a resolve call through any engine at
+ * all.
+ */
+export function classStringUsesModeAwareColor(classString: string, theme: ThemeConfig): boolean {
+  return classString.split(/\s+/).some((rawToken) => {
+    if (!rawToken) return false;
+    const segments = rawToken.split(':');
+    const base = segments.pop() ?? rawToken;
+    return findModeAwareColor(base, theme) !== null;
+  });
+}
+
 function hexToRgb(hex: string): [number, number, number] | null {
   const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) return null;

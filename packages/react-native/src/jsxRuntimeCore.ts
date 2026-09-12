@@ -19,6 +19,8 @@ import type { ReactElement } from 'react';
 import type { LayoutChangeEvent, PressableStateCallbackType } from 'react-native';
 import type { StyleObject } from './nativeBridge';
 import { getGlobalDarkMode, subscribeGlobalDarkMode } from './darkModeStore';
+import { getTheme } from './theme';
+import { classStringUsesModeAwareColor } from './jsEngine/resolvers/color';
 import { getDynamicToken, subscribeDynamicTokens, getDynamicTokensVersion } from './dynamicTokens';
 import { parsePercentRelativeExpr, type PercentRelativeExpr } from './layoutCalc';
 import { splitRespectingBrackets } from './jsEngine/parser';
@@ -337,6 +339,35 @@ const DARK_MODIFIER_RE = /(^|\s|:)dark:/;
 const BREAKPOINT_MODIFIER_RE = /(^|\s|:)(sm|md|lg|xl|2xl):|(^|\s|:)(min|max)-\[[^\]]*\]:/;
 const HOVER_MODIFIER_RE = /(^|\s|:)hover:/;
 const FOCUS_MODIFIER_RE = /(^|\s|:)focus:/;
+/**
+ * Does `classStrRaw` reference a mode-aware theme color (`{ light, dark }`)
+ * by its plain name, with no `dark:`/other modifier anywhere already
+ * marking it reactive? `DARK_MODIFIER_RE` etc. above only catch reactivity
+ * that's visible in the class string's own TEXT — a plain `bg-surface`
+ * class naming a mode-aware `surface` color looks, syntactically, identical
+ * to an ordinary always-the-same-color class; nothing distinguishes them
+ * without checking the theme, which is the one thing that actually knows
+ * whether `surface` was declared as `{ light, dark }`.
+ *
+ * A plain, cheap theme lookup (`getTheme()` is already parsed/cached — see
+ * theme.ts) via the SAME `classStringUsesModeAwareColor` the Expo Go
+ * jsEngine fallback uses — no bridge/WASM round-trip needed, since
+ * mode-awareness is a pure function of (class string, theme.colors),
+ * entirely independent of the CURRENT color scheme. An earlier version of
+ * this tried answering the question by resolving the class and peeking at a
+ * marker in the result, which doubled the `resolveStyle` call count for
+ * every color-bearing element on every render (caught by this file's own
+ * "no reactivity overhead for a plain element" test suite) — this version
+ * costs one local object-property lookup per color-family token instead.
+ *
+ * Confirmed via a real-device report: without this, a theme toggle only
+ * visibly took effect on whichever tab happened to be open when it was
+ * pressed — every other already-mounted screen kept the stale color
+ * forever, since nothing ever told React to re-render it.
+ */
+function usesModeAwareColor(classStrRaw: string): boolean {
+  return classStringUsesModeAwareColor(classStrRaw, getTheme());
+}
 
 interface ReactiveProps {
   hostType: unknown;
@@ -604,7 +635,8 @@ function processElement(
     HOVER_MODIFIER_RE.test(classStrRaw) ||
     FOCUS_MODIFIER_RE.test(classStrRaw) ||
     classStrRaw.includes('var(--') ||
-    PERCENT_RELATIVE_CALC_HINT_RE.test(classStrRaw)
+    PERCENT_RELATIVE_CALC_HINT_RE.test(classStrRaw) ||
+    usesModeAwareColor(classStrRaw)
   ) {
     return _jsx(
       ReactiveElement,

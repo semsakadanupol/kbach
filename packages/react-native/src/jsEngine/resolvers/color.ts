@@ -32,19 +32,41 @@ function lookupHex(theme: ThemeConfig, key: string): string | null {
 // rather than duplicated ad hoc per call site).
 const MODE_AWARE_COLOR_PREFIXES = ['bg-', 'text-', 'border-'] as const;
 
-/** Mirrors resolvers/color.rs's `find_mode_aware_color`. */
-function findModeAwareColor(base: string, theme: ThemeConfig): { prefix: string; light: string; dark: string } | null {
+/**
+ * Mirrors `resolvers/color.rs`'s `find_mode_aware_color` — including
+ * stripping a trailing `/N` opacity suffix off the color NAME before the
+ * `theme.colors` lookup (and returning it alongside the match). Without
+ * this, `bg-surface/50` (surface mode-aware) looked up the literal,
+ * never-defined key `"surface/50"`, silently failed to match, and the whole
+ * class resolved to nothing — a real, reported bug: any mode-aware custom
+ * color completely lost inline opacity support.
+ */
+function findModeAwareColor(base: string, theme: ThemeConfig): { prefix: string; opacity: number | null; light: string; dark: string } | null {
   const important = base.startsWith('!') ? '!' : '';
   const rest = important ? base.slice(1) : base;
   for (const prefix of MODE_AWARE_COLOR_PREFIXES) {
     if (!rest.startsWith(prefix)) continue;
-    const value = rest.slice(prefix.length);
-    const entry: ColorEntry | undefined = theme.colors[value];
+    const [name, opacity] = splitOpacity(rest.slice(prefix.length));
+    const entry: ColorEntry | undefined = theme.colors[name];
     if (typeof entry === 'object' && entry !== null) {
-      return { prefix: `${important}${prefix}`, light: entry.light, dark: entry.dark };
+      return { prefix: `${important}${prefix}`, opacity, light: entry.light, dark: entry.dark };
     }
   }
   return null;
+}
+
+/**
+ * Bakes an optional `/N` opacity suffix into `hex` as an `rgba(...)` string
+ * — same decomposition `colorValue` already does for an ordinary
+ * (non-mode-aware) color's own inline opacity, reused here so a mode-aware
+ * color's light/dark sides get IDENTICAL opacity handling. Mirrors
+ * `resolvers/color.rs`'s `apply_opacity_to_hex`.
+ */
+function applyOpacityToHex(hex: string, opacity: number | null): string {
+  if (opacity === null) return hex;
+  const rgb = hexToRgb(hex);
+  if (rgb === null) return hex;
+  return `rgba(${rgb.join(',')},${opacity / 100})`;
 }
 
 /**
@@ -74,7 +96,7 @@ export function substituteModeAwareColorToken(token: string, theme: ThemeConfig,
   const found = findModeAwareColor(base, theme);
   if (found === null) return token;
   const hex = colorScheme === 'dark' ? found.dark : found.light;
-  return `${modifierPrefix}${found.prefix}[${hex}]`;
+  return `${modifierPrefix}${found.prefix}[${applyOpacityToHex(hex, found.opacity)}]`;
 }
 
 /**

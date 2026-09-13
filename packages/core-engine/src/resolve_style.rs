@@ -721,6 +721,31 @@ mod tests {
     }
 
     #[test]
+    fn an_inline_opacity_suffix_works_on_a_mode_aware_color_too() {
+        // Regression: `bg-surface/50` (surface mode-aware) looked up the
+        // literal, never-defined key "surface/50" in `find_mode_aware_color`
+        // (the opacity suffix wasn't stripped before the theme lookup),
+        // silently failed to match, and fell through to `lookup_hex` —
+        // which explicitly rejects a `ModeAware` entry — so the whole class
+        // resolved to nothing at all, on native and web alike.
+        let mut t = theme();
+        t.colors.insert(
+            "surface".to_string(),
+            ColorValue::ModeAware { light: "#f9fafb".to_string(), dark: "#111827".to_string() },
+        );
+
+        let light = resolve_style("bg-surface/50", &t, "light", false, W);
+        assert_eq!(light.get("backgroundColor").unwrap(), "rgba(249,250,251,0.5)");
+
+        let dark = resolve_style("bg-surface/50", &t, "dark", false, W);
+        assert_eq!(dark.get("backgroundColor").unwrap(), "rgba(17,24,39,0.5)");
+
+        // An explicit `dark:` modifier composes with opacity the same way.
+        let dark_prefixed = resolve_style("dark:bg-surface/50", &t, "dark", false, W);
+        assert_eq!(dark_prefixed.get("backgroundColor").unwrap(), "rgba(17,24,39,0.5)");
+    }
+
+    #[test]
     fn aspect_ratio_resolves_to_a_number_not_a_css_ratio_string() {
         let t = theme();
         // Fabric's aspectRatio prop parser wants a number, not "3 / 4".

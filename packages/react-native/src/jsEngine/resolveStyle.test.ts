@@ -70,6 +70,15 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('bg-surface', t, 'dark', false, W).backgroundColor).toBe('#111827');
   });
 
+  it('an inline opacity suffix works on a mode-aware color too', () => {
+    // Regression: findModeAwareColor looked up the literal, never-defined
+    // key "surface/50" (the opacity suffix wasn't stripped first), so
+    // bg-surface/50 silently resolved to nothing at all.
+    const t = theme({ colors: { surface: { light: '#f9fafb', dark: '#111827' } } });
+    expect(resolveStyleJs('bg-surface/50', t, 'light', false, W).backgroundColor).toBe('rgba(249,250,251,0.5)');
+    expect(resolveStyleJs('bg-surface/50', t, 'dark', false, W).backgroundColor).toBe('rgba(17,24,39,0.5)');
+  });
+
   it('applies the active modifier only when pressed', () => {
     const t = theme();
     expect(resolveStyleJs('active:bg-blue-8', t, 'light', false, W)).toEqual({});

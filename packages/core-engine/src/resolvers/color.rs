@@ -283,23 +283,51 @@ const MODE_AWARE_COLOR_PREFIXES: [&str; 3] = ["bg-", "text-", "border-"];
 /// both) and `substitute_mode_aware_color_token` (native, picks one) so
 /// neither can drift from the other on which prefixes/markers are
 /// recognized.
-fn find_mode_aware_color<'a>(base: &'a str, theme: &'a ThemeConfig) -> Option<(String, &'a str, &'a str)> {
+/// `value`'s own trailing `/N` opacity suffix (if any — see `split_opacity`)
+/// is stripped BEFORE the `theme.colors` lookup and returned alongside the
+/// match, rather than left for the caller to notice is missing: without
+/// this, `bg-surface/50` (surface mode-aware) looked up the literal,
+/// never-defined key `"surface/50"`, silently failed to match here, fell
+/// through to `lookup_hex` (which explicitly rejects a `ModeAware` entry,
+/// expecting it to have already been substituted away by this exact
+/// function), and the whole class resolved to nothing at all — confirmed as
+/// a real, reported bug: any mode-aware custom color completely lost inline
+/// opacity support, native and web alike, with no warning explaining why.
+fn find_mode_aware_color<'a>(base: &'a str, theme: &'a ThemeConfig) -> Option<(String, Option<u8>, &'a str, &'a str)> {
     let (important, rest) = match base.strip_prefix('!') {
         Some(r) => ("!", r),
         None => ("", base),
     };
     for prefix in MODE_AWARE_COLOR_PREFIXES {
-        let Some(value) = rest.strip_prefix(prefix) else { continue };
-        if let Some(ColorValue::ModeAware { light, dark }) = theme.colors.get(value) {
-            return Some((format!("{important}{prefix}"), light.as_str(), dark.as_str()));
+        let Some(after_prefix) = rest.strip_prefix(prefix) else { continue };
+        let (name, opacity) = split_opacity(after_prefix);
+        if let Some(ColorValue::ModeAware { light, dark }) = theme.colors.get(name) {
+            return Some((format!("{important}{prefix}"), opacity, light.as_str(), dark.as_str()));
         }
     }
     None
 }
 
+/// Bakes an optional `/N` opacity suffix into `hex` as an `rgba(...)`
+/// string — same decomposition `color_value` already does for an ordinary
+/// (non-mode-aware) color's own inline opacity, reused here so a mode-aware
+/// color's light/dark sides get IDENTICAL opacity handling. Returns `hex`
+/// unchanged when there's no opacity, or when `hex` isn't a `#`-prefixed
+/// value `hex_to_rgb` can decompose (same tolerant fallback `color_value`
+/// uses).
+fn apply_opacity_to_hex(hex: &str, opacity: Option<u8>) -> String {
+    match (opacity, hex.strip_prefix('#').and_then(hex_to_rgb)) {
+        (Some(pct), Some((r, g, b))) => format!("rgba({r},{g},{b},{})", pct as f64 / 100.0),
+        _ => hex.to_string(),
+    }
+}
+
 fn expand_base(base: &str, theme: &ThemeConfig) -> Option<(String, String)> {
-    let (prefix, light, dark) = find_mode_aware_color(base, theme)?;
-    Some((format!("{prefix}[{light}]"), format!("{prefix}[{dark}]")))
+    let (prefix, opacity, light, dark) = find_mode_aware_color(base, theme)?;
+    Some((
+        format!("{prefix}[{}]", apply_opacity_to_hex(light, opacity)),
+        format!("{prefix}[{}]", apply_opacity_to_hex(dark, opacity)),
+    ))
 }
 
 /// Native's counterpart to `expand_mode_aware_color_classes` — used by
@@ -340,9 +368,9 @@ pub fn substitute_mode_aware_color_token(token: &str, theme: &ThemeConfig, color
     let modifier_prefix = if segments.is_empty() { String::new() } else { format!("{}:", segments.join(":")) };
 
     match find_mode_aware_color(base, theme) {
-        Some((prefix, light, dark)) => {
+        Some((prefix, opacity, light, dark)) => {
             let hex = if color_scheme == "dark" { dark } else { light };
-            format!("{modifier_prefix}{prefix}[{hex}]")
+            format!("{modifier_prefix}{prefix}[{}]", apply_opacity_to_hex(hex, opacity))
         }
         None => token.to_string(),
     }
@@ -521,6 +549,16 @@ mod tests {
         let theme = theme_with_colors();
         let expanded = expand_mode_aware_color_classes("hover:bg-surface", &theme);
         assert_eq!(expanded, "hover:bg-[#f9fafb] hover:dark:bg-[#111827]");
+    }
+
+    #[test]
+    fn expands_a_mode_aware_color_with_an_inline_opacity_suffix() {
+        // Regression: the opacity suffix wasn't stripped before the
+        // mode-aware theme-color lookup, so `bg-surface/50` never matched
+        // at all and passed through unexpanded, unstyled.
+        let theme = theme_with_colors();
+        let expanded = expand_mode_aware_color_classes("bg-surface/50 p-4", &theme);
+        assert_eq!(expanded, "bg-[rgba(249,250,251,0.5)] dark:bg-[rgba(17,24,39,0.5)] p-4");
     }
 
     #[test]

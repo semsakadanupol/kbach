@@ -476,6 +476,34 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('outline-blue-6/50', t, 'light', false, W).outlineColor).toBe('rgba(37,99,235,0.5)');
   });
 
+  it('resolves an arbitrary hex border/outline value to color, not width', () => {
+    // Regression, reported live: every arbitrary border/outline value used
+    // to be treated as border-width/outline-width unconditionally —
+    // "border-[#050505]" (or the same thing via a mode-aware theme color
+    // substituted in by substituteModeAwareColorToken, e.g.
+    // "border-background") silently produced borderWidth: "#050505", which
+    // RN then rejected as an invalid native value.
+    const t = theme();
+    expect(resolveStyleJs('border-[#050505]', t, 'light', false, W).borderColor).toBe('#050505');
+    expect(resolveStyleJs('border-[#050505]', t, 'light', false, W).borderWidth).toBeUndefined();
+    expect(resolveStyleJs('border-t-[#050505]', t, 'light', false, W).borderTopColor).toBe('#050505');
+    expect(resolveStyleJs('outline-[#050505]', t, 'light', false, W).outlineColor).toBe('#050505');
+
+    // An arbitrary length still resolves to width, unaffected (RN wants a
+    // bare number for a px-suffixed value, same as every other length prop).
+    expect(resolveStyleJs('border-[3px]', t, 'light', false, W).borderWidth).toBe(3);
+    expect(resolveStyleJs('outline-[3px]', t, 'light', false, W).outlineWidth).toBe(3);
+  });
+
+  it('a plain class naming a mode-aware color on border resolves to border-color', () => {
+    // End-to-end version of the same regression: substituteModeAwareColorToken
+    // rewrites "border-background" to "border-[#050505]" BEFORE this ever
+    // reaches borderValue's dispatch.
+    const t = theme({ colors: { background: { light: '#f9fafb', dark: '#050505' } } });
+    expect(resolveStyleJs('border-background', t, 'light', false, W).borderColor).toBe('#f9fafb');
+    expect(resolveStyleJs('border-background', t, 'dark', false, W).borderColor).toBe('#050505');
+  });
+
   it('resolves text size and align before falling back to color', () => {
     expect(resolveStyleJs('text-lg', theme(), 'light', false, W).fontSize).toBe(18);
     expect(resolveStyleJs('text-center', theme(), 'light', false, W).textAlign).toBe('center');

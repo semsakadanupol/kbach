@@ -112,10 +112,12 @@ const LENGTH_UNITS: &[&str] = &["px", "rem", "em", "%", "vh", "vw"];
 
 /// True if `value` looks like a CSS length (a number, optionally with a
 /// known unit suffix like "20px"/"1.5rem"/"100%") rather than a color. Used
-/// ONLY for arbitrary `text-[...]` disambiguation — a real color never
-/// parses as a bare number or number+length-unit, so this is safe without
-/// needing full CSS-value-type inference.
-fn looks_like_length(value: &str) -> bool {
+/// for arbitrary-value disambiguation wherever a prefix is ambiguous between
+/// a length and a color (`text-[...]` below; `border-[...]`/`outline-[...]`
+/// in `border.rs`) — a real color never parses as a bare number or
+/// number+length-unit, so this is safe without needing full
+/// CSS-value-type inference.
+pub(super) fn looks_like_length(value: &str) -> bool {
     let without_unit = LENGTH_UNITS.iter().find_map(|u| value.strip_suffix(u)).unwrap_or(value);
     without_unit.parse::<f64>().is_ok()
 }

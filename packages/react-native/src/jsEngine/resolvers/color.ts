@@ -175,3 +175,21 @@ export function colorValue(theme: ThemeConfig, parsed: ParsedClass): string | nu
   if (rgb === null) return hex;
   return `rgba(${rgb.join(',')},${opacity / 100})`;
 }
+
+// Mirrors resolvers/color.rs's identical LENGTH_UNITS constant exactly.
+const LENGTH_UNITS = ['px', 'rem', 'em', '%', 'vh', 'vw'];
+
+/**
+ * True if `value` looks like a CSS length (a number, optionally with a
+ * known unit suffix like "20px"/"1.5rem"/"100%") rather than a color. Used
+ * for arbitrary-value disambiguation wherever a prefix is ambiguous between
+ * a length and a color (`border-[...]`/`outline-[...]` in border.ts) — a
+ * real color never parses as a bare number or number+length-unit, so this
+ * is safe without needing full CSS-value-type inference. Mirrors
+ * `resolvers/color.rs`'s `looks_like_length`.
+ */
+export function looksLikeLength(value: string): boolean {
+  const unit = LENGTH_UNITS.find((u) => value.endsWith(u));
+  const withoutUnit = unit ? value.slice(0, value.length - unit.length) : value;
+  return withoutUnit !== '' && Number.isFinite(Number(withoutUnit));
+}

@@ -4,7 +4,7 @@
  * CSS-only properties RN doesn't have, which is harmless — RN just logs an
  * unknown-style-property warning, same precedent the Rust engine documents).
  */
-import { colorValue } from './color';
+import { colorValue, looksLikeLength } from './color';
 import { decl, resolveLength, type Declaration } from '../shared';
 import type { ParsedClass } from '../parser';
 import type { ThemeConfig } from '../../theme';
@@ -46,7 +46,15 @@ function borderValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | n
     if (value === 'separate') return [decl('border-collapse', 'separate')];
   }
   if (parsed.isArbitrary) {
-    return [decl('border-width', value)];
+    // Regression guard: every arbitrary border value used to be treated as
+    // border-width unconditionally — "border-[#050505]" (or the same thing
+    // via a mode-aware theme color substituted in by
+    // substituteModeAwareColorToken, e.g. "border-background") silently
+    // produced border-width: #050505, which RN then rejected as an invalid
+    // native value. Mirrors resolvers/color.rs's identical fix.
+    if (looksLikeLength(value)) return [decl('border-width', value)];
+    const color = colorValue(theme, parsed);
+    return color === null ? null : [decl('border-color', color)];
   }
   if (Number.isFinite(Number(value)) && value.trim() !== '') {
     const v = resolveLength(theme, parsed);
@@ -64,7 +72,12 @@ function borderValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | n
 function borderSideValue(theme: ThemeConfig, parsed: ParsedClass, sideProperty: string): Declaration[] | null {
   const value = parsed.value;
   if (value === null) return null;
-  if (parsed.isArbitrary) return [decl(`${sideProperty}-width`, value)];
+  if (parsed.isArbitrary) {
+    // Same regression guard as `borderValue` above.
+    if (looksLikeLength(value)) return [decl(`${sideProperty}-width`, value)];
+    const color = colorValue(theme, parsed);
+    return color === null ? null : [decl(`${sideProperty}-color`, color)];
+  }
   if (Number.isFinite(Number(value)) && value.trim() !== '') {
     const v = resolveLength(theme, parsed);
     return v === null ? null : [decl(`${sideProperty}-width`, v)];
@@ -80,7 +93,12 @@ function borderSideValue(theme: ThemeConfig, parsed: ParsedClass, sideProperty: 
 function borderAxisValue(theme: ThemeConfig, parsed: ParsedClass, sideA: string, sideB: string): Declaration[] | null {
   const value = parsed.value;
   if (value === null) return null;
-  if (parsed.isArbitrary) return [decl(`${sideA}-width`, value), decl(`${sideB}-width`, value)];
+  if (parsed.isArbitrary) {
+    // Same regression guard as `borderValue` above.
+    if (looksLikeLength(value)) return [decl(`${sideA}-width`, value), decl(`${sideB}-width`, value)];
+    const color = colorValue(theme, parsed);
+    return color === null ? null : [decl(`${sideA}-color`, color), decl(`${sideB}-color`, color)];
+  }
   if (Number.isFinite(Number(value)) && value.trim() !== '') {
     const v = resolveLength(theme, parsed);
     return v === null ? null : [decl(`${sideA}-width`, v), decl(`${sideB}-width`, v)];
@@ -139,7 +157,12 @@ function outlineWidthValue(key: string): string | null {
 function outlineValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | null {
   const value = parsed.value;
   if (value === null) return null;
-  if (parsed.isArbitrary) return [decl('outline-width', value)];
+  if (parsed.isArbitrary) {
+    // Same regression guard as `borderValue` above.
+    if (looksLikeLength(value)) return [decl('outline-width', value)];
+    const color = colorValue(theme, parsed);
+    return color === null ? null : [decl('outline-color', color)];
+  }
   const w = outlineWidthValue(value);
   if (w !== null) return [decl('outline-width', w)];
   if (OUTLINE_STYLES.includes(value)) return [decl('outline-style', value)];

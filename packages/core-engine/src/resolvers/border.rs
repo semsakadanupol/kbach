@@ -1,4 +1,4 @@
-use super::color::color_value;
+use super::color::{color_value, looks_like_length};
 use super::{decl, resolve_length, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
@@ -43,7 +43,11 @@ fn border_side_property(side: &str) -> Option<&'static str> {
 fn border_side_value(theme: &ThemeConfig, parsed: &ParsedClass, side_property: &str) -> Option<Vec<Declaration>> {
     let value = parsed.value.as_deref()?;
     if parsed.is_arbitrary {
-        return Some(vec![decl(&format!("{side_property}-width"), value)]);
+        // Same regression guard as `border_value` — see its own doc comment.
+        if looks_like_length(value) {
+            return Some(vec![decl(&format!("{side_property}-width"), value)]);
+        }
+        return color_value(theme, parsed).map(|v| vec![decl(&format!("{side_property}-color"), &v)]);
     }
     if value.parse::<f64>().is_ok() {
         return resolve_length(theme, parsed).map(|v| vec![decl(&format!("{side_property}-width"), &v)]);
@@ -51,9 +55,8 @@ fn border_side_value(theme: &ThemeConfig, parsed: &ParsedClass, side_property: &
     if matches!(value, "solid" | "dashed" | "dotted" | "double" | "hidden" | "none") {
         return Some(vec![decl(&format!("{side_property}-style"), value)]);
     }
-    // `is_arbitrary` is guaranteed false here (the arbitrary case already
-    // returned above as a width) — color_value's own opacity-suffix
-    // handling (`border-t-blue-6/50`) is what this reuses it for.
+    // color_value's own opacity-suffix handling (`border-t-blue-6/50`) is
+    // what this reuses it for.
     color_value(theme, parsed).map(|v| vec![decl(&format!("{side_property}-color"), &v)])
 }
 
@@ -62,7 +65,12 @@ fn border_side_value(theme: &ThemeConfig, parsed: &ParsedClass, side_property: &
 fn border_axis_value(theme: &ThemeConfig, parsed: &ParsedClass, side_a: &str, side_b: &str) -> Option<Vec<Declaration>> {
     let value = parsed.value.as_deref()?;
     if parsed.is_arbitrary {
-        return Some(vec![decl(&format!("{side_a}-width"), value), decl(&format!("{side_b}-width"), value)]);
+        // Same regression guard as `border_value` — see its own doc comment.
+        if looks_like_length(value) {
+            return Some(vec![decl(&format!("{side_a}-width"), value), decl(&format!("{side_b}-width"), value)]);
+        }
+        let color = color_value(theme, parsed)?;
+        return Some(vec![decl(&format!("{side_a}-color"), &color), decl(&format!("{side_b}-color"), &color)]);
     }
     if value.parse::<f64>().is_ok() {
         let v = resolve_length(theme, parsed)?;
@@ -98,15 +106,23 @@ fn border_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declara
         if value == "separate" {
             return Some(vec![decl("border-collapse", "separate")]);
         }
-    }
-    if parsed.is_arbitrary {
+        if value.parse::<f64>().is_ok() {
+            return resolve_length(theme, parsed).map(|v| vec![decl("border-width", &v)]);
+        }
+        if matches!(value, "solid" | "dashed" | "dotted" | "double" | "hidden" | "none") {
+            return Some(vec![decl("border-style", value)]);
+        }
+    } else if looks_like_length(value) {
+        // Regression guard: an arbitrary "border-[3px]" used to be the ONLY
+        // shape this branch handled at all, unconditionally — meaning an
+        // arbitrary COLOR ("border-[#050505]", or the same thing via a
+        // mode-aware theme color substituted in by
+        // substitute_mode_aware_color_token, e.g. "border-background")
+        // dropped straight into a `border-width` declaration instead of
+        // `border-color`, and failed RN's "isn't a valid native value for
+        // border-width" validation. Mirrors resolve_text's identical
+        // looks_like_length guard for arbitrary "text-[...]".
         return Some(vec![decl("border-width", value)]);
-    }
-    if value.parse::<f64>().is_ok() {
-        return resolve_length(theme, parsed).map(|v| vec![decl("border-width", &v)]);
-    }
-    if matches!(value, "solid" | "dashed" | "dotted" | "double" | "hidden" | "none") {
-        return Some(vec![decl("border-style", value)]);
     }
 
     color_value(theme, parsed).map(|v| vec![decl("border-color", &v)])
@@ -198,7 +214,14 @@ const OUTLINE_STYLES: &[&str] = &["solid", "dashed", "dotted", "double"];
 fn outline_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declaration>> {
     let value = parsed.value.as_deref()?;
     if parsed.is_arbitrary {
-        return Some(vec![decl("outline-width", value)]);
+        // Same regression guard as `border_value` above — an arbitrary
+        // color ("outline-[#050505]", or a mode-aware theme color
+        // substituted in the same way) must not fall into `outline-width`
+        // just because it's arbitrary.
+        if looks_like_length(value) {
+            return Some(vec![decl("outline-width", value)]);
+        }
+        return color_value(theme, parsed).map(|v| vec![decl("outline-color", &v)]);
     }
     if let Some(w) = outline_width_value(value) {
         return Some(vec![decl("outline-width", w)]);
@@ -402,6 +425,31 @@ mod tests {
     fn named_color_border_value_resolves_to_color() {
         let t = theme();
         assert_eq!(resolve(&parse_class("border-blue-6"), &t), Some(vec![decl("border-color", "#2563eb")]));
+    }
+
+    #[test]
+    fn an_arbitrary_hex_border_value_resolves_to_color_not_width() {
+        // Regression: `border-[...]` used to treat EVERY arbitrary value as
+        // border-width unconditionally, regardless of whether it looked
+        // like a length at all — "border-[#050505]" (or the same thing via
+        // a mode-aware theme color substituted in by
+        // substitute_mode_aware_color_token before this ever runs, e.g.
+        // `border-background`) silently produced `border-width: #050505`,
+        // which then failed RN's native-value validation ("isn't a valid
+        // native value for border-width — dropped"). Mirrors resolve_text's
+        // identical `looks_like_length` guard for arbitrary `text-[...]`.
+        let t = theme();
+        assert_eq!(resolve(&parse_class("border-[#050505]"), &t), Some(vec![decl("border-color", "#050505")]));
+        assert_eq!(resolve(&parse_class("border-t-[#050505]"), &t), Some(vec![decl("border-top-color", "#050505")]));
+        assert_eq!(
+            resolve(&parse_class("border-x-[#050505]"), &t),
+            Some(vec![decl("border-left-color", "#050505"), decl("border-right-color", "#050505")])
+        );
+        assert_eq!(resolve(&parse_class("outline-[#050505]"), &t), Some(vec![decl("outline-color", "#050505")]));
+
+        // An arbitrary LENGTH still resolves to width, unaffected.
+        assert_eq!(resolve(&parse_class("border-[3px]"), &t), Some(vec![decl("border-width", "3px")]));
+        assert_eq!(resolve(&parse_class("outline-[3px]"), &t), Some(vec![decl("outline-width", "3px")]));
     }
 
     #[test]

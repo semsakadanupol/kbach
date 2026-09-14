@@ -746,6 +746,32 @@ mod tests {
     }
 
     #[test]
+    fn a_plain_class_naming_a_mode_aware_color_on_border_resolves_to_border_color() {
+        // Regression, reported live: `border-background` (background
+        // mode-aware) got pre-substituted by `substitute_mode_aware_color_token`
+        // to `border-[#050505]` (an arbitrary value) BEFORE ever reaching
+        // border.rs's dispatch — which then unconditionally treated every
+        // arbitrary border value as border-width, producing
+        // `border-width: #050505` and failing RN's "isn't a valid native
+        // value for border-width" validation. See border.rs's own
+        // `looks_like_length` regression guard (mirrors resolve_text's
+        // identical fix for `text-[...]`) for the actual fix.
+        let mut t = theme();
+        t.colors.insert(
+            "background".to_string(),
+            ColorValue::ModeAware { light: "#f9fafb".to_string(), dark: "#050505".to_string() },
+        );
+
+        let light = resolve_style("border-background", &t, "light", false, W);
+        assert_eq!(light.get("borderColor").unwrap(), "#f9fafb");
+        assert!(light.get("borderWidth").is_none());
+
+        let dark = resolve_style("border-background", &t, "dark", false, W);
+        assert_eq!(dark.get("borderColor").unwrap(), "#050505");
+        assert!(dark.get("borderWidth").is_none());
+    }
+
+    #[test]
     fn aspect_ratio_resolves_to_a_number_not_a_css_ratio_string() {
         let t = theme();
         // Fabric's aspectRatio prop parser wants a number, not "3 / 4".

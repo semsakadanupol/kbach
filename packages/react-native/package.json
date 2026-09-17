@@ -84,7 +84,7 @@
     "./babel-plugin": "./src/babel-plugin.js"
   },
   "scripts": {
-    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsup",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsup && node scripts/append-classname-types.mjs",
     "dev": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsup --watch",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --coverage --passWithNoTests",

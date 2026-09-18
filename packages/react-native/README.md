@@ -17,10 +17,16 @@ npm install @kbach/react-native@beta
 
 ## Setup
 
-| Target | What to do |
+The babel plugin (below) is **required on every target, including Expo
+Go** — it's the only thing that makes `className` get intercepted at all;
+without it, `className` is just an unrecognized prop RN silently ignores
+(no styling, no warning). What differs per target is what happens *after*
+that:
+
+| Target | Setup |
 | :-- | :-- |
-| **Expo Go** | Nothing. A pure-JS fallback engine loads automatically. |
-| **Expo Web** / `react-native-web` | Nothing. Resolves through the same CSS engine `@kbach/react` uses. |
+| **Expo Go** | Add the babel plugin (below). A pure-JS fallback engine loads automatically after that — no other setup. |
+| **Expo Web** / `react-native-web` | Add the babel plugin (below). Resolves through the same CSS engine `@kbach/react` uses after that — no other setup. |
 | **Expo dev client / prebuild / EAS** | Add the babel plugin (below), then `npx expo prebuild && npx expo run:android`. |
 | **React Native CLI** | Add the babel plugin (below), then restart Metro with `--reset-cache` and rebuild the app. |
 

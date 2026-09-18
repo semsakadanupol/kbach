@@ -17,10 +17,21 @@ and how the underlying engine is built, see the repo root's
 npm install @kbach/react-native@beta
 ```
 
+The babel plugin is **required on every target, including Expo Go** — it
+injects the per-file `@jsxImportSource @kbach/react-native` pragma
+(babel-plugin.js) that routes `className` through this package's
+jsx-runtime instead of `react/jsx-runtime`; nothing else makes
+interception happen. Confirmed as a real, reported doc bug: the table
+below used to say "None" for Expo Go/Expo Web, and a from-scratch repro
+(fresh Expo project, README's own example, zero babel config, Expo Go on
+a real emulator) showed `className` doing nothing at all — no styling, no
+warning, no error — exactly as this mechanism predicts. What differs per
+target is what happens *after* the plugin is in place:
+
 | Target | Setup |
 | :-- | :-- |
-| **Expo Go** | None. A pure-JS fallback engine loads automatically (reduced utility coverage). |
-| **Expo Web** / `react-native-web` | None. Uses the same WASM CSS engine as `@kbach/react`. |
+| **Expo Go** | Babel plugin. A pure-JS fallback engine loads automatically after that (reduced utility coverage) — no other setup. |
+| **Expo Web** / `react-native-web` | Babel plugin. Uses the same WASM CSS engine as `@kbach/react` after that — no other setup. |
 | **Expo dev client / prebuild / EAS** | Babel plugin, then `npx expo prebuild && npx expo run:android`. Full native engine. |
 | **React Native CLI** | Babel plugin, then restart Metro with `--reset-cache` and rebuild the Android app. |
 
@@ -307,3 +318,8 @@ Subpath exports: `@kbach/react-native/babel-plugin`,
   Quote it.
 - **TypeScript error on `className`** (`Property 'className' does not
   exist on type ... ViewProps ...`) — fixed in `>= 1.0.0-beta.46`; update.
+- **`className` does absolutely nothing — no styling, no warning, no
+  error, on any target including Expo Go** — the babel plugin (§1) is
+  missing. It's required on every target, not just Android/dev-client
+  builds; without it nothing routes `className` through this package's
+  jsx-runtime at all, so RN just silently ignores the unrecognized prop.

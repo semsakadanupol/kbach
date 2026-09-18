@@ -25,7 +25,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "AGENTS.md"
   ],
   "source": "./src/index.ts",
   "main": "./dist/index.js",

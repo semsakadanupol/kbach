@@ -33,7 +33,8 @@
     "android/build.gradle",
     "android/src",
     "specs",
-    "react-native.config.js"
+    "react-native.config.js",
+    "AGENTS.md"
   ],
   "source": "./src/index.ts",
   "main": "./dist/index.js",

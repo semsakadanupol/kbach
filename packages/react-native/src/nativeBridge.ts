@@ -198,7 +198,43 @@ function resolveStyleUncached(classString: string, pressed: boolean, colorScheme
 // same message printing twice (once per entry) instead of once, never a
 // correctness issue, so not worth the extra externalized-entry complexity
 // just for de-dup cosmetics.
+//
+// Capped and cleared wholesale past WARNED_MESSAGES_MAX, same bounded-
+// growth shape resolveStyleCache uses above — a long dev session building
+// many distinct bad values (dynamically built class strings, each with
+// slightly different bad data) would otherwise grow this without limit.
+// Dev-only, so low severity either way, but no reason not to match the
+// existing convention.
+const WARNED_MESSAGES_MAX = 500;
 const warnedMessages = new Set<string>();
+
+// Matches the first "..." quoted segment in a warning message — every
+// warning this file receives (from resolve_style.rs / jsEngine/
+// resolveStyle.ts) leads with the offending token/value in quotes, e.g.
+// `[Kbach] "text-cetner" doesn't match...`.
+const QUOTED_TOKEN_RE = /"([^"]*)"/;
+
+/**
+ * Brackets the ONE token `warning` is about inside the full `classString`,
+ * so "which of my 15 classes is this warning even about" doesn't require
+ * manually diffing two strings — the QA report's #1 readability gap for a
+ * long className. Splits on whitespace (keeping the separators via a
+ * capturing-group split, so the exact original spacing survives) and
+ * brackets the first exact match; falls back to the unmodified string if
+ * the warning's quoted text doesn't appear as its own whole token (e.g. it
+ * had its own `_kbon:` state-modifier marker stripped for display — a rare
+ * combination not worth a wrong/misleading highlight over).
+ */
+function highlightToken(classString: string, warning: string): string {
+  const match = QUOTED_TOKEN_RE.exec(warning);
+  if (match === null) return classString;
+  const token = match[1]!;
+  const parts = classString.split(/(\s+)/);
+  const idx = parts.indexOf(token);
+  if (idx === -1) return classString;
+  parts[idx] = `»${token}«`;
+  return parts.join('');
+}
 
 function warnIfDev(classString: string, warnings: string[]): void {
   if (warnings.length === 0) return;
@@ -208,8 +244,9 @@ function warnIfDev(classString: string, warnings: string[]): void {
     // per line" scan-ability the warning text itself already uses (see
     // rn_style_value/rnStyleValue's own doc comment), rather than a
     // trailing parenthetical tacked onto a full paragraph.
-    const message = `${warning}\nFrom className: "${classString}"`;
+    const message = `${warning}\nFrom className: "${highlightToken(classString, warning)}"`;
     if (warnedMessages.has(message)) continue;
+    if (warnedMessages.size >= WARNED_MESSAGES_MAX) warnedMessages.clear();
     warnedMessages.add(message);
     console.warn(message);
   }

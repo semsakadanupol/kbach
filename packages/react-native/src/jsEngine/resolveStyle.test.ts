@@ -537,4 +537,15 @@ describe('resolveStyleJs', () => {
     expect(style.width).toBe('50%');
     expect(warnings).toHaveLength(0);
   });
+
+  it('an embedded quote in an arbitrary value does not break the warning message', () => {
+    // isSafeArbitraryValue blocks "{"/"}"/";" but never blocked a literal
+    // '"' — confirmed real: this reaches rnStyleValue's warning path with
+    // the quote intact unless sanitized.
+    const { style, warnings } = resolveStyleJsWithWarnings('p-[10px"oops]', theme(), 'light', false, W);
+    expect(style.padding).toBeUndefined();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(`10px'oops`);
+    expect(warnings[0]).not.toContain(`10px"oops`);
+  });
 });

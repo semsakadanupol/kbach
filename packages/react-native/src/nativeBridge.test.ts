@@ -141,6 +141,54 @@ describe('nativeBridge', () => {
       expect(warnSpy).toHaveBeenCalledTimes(2);
       warnSpy.mockRestore();
     });
+
+    it('brackets the offending token inside a long className, not just the token alone', async () => {
+      // Reported from a QA pass: with 3 classes the offending one is easy
+      // to spot; with 15+ it isn't. The warning message's own quoted text
+      // ("text-cetner") should get »«-bracketed at its actual position in
+      // the full className, not just echoed on its own.
+      mockResolveStyle.mockReturnValue(
+        '{"__kbachWarnings":["[Kbach] \\"text-cetner\\" doesn\'t match any known Kbach utility — did you mean \\"text-center\\"? (skipped)"]}',
+      );
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { resolveStyle } = await import('./nativeBridge');
+      resolveStyle('h-10 rounded-lg text-cetner items-center justify-center');
+      expect(warnSpy.mock.calls[0]![0]).toContain('h-10 rounded-lg »text-cetner« items-center justify-center');
+      warnSpy.mockRestore();
+    });
+
+    it('falls back to the unbracketed className when the warning names no exact token', async () => {
+      // No quoted segment in the message at all — must not throw, must not
+      // mangle the className.
+      mockResolveStyle.mockReturnValue('{"__kbachWarnings":["Kbach: bad value with no quoted token"]}');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { resolveStyle } = await import('./nativeBridge');
+      resolveStyle('flex p-4');
+      expect(warnSpy.mock.calls[0]![0]).toContain('From className: "flex p-4"');
+      expect(warnSpy.mock.calls[0]![0]).not.toContain('»');
+      warnSpy.mockRestore();
+    });
+
+    it('caps the warning dedup set instead of growing it without bound', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { resolveStyle } = await import('./nativeBridge');
+
+      // 501 distinct warnings — one past WARNED_MESSAGES_MAX (500) — then
+      // re-emit the very FIRST one again. If the set were never capped, the
+      // first warning would still be remembered and this re-emission would
+      // be silently de-duped (call count stays at 501); since it caps and
+      // clears at 500, the set was already wiped by the time this repeats,
+      // so it prints again instead (call count reaches 502).
+      for (let i = 0; i < 501; i++) {
+        mockResolveStyle.mockReturnValue(`{"__kbachWarnings":["Kbach: bad value ${i}"]}`);
+        resolveStyle(`w-[calc(50%-${i}px)]`);
+      }
+      mockResolveStyle.mockReturnValue('{"__kbachWarnings":["Kbach: bad value 0"]}');
+      resolveStyle('w-[calc(50%-0px)]');
+
+      expect(warnSpy).toHaveBeenCalledTimes(502);
+      warnSpy.mockRestore();
+    });
   });
 
   describe('warnings from the jsEngine fallback path (Expo Go)', () => {

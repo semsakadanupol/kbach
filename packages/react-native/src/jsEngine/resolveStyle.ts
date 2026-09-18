@@ -146,6 +146,19 @@ function isPlainPercentage(value: string): boolean {
  * that declaration entirely rather than shipping an invalid string into
  * RN's style object.
  */
+// Mirrors resolve_style.rs's identical `sanitize_for_warning` — see its own
+// doc comment for why: never a security concern (this string is already
+// safely JSON/JS-encoded regardless), purely so a human can actually read
+// the printed message. `isSafeArbitraryValue` (parser.ts) blocks "{"/"}"/
+// ";" but never blocked a literal '"', and an adversarial or just very
+// large arbitrary value would otherwise print a wall of text.
+function sanitizeForWarning(value: string): string {
+  const MAX_CHARS = 60;
+  const escaped = value.replace(/"/g, "'").replace(/[\n\r]/g, ' ');
+  if (escaped.length <= MAX_CHARS) return escaped;
+  return `${escaped.slice(0, MAX_CHARS)}…`;
+}
+
 function rnStyleValue(property: string, value: string): { value: string | number | null; warning: string | null } {
   // `aspect-ratio` -> a plain number (RN's New-Architecture prop parser
   // won't apply a CSS ratio string like "3 / 4"). Mirrors resolve_style.rs.
@@ -205,8 +218,9 @@ function rnStyleValue(property: string, value: string): { value: string | number
   // @kbach/react-native's ThemeProvider.tsx for the same constraint).
   // Mirror any wording change here in resolve_style.rs's identical Rust
   // warning (the native/JNI path's own copy of this exact message).
+  const sanitizedValue = sanitizeForWarning(value);
   const warning =
-    `[Kbach] "${value}" isn't a valid native value for "${property}" — dropped.\n` +
+    `[Kbach] "${sanitizedValue}" isn't a valid native value for "${property}" — dropped.\n` +
     'calc()/min()/max()/clamp() only resolve on native when every operand is a constant px/rem length ' +
     '(no %, vw, vh, var(), or other viewport/CSS-variable units — those need real layout/DOM, which ' +
     "doesn't exist on native at paint time).\n" +

@@ -100,6 +100,117 @@ fn is_recognized_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> bool {
     is_marker_utility(&parsed.utility) || resolve_utility(parsed, theme).is_some()
 }
 
+/// The alphabet a base utility token (no modifiers, no brackets) is built
+/// from — used only to generate edit candidates below, not for parsing.
+const EDIT_ALPHABET: &[char] = &[
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w',
+    'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-',
+];
+
+/// Every string one Norvig-style edit (delete, adjacent transpose, replace,
+/// insert) away from `base` — deletion/transposition/replacement/insertion,
+/// the same four operations classic spell-correction uses, chosen
+/// specifically because transposition catches the single most common real
+/// typo shape (adjacent keys swapped, e.g. "cetner" -> "center") that a
+/// naive delete/replace/insert-only edit distance would need TWO edits to
+/// reach. Bounded to distance 1 deliberately — a real typo is almost always
+/// one keystroke, and suggesting a distance-2 "correction" starts guessing
+/// rather than helping.
+fn edit_distance_1_candidates(base: &str) -> Vec<String> {
+    let chars: Vec<char> = base.chars().collect();
+    let n = chars.len();
+    let mut out = Vec::with_capacity(n * EDIT_ALPHABET.len() * 2);
+
+    for i in 0..n {
+        let mut c = chars.clone();
+        c.remove(i);
+        out.push(c.into_iter().collect());
+    }
+    for i in 0..n.saturating_sub(1) {
+        let mut c = chars.clone();
+        c.swap(i, i + 1);
+        out.push(c.into_iter().collect());
+    }
+    for i in 0..n {
+        for &ch in EDIT_ALPHABET {
+            if chars[i] == ch {
+                continue;
+            }
+            let mut c = chars.clone();
+            c[i] = ch;
+            out.push(c.into_iter().collect());
+        }
+    }
+    for i in 0..=n {
+        for &ch in EDIT_ALPHABET {
+            let mut c = chars.clone();
+            c.insert(i, ch);
+            out.push(c.into_iter().collect());
+        }
+    }
+    out
+}
+
+/// Finds a single-edit-away correction for `token`'s base utility (modifiers
+/// stripped) that actually resolves — using `resolve_utility` itself as the
+/// dictionary, rather than a separately maintained word list that could
+/// silently drift out of sync with the real vocabulary (miss a utility
+/// added later, or suggest one that was removed). Only ever called on the
+/// already-confirmed-unresolvable path (see call sites below), so the
+/// O(length × alphabet) cost here is never paid for a class that resolves
+/// normally.
+///
+/// Skips arbitrary-value tokens (`bg-[...]`) entirely — the bracket content
+/// is user data, not vocabulary, and editing bracket syntax at random
+/// produces no useful suggestion. Also skips a base under 3 characters (too
+/// many equally-plausible single-edit neighbors to pick one with any real
+/// confidence) or over 40 (not a realistic typo length; bounds the
+/// candidate count for a pathologically long unresolvable string).
+fn suggest_correction(token: &str, parsed: &ParsedClass, theme: &ThemeConfig) -> Option<String> {
+    if parsed.is_arbitrary {
+        return None;
+    }
+    let split_at = token.len() - token.rsplit(':').next().unwrap_or(token).len();
+    let (modifier_prefix, base) = token.split_at(split_at);
+    if base.len() < 3 || base.len() > 40 {
+        return None;
+    }
+    edit_distance_1_candidates(base).into_iter().find_map(|candidate| {
+        let candidate_token = format!("{modifier_prefix}{candidate}");
+        let candidate_parsed = parse_class(&candidate_token);
+        resolve_utility(&candidate_parsed, theme).is_some().then_some(candidate_token)
+    })
+}
+
+/// Makes arbitrary, potentially-adversarial text safe to interpolate into a
+/// warning message meant to be read as plain, one-fact-per-line text (RN's
+/// on-device LogBox renders raw text only — no escaping/wrapping of its
+/// own). Never a security concern by the time this runs — the string is
+/// already safely JSON-encoded crossing the JNI/WASM boundary regardless —
+/// purely about a human being able to actually read the printed message:
+/// an embedded newline would break the "each fact on its own line"
+/// structure, an embedded `"` visually breaks out of the message's own
+/// quoted-token appearance (`is_safe_arbitrary_value` blocks `{`/`}`/`;`
+/// but never blocked `"`), and a very long value (an adversarial or just
+/// very large arbitrary value) would otherwise print a wall of text
+/// instead of a scannable one-liner.
+fn sanitize_for_warning(value: &str) -> String {
+    const MAX_CHARS: usize = 60;
+    let escaped: String = value
+        .chars()
+        .map(|c| match c {
+            '"' => '\'',
+            '\n' | '\r' => ' ',
+            c => c,
+        })
+        .collect();
+    if escaped.chars().count() <= MAX_CHARS {
+        return escaped;
+    }
+    let truncated: String = escaped.chars().take(MAX_CHARS).collect();
+    format!("{truncated}…")
+}
+
 /// The one typo-warning message, shared by both call sites below (an
 /// inactive-modifier miss and a native-unresolvable miss) rather than two
 /// copies of the same format! drifting independently. Rust/JNI-only —
@@ -107,16 +218,24 @@ fn is_recognized_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> bool {
 /// equivalent warning at all yet (see resolveStyle.ts's own doc comment for
 /// why: it would need the full web dispatcher as its "is this a typo"
 /// ground truth, which this jsEngine directory doesn't have a port of).
-fn typo_warning(token: &str) -> String {
+fn typo_warning(token: &str, parsed: &ParsedClass, theme: &ThemeConfig) -> String {
     // Strip any `_kbon:` markers `jsxRuntimeCore.ts` substituted in for a
     // satisfied `hover:`/`focus:`/... so the message names the class the
     // developer actually wrote (`hover:flexx`, not `_kbon:flexx`).
-    let display: String = token
-        .split(':')
-        .filter(|seg| *seg != STATE_HOLD_MARKER)
-        .collect::<Vec<_>>()
-        .join(":");
-    format!("[Kbach] \"{display}\" doesn't match any known Kbach utility — typo? (skipped)")
+    let display = sanitize_for_warning(
+        &token
+            .split(':')
+            .filter(|seg| *seg != STATE_HOLD_MARKER)
+            .collect::<Vec<_>>()
+            .join(":"),
+    );
+    match suggest_correction(token, parsed, theme) {
+        Some(suggestion) => {
+            let suggestion = sanitize_for_warning(&suggestion);
+            format!("[Kbach] \"{display}\" doesn't match any known Kbach utility — did you mean \"{suggestion}\"? (skipped)")
+        }
+        None => format!("[Kbach] \"{display}\" doesn't match any known Kbach utility — typo? (skipped)"),
+    }
 }
 
 /// Whether a single modifier's condition currently holds, for the modifier
@@ -324,6 +443,7 @@ fn rn_style_value(property: &str, value: &str) -> (Option<Value>, Option<String>
     // which renders raw text only). Mirror any wording change here in
     // jsEngine/resolveStyle.ts's identical TS warning (the Expo Go
     // fallback path's own copy of this exact message).
+    let value = sanitize_for_warning(value);
     let warning = format!(
         "[Kbach] \"{value}\" isn't a valid native value for \"{property}\" — dropped.\n\
          calc()/min()/max()/clamp() only resolve on native when every operand is a constant px/rem length \
@@ -460,7 +580,7 @@ pub fn resolve_style_with_warnings(
             // than only catching it half the time depending on runtime
             // dark-mode/breakpoint state.
             if !is_recognized_utility(&parsed, theme) {
-                warnings.push(typo_warning(&token));
+                warnings.push(typo_warning(&token, &parsed, theme));
             }
             continue;
         }
@@ -480,7 +600,7 @@ pub fn resolve_style_with_warnings(
             // and never needs the web dispatcher called again just to
             // confirm what a successful native resolve already proves.
             if !is_recognized_utility(&parsed, theme) {
-                warnings.push(typo_warning(&token));
+                warnings.push(typo_warning(&token, &parsed, theme));
             }
             continue;
         };
@@ -1142,6 +1262,68 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("flexx-center"));
         assert!(warnings[0].contains("typo"));
+    }
+
+    #[test]
+    fn suggests_a_correction_for_a_one_edit_typo() {
+        // Reported live: "text-cetner" is a transposition (adjacent "tn" ->
+        // "nt") of the real utility "text-center" — the exact shape
+        // edit_distance_1_candidates' transposition step exists to catch in
+        // one edit, where a naive delete/replace/insert-only distance would
+        // need two.
+        let (_, warnings) = resolve_style_with_warnings("text-cetner", &theme(), "light", false, W);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("did you mean \"text-center\""), "got: {}", warnings[0]);
+
+        // A modifier chain is preserved in the suggestion.
+        let (_, warnings) = resolve_style_with_warnings("hover:text-cetner", &theme(), "light", false, W);
+        assert!(warnings[0].contains("did you mean \"hover:text-center\""), "got: {}", warnings[0]);
+    }
+
+    #[test]
+    fn does_not_suggest_a_correction_for_an_arbitrary_value() {
+        // The bracket content is user data, not vocabulary — editing it at
+        // random would produce a meaningless "did you mean". Also doubles as
+        // the CSS-injection-attempt regression case from the QA report: this
+        // must still warn (unsafe arbitrary value, rejected), just with the
+        // plain "typo?" phrasing, never a bogus suggestion.
+        let (_, warnings) = resolve_style_with_warnings("bg-[red;background:url(x)]", &theme(), "light", false, W);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("typo?"), "got: {}", warnings[0]);
+        assert!(!warnings[0].contains("did you mean"), "got: {}", warnings[0]);
+    }
+
+    #[test]
+    fn falls_back_to_plain_typo_phrasing_when_no_one_edit_correction_resolves() {
+        // "flexx-center" isn't a real utility one edit away from anything
+        // ("flex-center" doesn't exist either) — must fall back to the
+        // original phrasing, not claim a false-confidence suggestion.
+        let (_, warnings) = resolve_style_with_warnings("flexx-center", &theme(), "light", false, W);
+        assert!(warnings[0].contains("typo?"), "got: {}", warnings[0]);
+        assert!(!warnings[0].contains("did you mean"), "got: {}", warnings[0]);
+    }
+
+    #[test]
+    fn sanitize_for_warning_replaces_quotes_and_newlines_and_truncates() {
+        assert_eq!(sanitize_for_warning("plain"), "plain");
+        assert_eq!(sanitize_for_warning("has \"quotes\""), "has 'quotes'");
+        assert_eq!(sanitize_for_warning("line1\nline2\rline3"), "line1 line2 line3");
+        let long = "a".repeat(100);
+        let sanitized = sanitize_for_warning(&long);
+        assert_eq!(sanitized.chars().count(), 61); // 60 + the "…" marker
+        assert!(sanitized.ends_with('…'));
+    }
+
+    #[test]
+    fn an_embedded_quote_in_an_arbitrary_value_does_not_break_the_warning_message() {
+        // is_safe_arbitrary_value blocks "{"/"}"/";" but never blocked a
+        // literal '"' — confirmed real: this reaches rn_style_value's
+        // warning path with the quote intact unless sanitized.
+        let (style, warnings) = resolve_style_with_warnings("p-[10px\"oops]", &theme(), "light", false, W);
+        assert!(style.get("padding").is_none());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("10px'oops"), "got: {}", warnings[0]);
+        assert!(!warnings[0].contains("10px\"oops"), "got: {}", warnings[0]);
     }
 
     #[test]

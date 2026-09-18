@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { isPostcssConfigWired } from '../../codemods/postcssConfig';
 import { findFirstExisting } from '../../fsFind';
+import { findGlobalsCssFile } from '../../findGlobalsCss';
 import type { DoctorCheckResult } from '../types';
 
 const POSTCSS_CONFIG_NAMES = ['postcss.config.js', 'postcss.config.mjs', 'postcss.config.cjs'];
-const GLOBALS_CSS_CANDIDATES = ['app/globals.css', 'src/app/globals.css', 'styles/globals.css'];
 
 /** Next.js counterpart to viteWiring.ts's check. */
 export function checkPostcssConfigWiring(root: string): DoctorCheckResult {
@@ -29,17 +29,17 @@ export function checkPostcssConfigWiring(root: string): DoctorCheckResult {
     : {
         label: 'postcss config has the kbach plugin',
         status: 'fail',
-        fix: `Run \`npx kbach init\` or add '@kbach/react/postcss': {} to the plugins in ${path}.`,
+        fix: `Run \`npx @kbach/cli init\` or add '@kbach/react/postcss': {} to the plugins in ${path}.`,
       };
 }
 
 export function checkGlobalsCssMarkers(root: string): DoctorCheckResult {
-  const path = findFirstExisting(root, GLOBALS_CSS_CANDIDATES);
+  const path = findGlobalsCssFile(root);
   if (!path) {
     return {
       label: 'globals.css has the kbach marker pair',
       status: 'fail',
-      fix: 'No app/globals.css, src/app/globals.css, or styles/globals.css found.',
+      fix: 'No app/globals.css, src/app/globals.css, styles/globals.css, or src/styles/globals.css found.',
     };
   }
   const source = readFileSync(path, 'utf-8');
@@ -49,6 +49,6 @@ export function checkGlobalsCssMarkers(root: string): DoctorCheckResult {
     : {
         label: 'globals.css has the kbach marker pair',
         status: 'fail',
-        fix: `Run \`npx kbach init\` or add /* kbach:start */ / /* kbach:end */ to ${path}.`,
+        fix: `Run \`npx @kbach/cli init\` or add /* kbach:start */ / /* kbach:end */ to ${path}.`,
       };
 }

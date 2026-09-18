@@ -28,6 +28,6 @@ export function checkBabelPluginWiring(root: string): DoctorCheckResult {
     : {
         label: 'babel.config.js has the kbach plugin',
         status: 'fail',
-        fix: `Run \`npx kbach init\` or add '${PLUGIN_ENTRY}' to the plugins array in ${path}.`,
+        fix: `Run \`npx @kbach/cli init\` or add '${PLUGIN_ENTRY}' to the plugins array in ${path}.`,
       };
 }

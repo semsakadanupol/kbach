@@ -7,11 +7,11 @@ import { ensureKbachCssMarkers } from '../codemods/globalsCssMarkers';
 import { writeFileAtomic } from '../fsAtomic';
 import { resolveDarkModeStrategy, writeKbachConfigIfNeeded } from '../configFile';
 import { findFirstExisting } from '../fsFind';
+import { findGlobalsCssFile } from '../findGlobalsCss';
 import { red, gray } from '../style';
 import type { InitFlowOptions } from './types';
 
 const POSTCSS_CONFIG_NAMES = ['postcss.config.js', 'postcss.config.mjs', 'postcss.config.cjs'];
-const GLOBALS_CSS_CANDIDATES = ['app/globals.css', 'src/app/globals.css', 'styles/globals.css'];
 
 const MANUAL_POSTCSS_SNIPPET = `module.exports = { plugins: { '@kbach/react/postcss': {} } };`;
 
@@ -51,10 +51,10 @@ export async function runNextInit(opts: InitFlowOptions): Promise<void> {
     }
   }
 
-  const globalsCssPath = findFirstExisting(opts.root, GLOBALS_CSS_CANDIDATES);
+  const globalsCssPath = findGlobalsCssFile(opts.root);
   if (!globalsCssPath) {
     p.log.warn(
-      `No app/globals.css, src/app/globals.css, or styles/globals.css found — add these markers to your global stylesheet yourself, then import it once from your entry point:`,
+      `No app/globals.css, src/app/globals.css, styles/globals.css, or src/styles/globals.css found — add these markers to your global stylesheet yourself, then import it once from your entry point:`,
     );
     p.log.message(MANUAL_MARKERS_SNIPPET);
   } else {

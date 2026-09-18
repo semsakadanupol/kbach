@@ -27,6 +27,6 @@ export function checkViteConfigWiring(root: string): DoctorCheckResult {
     : {
         label: 'vite.config has the kbach() plugin',
         status: 'fail',
-        fix: `Run \`npx kbach init\` or add \`kbach()\` (before react()) to the plugins array in ${path}.`,
+        fix: `Run \`npx @kbach/cli init\` or add \`kbach()\` (before react()) to the plugins array in ${path}.`,
       };
 }

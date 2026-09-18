@@ -1,6 +1,6 @@
 {
   "name": "@kbach/cli",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "Kbach's setup CLI — `npx @kbach/cli init` wires up @kbach/react or @kbach/react-native in an existing project (framework detection, config edits, install); `npx @kbach/cli doctor` diagnoses an already-broken setup. Installed globally (`npm i -g @kbach/cli`), both commands are also available as plain `kbach init` / `kbach doctor`.",
   "keywords": [
     "css",

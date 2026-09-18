@@ -113,6 +113,14 @@ container queries parse without error but do not apply. When two classes
 set the same property the more-specific one wins regardless of source
 order (`dark:bg-black bg-white` → black in dark mode).
 
+`disabled:`/`aria-[…]:`/`data-[…]:` read that exact element's own props —
+never a parent's, since there's no `group-disabled:`-style cascade to
+inherit through. `<Pressable disabled><Text className="disabled:text-gray-5">`
+does nothing to the `Text`, silently, because `Text` never received a
+`disabled` prop of its own; the prop has to be repeated on whichever
+element the modifier is written on:
+`<Pressable disabled><Text disabled className="disabled:text-gray-5">`.
+
 Expo Go covers a documented subset of utilities (no grid, filters,
 gradients, or DOM-only typography). Expo Web and a real dev-client build
 cover the full set.

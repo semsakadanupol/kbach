@@ -189,6 +189,16 @@ function isAriaTruthy(value: unknown): boolean {
  * — `null` for anything else (an ancestor/sibling/media modifier this
  * function has no opinion on, left for `resolveStyle` itself to handle or
  * not).
+ *
+ * Deliberately never looks past `hostRest` (THIS element's own props) —
+ * there's no `group-disabled:`-style cascade on native to walk up through,
+ * so a parent's `disabled`/`aria-*`/`data-*` prop is invisible here on
+ * purpose. Confirmed as a real, easy-to-hit footgun: `<Pressable
+ * disabled><Text className="disabled:...">` returns `null` for `Text`
+ * (never `true`), so the modifier is silently treated as unsatisfied —
+ * nothing warns, since from this function's own perspective a `null` here
+ * is indistinguishable from "not one of my modifiers at all." See
+ * AGENTS.md section 3.4 for the user-facing writeup of the same thing.
  */
 function propBasedModifierState(name: string, states: ElementStates, hostRest: Record<string, unknown>): boolean | null {
   if (STATE_MODIFIER_NAMES.has(name)) return states[name as keyof ElementStates];

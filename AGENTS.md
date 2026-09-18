@@ -216,6 +216,18 @@ the string:**
 A satisfied prop-based modifier is rewritten to an internal `_kbon` marker
 (one per satisfied modifier) so it still contributes to specificity.
 
+**Prop-based modifiers never inherit from an ancestor.** `disabled:` /
+`aria-[…]:` / `data-[…]:` read `hostRest` off THAT exact element's own
+props (`propBasedModifierState` in jsxRuntimeCore.ts) — there is no
+`group-disabled:`-style cascade on native to inherit one through. Confirmed
+as a real footgun (reported after two independent hits building a demo
+app): `<Pressable disabled><Text className="disabled:text-gray-5">` does
+nothing at all, silently — `Text` never received a `disabled` prop, so
+`propBasedModifierState` returns `null` for it (no opinion), the modifier
+is treated as never-satisfied, and nothing warns. The prop has to be
+repeated on whichever element actually carries the modifier:
+`<Pressable disabled><Text disabled className="disabled:text-gray-5">`.
+
 **Not supported** (parse without error, never apply): `group-*`, `peer-*`,
 `has-[…]`, container queries, `*:` / `**:`, `before:` / `after:` and other
 pseudo-elements.

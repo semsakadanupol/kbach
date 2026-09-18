@@ -220,19 +220,39 @@ const QUOTED_TOKEN_RE = /"([^"]*)"/;
  * manually diffing two strings — the QA report's #1 readability gap for a
  * long className. Splits on whitespace (keeping the separators via a
  * capturing-group split, so the exact original spacing survives) and
- * brackets the first exact match; falls back to the unmodified string if
- * the warning's quoted text doesn't appear as its own whole token (e.g. it
- * had its own `_kbon:` state-modifier marker stripped for display — a rare
+ * brackets the first token whose content contains the warning's quoted
+ * text once all whitespace is stripped from both sides.
+ *
+ * Whitespace-INSENSITIVE substring match, not exact equality, for two
+ * independent reasons a straight `indexOf` on the raw token missed
+ * (confirmed real, reported after the first version shipped):
+ *   1. The quoted text is often a VALUE, not a whole class token — an
+ *      "isn't a valid native value" warning on `p-[calc(100%-4px)]` quotes
+ *      just `calc(100% - 4px)`, never the surrounding `p-[...]` — so it can
+ *      only ever be a SUBSTRING of the real token, never equal to it.
+ *   2. `normalizeMathWhitespace`/`normalize_math_whitespace` inserts real
+ *      CSS-mandated spacing around a binary `+`/`-` before a calc()-shaped
+ *      value ever reaches a warning message (`calc(100%-4px)` in the
+ *      className becomes `calc(100% - 4px)` in the quoted text) — even a
+ *      whole-token warning wouldn't byte-for-byte equal what the developer
+ *      literally typed.
+ * Stripping whitespace from both sides before comparing sidesteps both:
+ * the typo-warning case (a whole token, already whitespace-free) still
+ * matches exactly as before, and the value case now matches as a
+ * substring of its enclosing token. Falls back to the unmodified string
+ * if nothing contains the quoted text at all (e.g. it had its own
+ * `_kbon:` state-modifier marker stripped for display — a rare
  * combination not worth a wrong/misleading highlight over).
  */
 function highlightToken(classString: string, warning: string): string {
   const match = QUOTED_TOKEN_RE.exec(warning);
   if (match === null) return classString;
-  const token = match[1]!;
+  const quoted = match[1]!.replace(/\s+/g, '');
+  if (quoted === '') return classString;
   const parts = classString.split(/(\s+)/);
-  const idx = parts.indexOf(token);
+  const idx = parts.findIndex((part) => part.replace(/\s+/g, '').includes(quoted));
   if (idx === -1) return classString;
-  parts[idx] = `»${token}«`;
+  parts[idx] = `»${parts[idx]}«`;
   return parts.join('');
 }
 

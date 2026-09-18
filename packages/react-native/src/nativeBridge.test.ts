@@ -157,6 +157,25 @@ describe('nativeBridge', () => {
       warnSpy.mockRestore();
     });
 
+    it('brackets the enclosing token for an "invalid value" warning, whose quoted text is a normalized VALUE not a whole token', async () => {
+      // Gap found after the first version shipped: normalizeMathWhitespace
+      // inserts real spacing around a binary "-" before a calc()-shaped
+      // value ever reaches a warning ("calc(100%-4px)" in the className ->
+      // "calc(100% - 4px)" in the quoted text), and the quoted text is only
+      // ever the VALUE, never the surrounding "p-[...]" wrapper — so a
+      // whitespace-insensitive SUBSTRING match against the whole token is
+      // required; an exact whole-token match (the original implementation)
+      // never fires here at all.
+      mockResolveStyle.mockReturnValue(
+        '{"__kbachWarnings":["[Kbach] \\"calc(100% - 4px)\\" isn\'t a valid native value for \\"padding\\" — dropped."]}',
+      );
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { resolveStyle } = await import('./nativeBridge');
+      resolveStyle('flex p-[calc(100%-4px)] items-center');
+      expect(warnSpy.mock.calls[0]![0]).toContain('flex »p-[calc(100%-4px)]« items-center');
+      warnSpy.mockRestore();
+    });
+
     it('falls back to the unbracketed className when the warning names no exact token', async () => {
       // No quoted segment in the message at all — must not throw, must not
       // mangle the className.

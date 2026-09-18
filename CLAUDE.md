@@ -2,11 +2,10 @@
 
 Project-specific instructions for Claude Code working in this repo.
 
-## Always check AGENTS.md before making changes
+## Always verify AGENTS.md is still up to date
 
 This repo's `AGENTS.md` files are the authoritative reference for how
-Kbach actually works — check the relevant one(s) **before editing code**,
-not just before answering questions about it:
+Kbach actually works:
 
 - [AGENTS.md](AGENTS.md) — cross-package overview, `kbach.config.js`
   (shared by both bindings), the color palette, how the Rust engine is
@@ -16,16 +15,20 @@ not just before answering questions about it:
 - [packages/react-native/AGENTS.md](packages/react-native/AGENTS.md) —
   `@kbach/react-native` only.
 
-Before changing behavior in a package, read its own `AGENTS.md` first —
-it documents non-obvious design decisions, known footguns, and
-version-gated failure modes that aren't visible from the code alone
-(e.g. "stale prebuilt `.so`", "duplicate `react-native` instance in a
-monorepo"). Skipping this is how a fix ends up re-breaking something the
-docs already explain.
+The user changes and adds features directly, not only through a session
+with an AI assistant — so `AGENTS.md` can drift out of date from work this
+session never saw, not just from a change made just now. Don't assume it's
+current just because nothing in THIS conversation touched it yet.
 
-After a change that affects install/setup steps, exports, resolution
-behavior, modifiers, the `kbach.config.js` shape, or a documented failure
-mode, **update the relevant `AGENTS.md` in the same change** — these
-files go stale fast otherwise, and a stale reference is worse than no
-reference (see the react-native file's own version-gated failure-mode
-entries for exactly what that staleness looks like once it happens).
+**Before working on a package, check whether its `AGENTS.md` still
+matches the current code** for whatever area the task touches — install/
+setup steps, exports, resolution behavior, modifiers, the
+`kbach.config.js` shape, version numbers named in failure-mode entries,
+etc. If the code has moved on and the doc hasn't, treat that as something
+to fix, not just note — update the doc as part of the task, the same way
+a stale test or a broken build would get fixed, even if nobody explicitly
+asked "update the docs." A stale `AGENTS.md` is worse than no `AGENTS.md`
+at all, since it actively misleads whoever reads it next.
+
+After making a change yourself that affects any of the above, update the
+relevant `AGENTS.md` in the same change, for the same reason.

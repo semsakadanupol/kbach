@@ -58,3 +58,24 @@ conversation. Confirm with the user each time, specifically:
 Finish and verify the actual code/doc change first (edit, test, rebuild)
 so there's something concrete to confirm — then stop and ask, rather than
 committing/publishing and reporting it as already done.
+
+## Every publish tags both `beta` and `latest`
+
+`beta` and `latest` are kept in sync — every `npm publish` (once the user
+has confirmed it, per the rule above) sets **both** tags to the version
+just published, for every package being published in that round:
+
+```sh
+npm publish --tag beta
+npm dist-tag add <package>@<version> latest
+```
+
+Do this for whichever of `@kbach/core-engine` / `@kbach/react` /
+`@kbach/react-native` actually got published — not the other two just
+because they happen to already be tagged `latest` from a prior release; a
+package that wasn't republished keeps its existing `latest` exactly as it
+was. `beta` still means "actively worked on" in spirit — it just no
+longer trails `latest` by design the way it did through 2026-09 (`latest`
+frozen on the pre-rewrite `1.0.0-beta.2`/`0.6.51`/`1.0.0-beta.0` for
+months while `beta` moved on, which is what put the retired
+`@kbach/android` dependency on the npm page in the first place).

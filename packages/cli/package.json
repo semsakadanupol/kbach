@@ -1,0 +1,56 @@
+{
+  "name": "kbach",
+  "version": "0.1.0-beta.1",
+  "description": "Kbach's setup CLI — `npx kbach init` wires up @kbach/react or @kbach/react-native in an existing project (framework detection, config edits, install); `npx kbach doctor` diagnoses an already-broken setup.",
+  "keywords": [
+    "css",
+    "react",
+    "react-native",
+    "tailwind",
+    "utility-first",
+    "styling",
+    "cli",
+    "setup"
+  ],
+  "license": "MIT",
+  "author": "semsakadanupol",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/semsakadanupol/kbach.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/semsakadanupol/kbach#readme",
+  "bugs": {
+    "url": "https://github.com/semsakadanupol/kbach/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "kbach": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --coverage --passWithNoTests",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.26.0",
+    "@clack/prompts": "^0.9.0",
+    "recast": "^0.23.9"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^6.0.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

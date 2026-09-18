@@ -65,7 +65,7 @@
     }
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node scripts/fix-postcss-cjs-interop.mjs",
     "dev": "tsup --watch",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --coverage --passWithNoTests",

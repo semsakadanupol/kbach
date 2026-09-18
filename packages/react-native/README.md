@@ -116,7 +116,7 @@ const accent = useDynamicToken('accent'); // '#8b5cf6' | undefined, reactive
 
 Call `setDynamicToken` from a component's own render (guarded to fire
 once), not from module top-level — see
-[AGENTS.md §3.8](https://github.com/semsakadanupol/kbach/blob/main/AGENTS.md)
+[AGENTS.md §8](https://github.com/semsakadanupol/kbach/blob/main/packages/react-native/AGENTS.md)
 for why and the exact pattern.
 
 ## Colors as values
@@ -161,8 +161,7 @@ grid, filters, gradients, or DOM-only typography). Expo Web and a real
 A malformed or misused value fails safely — a deduped, dev-only
 `console.warn` naming the offending class and the fix, never a crash or
 silently-wrong output. Confirmed across CSS-injection attempts, invalid
-`calc()` operands, and double-mounting — see AGENTS.md for the exact
-warning shapes.
+`calc()` operands, and double-mounting.
 
 `clsx()` — this package's own bundled copy, `import { clsx } from
 '@kbach/react-native'` — composes conditional class strings the same way
@@ -170,9 +169,11 @@ the standalone `clsx` package does. You don't need it for `dark:`/`sm:`/
 etc. (those work as plain classes), but it's there for `isActive &&
 'bg-blue-6'`-style composition.
 
-See [AGENTS.md](https://github.com/semsakadanupol/kbach/blob/main/AGENTS.md)
+See [this package's own AGENTS.md](https://github.com/semsakadanupol/kbach/blob/main/packages/react-native/AGENTS.md)
 for the complete reference — modifier list, `calc()`/`min()`/`max()`/
-`clamp()` support, dynamic tokens, monorepo setup, and how the engine works.
+`clamp()` support, dynamic tokens, monorepo setup, and failure modes; see
+the [root AGENTS.md](https://github.com/semsakadanupol/kbach/blob/main/AGENTS.md)
+for `kbach.config.js` and how the underlying engine is built.
 
 ## License
 

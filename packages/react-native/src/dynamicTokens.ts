@@ -59,8 +59,8 @@ function notify(): void {
  * elsewhere in the tree — the "Cannot update a component while rendering a
  * different component" class of bug. Reported from a QA pass. Call it
  * synchronously from your app's ROOT component's render (before any
- * consumer has mounted), guarded so it only fires once — see AGENTS.md
- * section 3.8 for the full Bad/Good example.
+ * consumer has mounted), guarded so it only fires once — see this
+ * package's own AGENTS.md section 8 for the full Bad/Good example.
  */
 export function setDynamicToken(name: string, value: string): void {
   tokens.set(name, value);

@@ -198,7 +198,8 @@ function isAriaTruthy(value: unknown): boolean {
  * (never `true`), so the modifier is silently treated as unsatisfied —
  * nothing warns, since from this function's own perspective a `null` here
  * is indistinguishable from "not one of my modifiers at all." See
- * AGENTS.md section 3.4 for the user-facing writeup of the same thing.
+ * this package's own AGENTS.md section 4 for the user-facing writeup of
+ * the same thing.
  */
 function propBasedModifierState(name: string, states: ElementStates, hostRest: Record<string, unknown>): boolean | null {
   if (STATE_MODIFIER_NAMES.has(name)) return states[name as keyof ElementStates];

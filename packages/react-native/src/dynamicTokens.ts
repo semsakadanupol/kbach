@@ -44,7 +44,24 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
-/** `name` is the bare token name, WITHOUT the leading `--` (matching how `getDynamicToken`/`var(--name)` substitution both address it). */
+/**
+ * `name` is the bare token name, WITHOUT the leading `--` (matching how
+ * `getDynamicToken`/`var(--name)` substitution both address it).
+ *
+ * `notify()` below is synchronous and immediately re-renders every
+ * already-mounted `ReactiveElement` subscribed via `useSyncExternalStore`
+ * (jsxRuntimeCore.ts) — safe when called from a component's own render
+ * body (React explicitly allows a component updating external state during
+ * its OWN render), a real hazard called from anywhere else with no fixed
+ * point in the render lifecycle: module-top-level code in particular runs
+ * whenever Metro's inline-requires first evaluates that module, which can
+ * land in the middle of React rendering a completely unrelated component
+ * elsewhere in the tree — the "Cannot update a component while rendering a
+ * different component" class of bug. Reported from a QA pass. Call it
+ * synchronously from your app's ROOT component's render (before any
+ * consumer has mounted), guarded so it only fires once — see AGENTS.md
+ * section 3.8 for the full Bad/Good example.
+ */
 export function setDynamicToken(name: string, value: string): void {
   tokens.set(name, value);
   applyToDom(name, value);

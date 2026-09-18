@@ -314,6 +314,32 @@ repaints, no re-render). On native the token value is substituted into the
 class string before each resolve, and subscribed elements re-render on
 change. `var(--x)` in a `className` already works unaided on Expo Web.
 
+**Call `setDynamicToken` synchronously from a render body, not from module
+top-level.** It calls `notify()` synchronously (dynamicTokens.ts), which
+synchronously re-renders every already-mounted `ReactiveElement` subscribed
+via `useSyncExternalStore` — safe when nothing is subscribed yet, a real
+hazard once something is. Module-top-level code runs whenever Metro's
+inline-requires first evaluates that module, which is NOT a fixed point in
+the app's lifecycle — it can land in the middle of React rendering some
+unrelated component elsewhere in the tree, which is exactly the "Cannot
+update a component while rendering a different component" class of bug:
+
+```tsx
+// Bad — races Metro inline-requires; can fire mid-render of an unrelated component.
+setDynamicToken('accent', '#8b5cf6');
+
+// Good — call synchronously in your ROOT component's own render, before any
+// consumer mounts; guard so it only ever fires once (unguarded, every
+// re-render would call notify() again, wastefully re-rendering every
+// subscribed element for no value change).
+function RootLayout({ children }) {
+  if (getDynamicToken('accent') === undefined) {
+    setDynamicToken('accent', '#8b5cf6');
+  }
+  return <ThemeProvider>{children}</ThemeProvider>;
+}
+```
+
 ### 3.9 Reading colors as values
 
 ```tsx

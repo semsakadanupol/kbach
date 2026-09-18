@@ -255,18 +255,10 @@ colors.alpha(colors.blue[6], 30);
 colors.get('brand');   // a custom color, typed as plain `string`
 ```
 
-**Correction — no automatic shade-mirroring exists.** An earlier version
-of this doc claimed `colors.blue[n]` auto-mirrors to shade `13 - n` in
-dark mode; confirmed false against the actual code (`useColors.ts`'s own
-doc comment: "fully manual, no automatic shade-shifting or other
-assumption about what a 'dark variant' should be") — this was never
-implemented in this package's history, not a regression. `colors.blue[6]`
-returns the SAME value in both light and dark mode unless `blue-6` itself
-is defined in the theme as a `{ light, dark }` pair (§4.1 of the root
-AGENTS.md) — there is no built-in "flip the shade number" behavior at all.
-If you want a color to differ by mode, define it as mode-aware in
-`kbach.config.js`; reaching for a different numbered shade yourself is a
-manual, app-level choice this hook has no opinion on.
+`colors.blue[6]` returns the same value in both light and dark mode
+unless `blue-6` itself is defined in the theme as a `{ light, dark }` pair
+(§4.1 of the root AGENTS.md) — define a color as mode-aware in
+`kbach.config.js` if you want it to differ by mode.
 
 `colors.brand` (a custom flat color) is typed `string | ColorScale`
 because the same object also serves shade families and TS can't tell them

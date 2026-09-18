@@ -146,7 +146,7 @@ npm install @kbach/react-native@beta
 | **Expo Go** | None. A pure-JS fallback engine loads automatically (reduced utility coverage). |
 | **Expo Web** / `react-native-web` | None. Uses the same WASM CSS engine as `@kbach/react`. |
 | **Expo dev client / prebuild / EAS** | Babel plugin, then `npx expo prebuild && npx expo run:android`. Full native engine. |
-| **React Native CLI** | Babel plugin, then rebuild the Android app. |
+| **React Native CLI** | Babel plugin, then restart Metro with `--reset-cache` and rebuild the Android app. |
 
 Babel plugin — added to the existing `babel.config.js` (keep the function
 form Expo generates; only add the `plugins` entry):
@@ -177,7 +177,10 @@ modules, never `kbach.config.js` itself):
    call in app code**.
 
 A dev-server restart is required after changing `kbach.config.js` or the
-babel config.
+babel config — for the babel config specifically, a plain restart isn't
+reliably enough (Metro's transform cache doesn't always invalidate on a
+babel config change on its own); use `--reset-cache` (`npx react-native
+start --reset-cache` / `npx expo start --clear`).
 
 ### 3.3 How resolution works
 
@@ -190,6 +193,7 @@ engines does the work, chosen automatically:
 | Android dev-client / CLI build | **Rust via JNI** (`KbachModule` TurboModule, prebuilt `.so`) | `resolveStyle(classString, themeJson, colorScheme, pressed, width)` → JSON style object. |
 | Expo Web / `react-native-web` | **Rust via WASM** (`generate_css_attr`) | Emits real CSS rules into a `<style>` tag; element gets `dataSet={{ kb }}` and rules target `[data-kb~="…"]`. Full modifier set. |
 | Expo Go | **Pure-JS fallback** (`jsEngine/`) | A partial TS port of the native resolver. No custom native module can load in Expo Go. |
+| iOS — ANY build (dev-client, CLI, EAS) | **Pure-JS fallback** (`jsEngine/`) | Same reduced-coverage path as Expo Go, since there's no iOS native module at all yet (`TurboModuleRegistry.get('KbachModule')` returns `null` on iOS, so `resolveStyle` falls through to the JS engine — see nativeBridge.ts). Not specific to Expo Go; a real iOS dev-client/CLI build is on this row too. |
 
 Resolution is memoized per `(classString, pressed, colorScheme, width,
 theme)`.
@@ -273,6 +277,10 @@ No provider required. `<ThemeProvider>` optionally seeds a startup
 import AsyncStorage from '@react-native-async-storage/async-storage';
 <ThemeProvider persist={AsyncStorage}><App /></ThemeProvider>;
 ```
+
+Mount at most one — dark mode is one global store, not scoped per
+provider, so a second mounted instance logs a dev-only warning (they'd
+fight over the same `defaultMode`/`persist` seed).
 
 `persist` takes any `{ getItem, setItem }` async store. The persisted mode
 is read once on mount and wins over `defaultMode`; later changes are

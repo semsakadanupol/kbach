@@ -8,6 +8,7 @@ package's own `AGENTS.md`, not here:
 
 - [`packages/react/AGENTS.md`](packages/react/AGENTS.md) — `@kbach/react` (web)
 - [`packages/react-native/AGENTS.md`](packages/react-native/AGENTS.md) — `@kbach/react-native`
+- [`packages/cli/AGENTS.md`](packages/cli/AGENTS.md) — `@kbach/cli`, the setup-automation CLI
 
 The user-facing package READMEs are deliberately short; these `AGENTS.md`
 files are the authoritative reference.
@@ -25,6 +26,7 @@ core** compiled to different targets, and two thin bindings on top:
 | `@kbach/core-engine` | Rust → WASM (web) + JNI `.so` (Android). Consumed by the two below; not used directly. | Parser + resolvers. |
 | `@kbach/react` | Web / DOM | Class strings are scanned at **build time** and compiled to a real CSS file. |
 | `@kbach/react-native` | Android (JNI), Expo Web (WASM), Expo Go (JS fallback) | Class strings are resolved to a **style object at render time**. |
+| `@kbach/cli` | Node CLI | Not a runtime dependency — automates the setup below via codemods (`init`) and read-only diagnostics (`doctor`). |
 
 Both bindings read the same optional `kbach.config.js` and expose the same
 `useTheme()` / `useColors()` / dark-mode API.
@@ -35,7 +37,8 @@ Both bindings read the same optional `kbach.config.js` and expose the same
 
 Install, build-plugin wiring (Vite/PostCSS), the runtime `kb()`/
 jsx-runtime paths, dark mode, plugin options, and the full exports list —
-see [`packages/react/AGENTS.md`](packages/react/AGENTS.md).
+see [`packages/react/AGENTS.md`](packages/react/AGENTS.md). `npx
+@kbach/cli init` automates the Vite/PostCSS wiring below — see §4.
 
 ---
 
@@ -47,10 +50,26 @@ iOS runs the JS fallback in every build type), the native modifier set,
 `calc()`/dynamic tokens/colors-as-values, monorepo caveats, the full
 exports list, and package-specific failure modes — see
 [`packages/react-native/AGENTS.md`](packages/react-native/AGENTS.md).
+`npx @kbach/cli init` automates the per-target setup below — see §4.
 
 ---
 
-## 4. `kbach.config.js` (shared by both packages)
+## 4. `@kbach/cli` (setup automation)
+
+`npx @kbach/cli init` detects which of the four frameworks above a
+project is (Vite/Next.js → `@kbach/react`; Expo/React Native CLI →
+`@kbach/react-native`) and performs the install + config-file wiring
+each package's own §1/§2 above documents by hand, via format-preserving
+codemods (never string templating) that are safe to re-run at any time.
+`npx @kbach/cli doctor` runs the equivalent read-only diagnostics with a
+real exit code, usable as a CI gate. Full detail — detection logic, the
+exact codemod per framework, the `doctor` check list, non-interactive/CI
+behavior, failure modes — in
+[`packages/cli/AGENTS.md`](packages/cli/AGENTS.md).
+
+---
+
+## 5. `kbach.config.js` (shared by both bindings)
 
 A plain JS module exporting a `KbachConfig`. On web the plugin
 auto-discovers it at the project root; on native the babel plugin
@@ -69,7 +88,7 @@ module.exports = {
 > syntax error and the whole file fails to load (on native this surfaces as
 > a Metro bundling error).
 
-### 4.1 `extend.colors`
+### 5.1 `extend.colors`
 
 Each value is a literal color OR a reference to another color name,
 optionally with an `/opacity` suffix (0–100):
@@ -105,7 +124,7 @@ mode-aware color compiles to a live `rgb(var(--kb-color-<name>))` CSS
 variable; on native it resolves to the concrete side for the current
 scheme at render time.
 
-### 4.2 Other `extend` sections
+### 5.2 Other `extend` sections
 
 ```js
 extend: {
@@ -120,14 +139,14 @@ extend: {
 package — native strips them to the first name at resolve time, so the
 same config works unmodified on Expo Web.
 
-### 4.3 `theme` vs `extend`
+### 5.3 `theme` vs `extend`
 
 `theme.colors` / `theme.spacing` / `theme.screens` / `theme.fontFamily`
 **replace** the built-in section entirely (e.g. `theme.colors` drops the
 default 22-family palette). `extend` merges on top. `container` only exists
 under `extend` (it's inherently additive).
 
-### 4.4 Runtime application
+### 5.4 Runtime application
 
 `resolveKbachConfig(config)` → a merged `ThemeConfig` (pure function).
 `applyKbachConfig(config)` = `resolveKbachConfig` + `setTheme` + re-sync of
@@ -137,7 +156,7 @@ build-time / babel-time path needs no call.
 
 ---
 
-## 5. The palette
+## 6. The palette
 
 22 hue families (`gray`, `red`, `orange`, `amber`, `yellow`, `lime`,
 `green`, `emerald`, `teal`, `cyan`, `sky`, `blue`, `indigo`, `violet`,
@@ -151,7 +170,7 @@ truth (`generate-palette.mjs`), not hand-maintained in either binding.
 
 ---
 
-## 6. How the engine is built
+## 7. How the engine is built
 
 `@kbach/core-engine` is a Rust crate. `npm run build` in that package
 produces:
@@ -182,7 +201,7 @@ gets cascade/specificity for free from CSS + the registry's per-modifier
 
 ---
 
-## 7. Cross-package differences at a glance
+## 8. Cross-package differences at a glance
 
 | | `@kbach/react` | `@kbach/react-native` |
 | :-- | :-- | :-- |
@@ -196,7 +215,7 @@ gets cascade/specificity for free from CSS + the registry's per-modifier
 
 ---
 
-## 8. Common failure modes
+## 9. Common failure modes
 
 Shared across both packages, since `kbach.config.js` is read by both:
 

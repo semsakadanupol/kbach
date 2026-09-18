@@ -13,6 +13,23 @@ underlying engine is built, see the repo root's
 ## 1. Install + wire up the build
 
 ```sh
+npx @kbach/cli init
+```
+
+Automates everything below — installs `@kbach/react`, patches
+`vite.config.ts` or `postcss.config.js` via a format-preserving codemod
+(never string templating), and for the PostCSS path ensures the marker
+pair exists in `globals.css`. Safe to re-run at any time (idempotent —
+reports "already wired up" rather than duplicating an entry). See
+[`packages/cli/AGENTS.md`](../cli/AGENTS.md) for exactly what it detects
+and changes, and what it does when a codemod can't safely apply (prints
+the same manual snippet shown below, rather than guessing).
+
+The manual steps below are both the CLI's own fallback and the accurate
+reference for what it actually does — start here if you're wiring this
+up by hand, or the CLI reported it couldn't:
+
+```sh
 npm install @kbach/react@beta
 ```
 

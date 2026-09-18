@@ -14,6 +14,24 @@ and how the underlying engine is built, see the repo root's
 ## 1. Install + setup
 
 ```sh
+npx @kbach/cli init
+```
+
+Automates everything below — installs `@kbach/react-native`, patches (or
+creates) `babel.config.js` via a format-preserving codemod (handles both
+Expo's function-export form and React Native CLI's plain object-export
+form), and on React Native CLI offers to run the native rebuild right
+there. Safe to re-run at any time (idempotent — reports "already has the
+kbach babel plugin" rather than duplicating the entry). See
+[`packages/cli/AGENTS.md`](../cli/AGENTS.md) for exactly what it detects
+and changes, and what it does when the codemod can't safely apply
+(prints the same manual snippet shown below, rather than guessing).
+
+The manual steps below are both the CLI's own fallback and the accurate
+reference for what it actually does — start here if you're wiring this
+up by hand, or the CLI reported it couldn't:
+
+```sh
 npm install @kbach/react-native@beta
 ```
 
@@ -257,7 +275,7 @@ colors.get('brand');   // a custom color, typed as plain `string`
 
 `colors.blue[6]` returns the same value in both light and dark mode
 unless `blue-6` itself is defined in the theme as a `{ light, dark }` pair
-(§4.1 of the root AGENTS.md) — define a color as mode-aware in
+(§5.1 of the root AGENTS.md) — define a color as mode-aware in
 `kbach.config.js` if you want it to differ by mode.
 
 `colors.brand` (a custom flat color) is typed `string | ColorScale`

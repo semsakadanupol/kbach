@@ -8,7 +8,7 @@ export type DarkModeChoice = 'media' | 'attribute' | 'class';
 
 /**
  * `null` means "system default" — `darkMode: 'media'` is already the
- * engine's own default (root AGENTS.md §4), so choosing it means no
+ * engine's own default (root AGENTS.md §5), so choosing it means no
  * config file is written at all rather than one that just restates the
  * default.
  */

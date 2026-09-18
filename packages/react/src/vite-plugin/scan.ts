@@ -103,10 +103,62 @@ function splitClassTokens(str: string): string[] {
 // is filtered.
 const NOT_A_CLASS_NAME_RE = /[${}]|-$|^[?:&|!"'=<>]+$/;
 
+/**
+ * True if `token` contains a `(`/`)` that isn't nested inside a `[...]`
+ * bracket pair WITHIN THAT SAME TOKEN — never valid Kbach syntax. Every
+ * real use of `calc()`/`rgb()`/`var()`/etc. is always wrapped in an
+ * arbitrary-value bracket (`w-[calc(50%-1rem)]`, `bg-[rgb(255,0,0)]`);
+ * a bare, unbracketed paren never appears in a real utility. Reported
+ * live: the scanner's own necessarily-broad rules (any `kb(...)`/`clsx(...)`
+ * call-shaped text anywhere in the file, any backtick template literal —
+ * see their own doc comments for why the trade-off is deliberate: missing
+ * a real dynamic class silently is worse than an extra false-positive
+ * candidate) occasionally sweep up plain prose that happens to contain a
+ * literal `kb()` — e.g. documentation text like `kb() — runtime-assembled
+ * class strings` inside a JSX heading, nowhere near an actual call. Since
+ * that candidate then fails to resolve as any real utility, it produced a
+ * spurious "Unknown class ... Typo?" warning with nothing to fix. This
+ * check can't catch every such case (a bare English word with no
+ * punctuation, like "runtime" alone, is syntactically indistinguishable
+ * from a real single-word utility — see this repo's own AGENTS.md for
+ * that known, narrower limitation), but it's a safe, zero-false-negative
+ * filter for the parenthesized shape specifically.
+ */
+function hasUnbracketedParen(token: string): boolean {
+  let bracketDepth = 0;
+  for (const ch of token) {
+    if (ch === '[') bracketDepth++;
+    else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+    else if ((ch === '(' || ch === ')') && bracketDepth === 0) return true;
+  }
+  return false;
+}
+
 function pushTokens(str: string, into: Set<string>): void {
   for (const tok of splitClassTokens(str)) {
-    if (tok && !NOT_A_CLASS_NAME_RE.test(tok)) into.add(tok);
+    if (tok && !NOT_A_CLASS_NAME_RE.test(tok) && !hasUnbracketedParen(tok)) into.add(tok);
   }
+}
+
+// How far to look on each side of a template literal for the `>{`/`}<`
+// JSX-expression-child shape — generous enough for realistic whitespace/
+// newline formatting between the tag and the `{`, but still bounded so a
+// pathological file can't make this scan expensive.
+const JSX_CHILD_CONTEXT_WINDOW = 40;
+const JSX_CHILD_BEFORE_RE = />\s*\{\s*$/;
+const JSX_CHILD_AFTER_RE = /^\s*\}\s*</;
+
+/**
+ * True if the template literal spanning `matchStart`..`matchEnd` in `code`
+ * (backtick-to-backtick, inclusive) is a JSX expression child — `>{` right
+ * before it, `}<` right after — the shape `<h2>{\`...\`}</h2>` produces.
+ * See rule 4's own doc comment in `extractClassStrings` for why that shape
+ * specifically is excluded from the catch-all template-literal scan.
+ */
+function isJsxExpressionChildTemplateLiteral(code: string, matchStart: number, matchEnd: number): boolean {
+  const before = code.slice(Math.max(0, matchStart - JSX_CHILD_CONTEXT_WINDOW), matchStart);
+  const after = code.slice(matchEnd, matchEnd + JSX_CHILD_CONTEXT_WINDOW);
+  return JSX_CHILD_BEFORE_RE.test(before) && JSX_CHILD_AFTER_RE.test(after);
 }
 
 function pushTemplateLiteralBody(body: string, into: Set<string>): void {
@@ -203,9 +255,21 @@ export function extractClassStrings(rawCode: string): string[] {
 
   // 4. Any other template literal in the file — catches one assigned to a
   // variable and spread into className some other way. Harmless to double-
-  // scan one already caught above — `found` is a Set.
+  // scan one already caught above — `found` is a Set. Skips one shaped
+  // like a JSX expression child (`>{` ... `}<` — the only place a
+  // template literal can appear as JSX display text; a literal backtick
+  // character in real JSX text is just a character, never template-
+  // literal syntax) — that's plain prose, never a class source, and rules
+  // 1–3 already cover every className=/kb=/composer-call shape that
+  // actually assigns a template literal to styling. Reported live: a
+  // heading like `<h2>{\`kb() — runtime-assembled class strings\`}</h2>`
+  // had every word split out as its own false-positive class candidate
+  // ("runtime-assembled", "strings", …) with nothing to fix.
   const templateRe = /`([^`]{1,2000})`/g;
-  while ((m = templateRe.exec(code)) !== null) pushTemplateLiteralBody(m[1]!, found);
+  while ((m = templateRe.exec(code)) !== null) {
+    if (isJsxExpressionChildTemplateLiteral(code, m.index, templateRe.lastIndex)) continue;
+    pushTemplateLiteralBody(m[1]!, found);
+  }
 
   return [...found];
 }

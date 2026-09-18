@@ -108,6 +108,51 @@ describe('extractClassStrings', () => {
     expect(() => extractClassStrings(code)).not.toThrow();
     expect(extractClassStrings(code)).toEqual([]);
   });
+
+  it('does not extract a literal "kb()" substring living inside a real className attribute', () => {
+    // No valid Kbach utility ever has a bare, unbracketed paren, so this is
+    // safe to filter with zero false negatives for real arbitrary-value
+    // syntax (see the next test).
+    const code = `<div className="flex kb() items-center" />`;
+    const found = extractClassStrings(code);
+    expect(found).toEqual(expect.arrayContaining(['flex', 'items-center']));
+    expect(found).not.toContain('kb()');
+  });
+
+  it('still extracts a real arbitrary value whose OWN parens are inside its OWN brackets', () => {
+    const code = `<div className="w-[calc(50%-1rem)] bg-[rgb(255,0,0)]" />`;
+    expect(extractClassStrings(code)).toEqual(
+      expect.arrayContaining(['w-[calc(50%-1rem)]', 'bg-[rgb(255,0,0)]']),
+    );
+  });
+
+  it('does not tokenize a template-literal JSX expression child as candidate classes', () => {
+    // Reported live and confirmed: a heading's own display text written as
+    // a template literal — `<h2>{\`kb() — runtime-assembled class
+    // strings\`}</h2>` — has no className/kb attribute and no clsx()/kb()
+    // call anywhere nearby, yet rule 4's catch-all "any backtick literal in
+    // the file" scan (which exists to catch a template literal assigned to
+    // a variable and spread into className some other way) doesn't know
+    // that and unconditionally splits the whole string by whitespace,
+    // producing "runtime-assembled", "strings", etc. as false-positive
+    // candidates — each one then a spurious "Unknown class ... Typo?"
+    // warning with nothing to fix. A template literal is JSX display text
+    // (as opposed to assigned to a variable/passed to a call) if and only
+    // if it's a `{`...`}` expression child with nothing else inside the
+    // braces — the `>{` / `}<` shape this test's repro has exactly.
+    const code = 'export function Demo() { return <h2>{`kb() — runtime-assembled class strings`}</h2>; }';
+    expect(extractClassStrings(code)).toEqual([]);
+  });
+
+  it('still tokenizes a template literal assigned to a variable (the case rule 4 exists for)', () => {
+    const code = "const styles = `bg-blue-6 rounded-lg`; el.className = styles;";
+    expect(extractClassStrings(code)).toEqual(expect.arrayContaining(['bg-blue-6', 'rounded-lg']));
+  });
+
+  it('still tokenizes a template literal inside className={...} (already covered by rule 2, harmless double-scan by rule 4)', () => {
+    const code = '<div className={`p-4 ${isActive ? "bg-blue-6" : "bg-gray-9"}`} />';
+    expect(extractClassStrings(code)).toEqual(expect.arrayContaining(['p-4', 'bg-blue-6', 'bg-gray-9']));
+  });
 });
 
 describe('scanUsedTags', () => {

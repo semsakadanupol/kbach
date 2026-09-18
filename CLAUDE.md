@@ -32,3 +32,29 @@ at all, since it actively misleads whoever reads it next.
 
 After making a change yourself that affects any of the above, update the
 relevant `AGENTS.md` in the same change, for the same reason.
+
+## Always test a new or fixed feature before calling it done
+
+Don't report a fix or a new feature as finished on the strength of the
+change alone — run whatever actually exercises it: the relevant test
+suite (`npm run test` / `cargo test` in the affected package(s)), a
+typecheck/lint pass, and — for anything touching Rust source — a rebuild
+of the consuming WASM/`.so` artifacts, since a source-only fix does
+nothing for a consumer until those are rebuilt (see the root AGENTS.md's
+"How the engine is built" section). Add a regression test reproducing the
+original bug/behavior where practical, not just enough code to make it
+compile.
+
+## Ask before every commit and before every publish
+
+Do not commit or run `npm publish` on your own judgment, even mid-task,
+even after several were already approved earlier in the same
+conversation. Confirm with the user each time, specifically:
+
+- Before creating a git commit (including a version-bump commit).
+- Before running `npm publish` for `@kbach/core-engine`, `@kbach/react`,
+  or `@kbach/react-native`.
+
+Finish and verify the actual code/doc change first (edit, test, rebuild)
+so there's something concrete to confirm — then stop and ask, rather than
+committing/publishing and reporting it as already done.

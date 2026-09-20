@@ -11,6 +11,12 @@ Tailwind CSS v4 feature parity, plus Kbach's own color palette.
 npm install @kbach/react
 ```
 
+Or skip straight to a working setup: `npx @kbach/cli init` detects Vite
+or Next.js, installs this package, and patches `vite.config.ts` /
+`postcss.config.js` for you — see [`@kbach/cli`](https://www.npmjs.com/package/@kbach/cli).
+The steps below are what it automates, and still the fallback it prints
+if your config file's shape is too unusual for it to edit safely.
+
 ## Quick start
 
 ```ts

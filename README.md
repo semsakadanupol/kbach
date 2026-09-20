@@ -12,6 +12,11 @@ separate bindings for web and React Native.
 | [`@kbach/core-engine`](packages/core-engine)         | Rust parser/style engine (WASM for web, JNI for native Android). Not published standalone — consumed by the two packages below. |
 | [`@kbach/react`](packages/react)                     | Web bindings — Vite plugin, static CSS generation, React hooks.   |
 | [`@kbach/react-native`](packages/react-native)       | React Native bindings — native (Android), Expo Web, and Expo Go. |
+| [`@kbach/cli`](packages/cli)                         | Setup automation — `npx @kbach/cli init` detects your framework and wires up whichever binding above you need; `doctor` diagnoses an existing setup. |
+
+Setting up `@kbach/react` or `@kbach/react-native` in an existing
+project? Start with `npx @kbach/cli init` — it automates the install and
+config-file wiring either package's own README shows by hand.
 
 Each package's own README has a short install-and-go guide.
 [`AGENTS.md`](AGENTS.md) is the full reference — how to use both packages

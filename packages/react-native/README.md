@@ -15,6 +15,13 @@ Utility-class styling for React Native — the same class names as
 npm install @kbach/react-native@beta
 ```
 
+Or skip straight to a working setup: `npx @kbach/cli init` detects Expo
+or React Native CLI, installs this package, and patches
+`babel.config.js` for you (on React Native CLI, it'll even offer to run
+the native rebuild) — see [`@kbach/cli`](https://www.npmjs.com/package/@kbach/cli).
+The steps below are what it automates, and still the fallback it prints
+if your `babel.config.js`'s shape is too unusual for it to edit safely.
+
 ## Setup
 
 The babel plugin (below) is **required on every target, including Expo

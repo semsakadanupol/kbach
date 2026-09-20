@@ -125,4 +125,16 @@ describe('applyKbachConfig', () => {
     expect(getTheme()).toBe(theme);
     expect(getTheme().colors.brand).toBe('#ff6b35');
   });
+
+  it('re-applying the exact same config keeps getTheme() reference-stable', () => {
+    // The actual real-world path the Fast Refresh bug goes through:
+    // babel-plugin.js's injected applyKbachConfig() call re-runs on every
+    // file Metro re-executes, with the SAME config content every time
+    // unless the user genuinely edited kbach.config.js.
+    const config = { extend: { colors: { brand: '#ff6b35' } } };
+    applyKbachConfig(config);
+    const first = getTheme();
+    applyKbachConfig(config);
+    expect(getTheme()).toBe(first);
+  });
 });

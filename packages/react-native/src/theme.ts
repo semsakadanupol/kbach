@@ -111,9 +111,36 @@ export const defaultTheme: ThemeConfig = {
 let activeTheme: ThemeConfig = defaultTheme;
 let activeThemeJson: string = JSON.stringify(defaultTheme);
 
+/**
+ * Idempotent by CONTENT, not just a plain assignment — deliberately, not a
+ * micro-optimization. The babel plugin (`babel-plugin.js`) injects
+ * `applyKbachConfig(require('kbach.config.js'))` at the top of EVERY user
+ * file, not just one entry point, so it re-runs on every single file
+ * Metro (re-)executes. Editing `kbach.config.js` itself under Expo Fast
+ * Refresh forces Metro to invalidate and re-execute every file that
+ * requires it — which, because of that injection, is the entire app, not
+ * just the file you're looking at. A plain unconditional reassignment here
+ * would hand every one of those re-executions a BRAND NEW theme object
+ * (`resolveKbachConfig` always builds one fresh) even when the config's
+ * actual content hasn't changed, which in turn invalidates every
+ * `useColors()` call's `useMemo` (keyed on this object's identity) and
+ * re-evaluates `usesModeAwareColor()` for every reactive element
+ * (jsxRuntimeCore.ts) across the whole tree, all at once, right as Fast
+ * Refresh is already mid-teardown/rebuild for that same app-wide
+ * invalidation — reported live as "Unable to find node on an unmounted
+ * component," a known-flaky class of React Native Fast Refresh race that
+ * this amount of simultaneous churn measurably worsens. Comparing against
+ * the JSON serialization this function already computes (previously only
+ * for the JNI boundary, see `getThemeJson`) costs nothing new — it's the
+ * same computation the old code did unconditionally — it just skips the
+ * assignment (and therefore the reference change every downstream
+ * consumer sees) when the content is unchanged.
+ */
 export function setTheme(theme: ThemeConfig): void {
+  const json = JSON.stringify(theme);
+  if (json === activeThemeJson) return;
   activeTheme = theme;
-  activeThemeJson = JSON.stringify(theme);
+  activeThemeJson = json;
 }
 
 export function getTheme(): ThemeConfig {

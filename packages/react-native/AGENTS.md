@@ -345,3 +345,17 @@ Subpath exports: `@kbach/react-native/babel-plugin`,
   missing. It's required on every target, not just Android/dev-client
   builds; without it nothing routes `className` through this package's
   jsx-runtime at all, so RN just silently ignores the unrecognized prop.
+- **`ERROR [Error: Unable to find node on an unmounted component.]` on
+  Expo Fast Refresh, especially right after editing `kbach.config.js`** —
+  stale `@kbach/react-native` (`< 1.0.0-beta.51`). Root cause: the babel
+  plugin (§1) injects `applyKbachConfig(require('kbach.config.js'))` into
+  *every* user file, so editing that config forces Metro to re-execute the
+  entire app (every file requires it), not just the screen you're on;
+  before beta.51, `setTheme` (`theme.ts`) handed every one of those
+  redundant re-applications a brand-new theme object even when the config
+  content hadn't changed, invalidating every `useColors()` memo and
+  reactive-element check across the whole tree simultaneously, right as
+  Fast Refresh was already mid-teardown — worsening this normally-rare
+  React Native Fast Refresh race. `setTheme` is idempotent by content
+  since beta.51 (compares against the theme's own JSON serialization
+  before replacing it); update.

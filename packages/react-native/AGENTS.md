@@ -9,6 +9,23 @@ cross-package overview, `kbach.config.js` reference, the color palette,
 and how the underlying engine is built, see the repo root's
 [AGENTS.md](https://github.com/semsakadanupol/kbach/blob/main/AGENTS.md).
 
+> **Before writing a single class here, know these three things —
+> Tailwind familiarity actively misleads on all three:**
+>
+> 1. Color shades are `1`–`12` (lightest→darkest), not Tailwind's
+>    `50`–`950` — `bg-blue-500` resolves to nothing; the real class is
+>    `bg-blue-6`. Full palette: root AGENTS.md §6.
+> 2. `group-*`, `peer-*`, `has-[…]`, container queries, grid, and pseudo-
+>    elements (`before:`/`after:`) are real Tailwind syntax that PARSES
+>    here but applies **zero style, with no warning** — native has no
+>    cascade/DOM to support them. See §4's "Not supported" list. A typo
+>    DOES warn; an unsupported-but-valid utility does not — don't assume
+>    silence means it worked.
+> 3. The babel plugin (§1 below) is required on **every** target,
+>    including Expo Go — without it `className` does literally nothing,
+>    silently, no error. This is the single most common real setup bug
+>    reported against this package.
+
 ---
 
 ## 1. Install + setup
@@ -220,6 +237,23 @@ Outside React: `getGlobalDarkMode()` / `toggleGlobalDarkMode()` /
   engine (a space splits the class token). Use underscores if you want them
   for readability: `w-[calc(100%_-_3rem)]`.
 
+### 7.1 Arbitrary values elsewhere — same px/rem-only rule
+
+Not just `calc()`: any arbitrary value RN needs as a plain number (font
+size, spacing, radii, ...) follows the identical rule. `text-[20px]` and
+`text-[1.5rem]` work (`rem` × 16, same as everywhere else); `text-[2em]`,
+`text-[50%]`, `text-[10vh]`/`text-[10vw]` don't — `em` needs the parent's
+own cascaded font-size and `%`/viewport units need real layout, neither
+of which exists at native resolve time — dropped with the same dev-only
+`console.warn`, never a crash. Identical on Expo Go's JS-fallback engine
+(`jsEngine/resolveStyle.ts` mirrors `resolve_style.rs`'s `rn_style_value`
+exactly). Web (including Expo Web) has none of this restriction — real
+CSS resolves every unit natively.
+
+**`text-[…]` specifically needs `< 1.0.0-beta.52` excluded** — every
+arbitrary `text-[…]` value, including a plain `text-[10px]`, silently
+resolved nothing at all on native/Expo Go before that version (see §13).
+
 ## 8. Dynamic tokens (native counterpart to CSS custom properties)
 
 ```tsx
@@ -359,3 +393,13 @@ Subpath exports: `@kbach/react-native/babel-plugin`,
   React Native Fast Refresh race. `setTheme` is idempotent by content
   since beta.51 (compares against the theme's own JSON serialization
   before replacing it); update.
+- **`text-[10px]` (or any other arbitrary `text-[…]` value) does nothing
+  on native or Expo Go** — stale `@kbach/react-native` (`< 1.0.0-beta.52`).
+  The native dispatcher's `resolve_text_native` (`resolvers/mod.rs`) never
+  got the arbitrary-value length check `color::resolve_text` (web) already
+  had — an arbitrary value skipped the font-size/align lookup entirely and
+  fell straight through to color resolution, which correctly rejected
+  "10px" as not a real color and silently dropped the whole declaration.
+  Fixed identically in both the Rust native dispatcher and its Expo Go JS-
+  fallback mirror (`jsEngine/resolveUtilityNative.ts`) in beta.52; update.
+  Web (including Expo Web) was never affected.

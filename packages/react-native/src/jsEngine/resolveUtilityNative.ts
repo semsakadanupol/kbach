@@ -98,13 +98,26 @@ function nativeHexColor(parsed: ParsedClass, theme: ThemeConfig): string | null 
   return color.colorValue(theme, parsed);
 }
 
-/** Mirrors `color::resolve_text`'s three-way "text-" disambiguation (size / align / color). */
+/**
+ * Mirrors `color::resolve_text`'s "text-" disambiguation (size / align /
+ * color). Bug, confirmed live (not hypothetical), fixed here to match
+ * `resolvers/mod.rs`'s own identical fix: an arbitrary `text-[10px]` has
+ * `isArbitrary === true`, which skipped the size/align block entirely
+ * (non-arbitrary only) and fell straight through to `nativeHexColor` —
+ * "10px" isn't a real color, so the whole declaration silently dropped.
+ * Reported live as "text-[10px] not work" in @kbach/react-native. Same
+ * `looksLikeLength` check the web dispatcher already has, ahead of the
+ * color fallback for the arbitrary case only, so a real arbitrary color
+ * (`text-[#ff0000]`) still resolves as a color, not a misread length.
+ */
 function resolveTextNative(parsed: ParsedClass, theme: ThemeConfig): Declaration[] | null {
   if (!parsed.isArbitrary && parsed.value !== null) {
     const size = typography.textSize(parsed.value);
     if (size !== null) return [decl('font-size', size)];
     const align = typography.textAlign(parsed.value);
     if (align !== null) return [decl('text-align', align)];
+  } else if (parsed.isArbitrary && parsed.value !== null && color.looksLikeLength(parsed.value)) {
+    return [decl('font-size', parsed.value)];
   }
   const hex = nativeHexColor(parsed, theme);
   return hex === null ? null : [decl('color', hex)];

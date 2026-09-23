@@ -458,9 +458,26 @@ fn native_hex_color(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<String>
     color::color_value(theme, parsed)
 }
 
-/// Mirrors `color::resolve_text`'s three-way "text-" disambiguation
-/// (size / align / color) so `text-lg`/`text-center` resolve correctly on
-/// native instead of being treated as (unresolvable) color names.
+/// Mirrors `color::resolve_text`'s "text-" disambiguation (size / align /
+/// color) so `text-lg`/`text-center` resolve correctly on native instead
+/// of being treated as (unresolvable) color names.
+///
+/// Bug, confirmed live (not hypothetical): this native dispatcher never
+/// got the SAME arbitrary-value fix `color::resolve_text`'s own doc
+/// comment describes as already applied there — an arbitrary `text-[10px]`
+/// has `is_arbitrary == true`, which skipped the size/align block
+/// entirely (that block only ever ran for the NON-arbitrary named-keyword
+/// case) and fell straight through to `native_hex_color`, i.e. treated
+/// "10px" as a color value. `color::color_value` correctly rejects that as
+/// not a real color and returns `None`, so the whole declaration silently
+/// dropped — `text-[10px]` produced nothing at all on native/Expo Go,
+/// while the identical class worked fine on web (whose dispatcher already
+/// had this exact check). Same `looks_like_length` check as the web
+/// version, checked ahead of the color fallback for the arbitrary case
+/// only — a real color value never parses as a bare number or
+/// number+known-length-unit, so this is safe without risking a genuine
+/// arbitrary color (`text-[#ff0000]`, `text-[red]`) being misread as a
+/// length.
 fn resolve_text_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
     if !parsed.is_arbitrary {
         if let Some(value) = parsed.value.as_deref() {
@@ -470,6 +487,10 @@ fn resolve_text_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<
             if let Some(align) = typography::text_align(value) {
                 return Some(vec![decl("text-align", align)]);
             }
+        }
+    } else if let Some(value) = parsed.value.as_deref() {
+        if color::looks_like_length(value) {
+            return Some(vec![decl("font-size", value)]);
         }
     }
     native_hex_color(parsed, theme).map(|hex| vec![decl("color", &hex)])
@@ -594,6 +615,30 @@ mod native_dispatcher_tests {
             resolve_utility_native(&parse_class("text-blue-6"), &t),
             Some(vec![decl("color", "#2563eb")]),
         );
+    }
+
+    #[test]
+    fn resolves_an_arbitrary_text_size_as_font_size_not_color() {
+        // Regression test for a real, confirmed bug: resolve_text_native
+        // never got the arbitrary-value length/color disambiguation
+        // color::resolve_text's own doc comment describes as already fixed
+        // on web — text-[10px] has is_arbitrary == true, which skipped the
+        // size/align block entirely (non-arbitrary only) and fell straight
+        // through to native_hex_color, silently dropping the whole
+        // declaration ("10px" isn't a real color). Reported live as
+        // "text-[10px] not work" in @kbach/react-native specifically —
+        // confirmed this exact class resolved fine on web the whole time.
+        let t = theme();
+        assert_eq!(resolve_utility_native(&parse_class("text-[10px]"), &t), Some(vec![decl("font-size", "10px")]));
+        assert_eq!(resolve_utility_native(&parse_class("text-[1.5rem]"), &t), Some(vec![decl("font-size", "1.5rem")]));
+        // A real arbitrary color must still resolve as a color, not get
+        // misread as a length just because this fix now checks arbitrary
+        // values more closely than before.
+        assert_eq!(
+            resolve_utility_native(&parse_class("text-[#ff0000]"), &t),
+            Some(vec![decl("color", "#ff0000")]),
+        );
+        assert_eq!(resolve_utility_native(&parse_class("text-[red]"), &t), Some(vec![decl("color", "red")]));
     }
 
     #[test]

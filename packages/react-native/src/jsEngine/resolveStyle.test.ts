@@ -510,6 +510,18 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('text-blue-6', theme(), 'light', false, W).color).toBe('#2563eb');
   });
 
+  it('resolves an arbitrary text size as font-size, not color', () => {
+    // Regression test for a real, confirmed bug, mirroring
+    // resolvers/mod.rs's own identical fix — see that test's doc comment.
+    // Reported live as "text-[10px] not work" in @kbach/react-native;
+    // this file is Expo Go's own engine, a separate hand-port from Rust
+    // that had the identical bug and needed the identical fix.
+    expect(resolveStyleJs('text-[10px]', theme(), 'light', false, W).fontSize).toBe(10);
+    expect(resolveStyleJs('text-[1.5rem]', theme(), 'light', false, W).fontSize).toBe(24);
+    // A real arbitrary color must still resolve as a color.
+    expect(resolveStyleJs('text-[#ff0000]', theme(), 'light', false, W).color).toBe('#ff0000');
+  });
+
   it('resolves a constant-only arbitrary calc() to a plain number', () => {
     expect(resolveStyleJs('p-[calc(16px+8px)]', theme(), 'light', false, W).padding).toBe(24);
   });

@@ -8,6 +8,16 @@ overview, `kbach.config.js` reference, the color palette, and how the
 underlying engine is built, see the repo root's
 [AGENTS.md](https://github.com/semsakadanupol/kbach/blob/main/AGENTS.md).
 
+> **Before writing a single class, know this — Tailwind familiarity
+> actively misleads here:** color shades are `1`–`12` (lightest→darkest),
+> not Tailwind's `50`–`950`. `bg-blue-500` is not a Kbach class — it
+> silently resolves to nothing (an "Unknown class ... Typo?" dev warning,
+> not a visible color, and ONLY if the string was actually reachable by
+> the static scanner — see §2). The real class is `bg-blue-6`. Full
+> palette: root AGENTS.md §6. Everything else in real Tailwind's utility
+> vocabulary works here essentially as-is — unlike `@kbach/react-native`,
+> web has the full modifier set with no native-platform gaps.
+
 ---
 
 ## 1. Install + wire up the build

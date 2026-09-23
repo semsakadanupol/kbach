@@ -13,6 +13,39 @@ package's own `AGENTS.md`, not here:
 The user-facing package READMEs are deliberately short; these `AGENTS.md`
 files are the authoritative reference.
 
+> **Before writing a single class, read this.** Kbach's class vocabulary
+> LOOKS like Tailwind CSS — same utility names, same `dark:`/`hover:`/
+> `sm:` modifier syntax, same `bg-`/`text-`/`p-` prefixes — closely enough
+> that pattern-matching on Tailwind muscle memory silently produces wrong
+> or non-resolving classes in three specific, easy-to-miss ways:
+>
+> 1. **Shades are `1`–`12`, NOT Tailwind's `50`–`950`.** `bg-blue-500` is
+>    not a Kbach class — it silently resolves to nothing (an "Unknown
+>    class" warning, not a visible color). The real class is `bg-blue-6`
+>    (`1` = lightest, `12` = darkest — the numbering is inverted from
+>    Tailwind's too, not just rescaled). See §6.
+> 2. **On `@kbach/react-native` specifically, a large chunk of real
+>    Tailwind has no native equivalent at all and silently does nothing**:
+>    `group-*`, `peer-*`, `has-[…]`, container queries, grid, `before:`/
+>    `after:` and other pseudo-elements. These PARSE without error and
+>    apply zero style — there is no warning for "this is a real utility
+>    native just doesn't support yet" (as opposed to a typo, which DOES
+>    warn). See `packages/react-native/AGENTS.md` §4.
+> 3. **An arbitrary value's unit matters more on native than on web.**
+>    `text-[20px]`/`w-[2rem]` work; `text-[2em]`/`w-[50%]`/`h-[10vh]` on
+>    native need real layout/cascade context that doesn't exist at
+>    resolve time and get dropped (dev-only warning, not a crash) unless
+>    they're one of the specific measured/reduced shapes
+>    `packages/react-native/AGENTS.md` §7/§7.1 documents. Web has none of
+>    this restriction.
+>
+> When in doubt about whether a specific class/value/modifier is
+> supported, don't guess from Tailwind familiarity — check the relevant
+> package's own AGENTS.md, or run `npx @kbach/cli doctor` / rely on the
+> dev-time "Unknown class ... Typo?" warning, which is real and accurate
+> for a genuine typo (as opposed to the silent-no-op cases above, which
+> are real utilities on a platform that doesn't support them yet).
+
 ---
 
 ## 1. What Kbach is

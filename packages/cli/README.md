@@ -92,7 +92,12 @@ Exits `0` if every check passes, `1` otherwise — usable as a CI gate.
 kbach init --dry-run              # show what would change, write nothing
 kbach init -y                     # skip every prompt, take the documented defaults
 kbach init --pm pnpm              # override package-manager auto-detection
+kbach init --cwd apps/mobile      # run against a different directory (monorepos)
 ```
+
+Package-manager auto-detection walks up to the workspace root for a
+lockfile too, so a monorepo on pnpm/yarn/bun is detected correctly even
+when the lockfile isn't in the directory you're running from.
 
 Every prompt (dark-mode strategy, the native-rebuild confirmation) also
 falls back to its documented default automatically when run from a

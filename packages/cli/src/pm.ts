@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 
 export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
@@ -11,12 +11,36 @@ const LOCKFILES: Record<PackageManager, string> = {
   npm: 'package-lock.json',
 };
 
-/** Detects the package manager from whichever lockfile is present at `root`; defaults to npm. */
+function lockfileAt(dir: string): PackageManager | null {
+  if (existsSync(join(dir, 'bun.lockb')) || existsSync(join(dir, LOCKFILES.bun))) return 'bun';
+  if (existsSync(join(dir, LOCKFILES.pnpm))) return 'pnpm';
+  if (existsSync(join(dir, LOCKFILES.yarn))) return 'yarn';
+  if (existsSync(join(dir, LOCKFILES.npm))) return 'npm';
+  return null;
+}
+
+/**
+ * Walks `root` and its ancestor directories looking for a lockfile — the
+ * same walk-up-to-filesystem-root algorithm `doctor/checks/packageInstalled.ts`'s
+ * `findInstalledPackageJson` already uses for `node_modules`, for the
+ * identical reason: in a monorepo, the lockfile conventionally lives at
+ * the WORKSPACE root, not inside the individual app/package directory a
+ * user actually runs `kbach init`/`doctor` from. Checking only `root`
+ * itself silently defaulted to npm for any monorepo on pnpm/yarn/bun —
+ * confirmed as a real gap, not hypothetical, the same class of bug
+ * `findInstalledPackageJson`'s own doc comment already describes.
+ * Defaults to npm only once the walk reaches the filesystem root with no
+ * lockfile found anywhere.
+ */
 export function detectPackageManager(root: string): PackageManager {
-  if (existsSync(join(root, 'bun.lockb')) || existsSync(join(root, LOCKFILES.bun))) return 'bun';
-  if (existsSync(join(root, LOCKFILES.pnpm))) return 'pnpm';
-  if (existsSync(join(root, LOCKFILES.yarn))) return 'yarn';
-  return 'npm';
+  let dir = root;
+  for (;;) {
+    const found = lockfileAt(dir);
+    if (found) return found;
+    const parent = dirname(dir);
+    if (parent === dir) return 'npm';
+    dir = parent;
+  }
 }
 
 const INSTALL_ARGS: Record<PackageManager, string[]> = {

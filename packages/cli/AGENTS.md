@@ -189,7 +189,7 @@ crash in the same class of environment would be an inconsistency.
 Flags (`src/cli.ts`):
 
 ```
-kbach <init|doctor> [--dry-run] [-y|--yes] [--pm <npm|pnpm|yarn|bun>]
+kbach <init|doctor> [--dry-run] [-y|--yes] [--pm <npm|pnpm|yarn|bun>] [--cwd <path>]
 ```
 
 - `--dry-run` — every codemod still runs and reports what it *would* do;
@@ -197,8 +197,20 @@ kbach <init|doctor> [--dry-run] [-y|--yes] [--pm <npm|pnpm|yarn|bun>]
 - `-y` / `--yes` — every prompt takes its documented default, same as the
   non-interactive fallback but without the warning.
 - `--pm` — overrides `detectPackageManager()` (`src/pm.ts`), which
-  otherwise picks npm/pnpm/yarn/bun from whichever lockfile is present at
-  the project root.
+  otherwise walks `root` and its ancestor directories for a lockfile —
+  same up-to-filesystem-root algorithm `checkPackageInstalled()`'s own
+  `findInstalledPackageJson` already uses for `node_modules` (§7's
+  table), for the identical monorepo reason: the lockfile conventionally
+  lives at the WORKSPACE root, not inside the individual app directory
+  you actually run this from. Defaults to npm only once the walk finds
+  none anywhere up the tree.
+- `--cwd <path>` — run against a directory other than wherever the
+  command was invoked from (relative paths resolve against the real
+  `process.cwd()`). Threaded through to every detection/codemod/doctor
+  check — nothing in this package otherwise reads `process.cwd()`
+  directly. Useful for a monorepo (`kbach init --cwd apps/mobile` from
+  the workspace root) or a script/CI step that already knows the target
+  path.
 
 ---
 

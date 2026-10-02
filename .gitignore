@@ -8,6 +8,7 @@ coverage/
 .env
 .env.*
 !.env.example
+.npmrc
 
 # apps/next-sandbox (Next.js build output + its auto-generated type-hints file)
 .next/

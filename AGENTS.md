@@ -9,6 +9,7 @@ package's own `AGENTS.md`, not here:
 - [`packages/react/AGENTS.md`](packages/react/AGENTS.md) — `@kbach/react` (web)
 - [`packages/react-native/AGENTS.md`](packages/react-native/AGENTS.md) — `@kbach/react-native`
 - [`packages/cli/AGENTS.md`](packages/cli/AGENTS.md) — `@kbach/cli`, the setup-automation CLI
+- [`packages/vscode-extension/AGENTS.md`](packages/vscode-extension/AGENTS.md) — `kbach-vscode`, the editor extension
 
 The user-facing package READMEs are deliberately short; these `AGENTS.md`
 files are the authoritative reference.
@@ -23,7 +24,7 @@ files are the authoritative reference.
 >    not a Kbach class — it silently resolves to nothing (an "Unknown
 >    class" warning, not a visible color). The real class is `bg-blue-6`
 >    (`1` = lightest, `12` = darkest — the numbering is inverted from
->    Tailwind's too, not just rescaled). See §6.
+>    Tailwind's too, not just rescaled). See §7.
 > 2. **On `@kbach/react-native` specifically, a large chunk of real
 >    Tailwind has no native equivalent at all and silently does nothing**:
 >    `group-*`, `peer-*`, `has-[…]`, container queries, grid, `before:`/
@@ -60,6 +61,7 @@ core** compiled to different targets, and two thin bindings on top:
 | `@kbach/react` | Web / DOM | Class strings are scanned at **build time** and compiled to a real CSS file. |
 | `@kbach/react-native` | Android (JNI), Expo Web (WASM), Expo Go (JS fallback) | Class strings are resolved to a **style object at render time**. |
 | `@kbach/cli` | Node CLI | Not a runtime dependency — automates the setup below via codemods (`init`) and read-only diagnostics (`doctor`). |
+| `kbach-vscode` | VS Code extension | Not a runtime dependency — `className` completion/hover/diagnostics in the editor, validated against the real engine. |
 
 Both bindings read the same optional `kbach.config.js` and expose the same
 `useTheme()` / `useColors()` / dark-mode API.
@@ -102,7 +104,22 @@ behavior, failure modes — in
 
 ---
 
-## 5. `kbach.config.js` (shared by both bindings)
+## 5. `kbach-vscode` (editor extension)
+
+VS Code `className` completion, hover (resolved CSS value + a color
+swatch), and inline typo diagnostics — all validated against the real
+engine (via its Node-target WASM build, vendored into the extension's
+own `dist/` rather than depended on live — see that package's own
+AGENTS.md §1 for a real, confirmed gotcha around that), not a second
+hand-maintained copy of its rules. Autocomplete's general utility list is
+a seed scraped from the Rust engine's own test fixtures, not an
+exhaustive enumeration — a known, documented limit, not an oversight.
+Full detail in
+[`packages/vscode-extension/AGENTS.md`](packages/vscode-extension/AGENTS.md).
+
+---
+
+## 6. `kbach.config.js` (shared by both bindings)
 
 A plain JS module exporting a `KbachConfig`. On web the plugin
 auto-discovers it at the project root; on native the babel plugin
@@ -121,7 +138,7 @@ module.exports = {
 > syntax error and the whole file fails to load (on native this surfaces as
 > a Metro bundling error).
 
-### 5.1 `extend.colors`
+### 6.1 `extend.colors`
 
 Each value is a literal color OR a reference to another color name,
 optionally with an `/opacity` suffix (0–100):
@@ -157,7 +174,7 @@ mode-aware color compiles to a live `rgb(var(--kb-color-<name>))` CSS
 variable; on native it resolves to the concrete side for the current
 scheme at render time.
 
-### 5.2 Other `extend` sections
+### 6.2 Other `extend` sections
 
 ```js
 extend: {
@@ -172,14 +189,14 @@ extend: {
 package — native strips them to the first name at resolve time, so the
 same config works unmodified on Expo Web.
 
-### 5.3 `theme` vs `extend`
+### 6.3 `theme` vs `extend`
 
 `theme.colors` / `theme.spacing` / `theme.screens` / `theme.fontFamily`
 **replace** the built-in section entirely (e.g. `theme.colors` drops the
 default 22-family palette). `extend` merges on top. `container` only exists
 under `extend` (it's inherently additive).
 
-### 5.4 Runtime application
+### 6.4 Runtime application
 
 `resolveKbachConfig(config)` → a merged `ThemeConfig` (pure function).
 `applyKbachConfig(config)` = `resolveKbachConfig` + `setTheme` + re-sync of
@@ -189,7 +206,7 @@ build-time / babel-time path needs no call.
 
 ---
 
-## 6. The palette
+## 7. The palette
 
 22 hue families (`gray`, `red`, `orange`, `amber`, `yellow`, `lime`,
 `green`, `emerald`, `teal`, `cyan`, `sky`, `blue`, `indigo`, `violet`,
@@ -203,7 +220,7 @@ truth (`generate-palette.mjs`), not hand-maintained in either binding.
 
 ---
 
-## 7. How the engine is built
+## 8. How the engine is built
 
 `@kbach/core-engine` is a Rust crate. `npm run build` in that package
 produces:
@@ -234,7 +251,7 @@ gets cascade/specificity for free from CSS + the registry's per-modifier
 
 ---
 
-## 8. Cross-package differences at a glance
+## 9. Cross-package differences at a glance
 
 | | `@kbach/react` | `@kbach/react-native` |
 | :-- | :-- | :-- |
@@ -248,7 +265,7 @@ gets cascade/specificity for free from CSS + the registry's per-modifier
 
 ---
 
-## 9. Common failure modes
+## 10. Common failure modes
 
 Shared across both packages, since `kbach.config.js` is read by both:
 

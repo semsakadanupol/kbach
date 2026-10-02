@@ -14,7 +14,7 @@ and how the underlying engine is built, see the repo root's
 >
 > 1. Color shades are `1`–`12` (lightest→darkest), not Tailwind's
 >    `50`–`950` — `bg-blue-500` resolves to nothing; the real class is
->    `bg-blue-6`. Full palette: root AGENTS.md §6.
+>    `bg-blue-6`. Full palette: root AGENTS.md §7.
 > 2. `group-*`, `peer-*`, `has-[…]`, container queries, grid, and pseudo-
 >    elements (`before:`/`after:`) are real Tailwind syntax that PARSES
 >    here but applies **zero style, with no warning** — native has no
@@ -309,7 +309,7 @@ colors.get('brand');   // a custom color, typed as plain `string`
 
 `colors.blue[6]` returns the same value in both light and dark mode
 unless `blue-6` itself is defined in the theme as a `{ light, dark }` pair
-(§5.1 of the root AGENTS.md) — define a color as mode-aware in
+(§6.1 of the root AGENTS.md) — define a color as mode-aware in
 `kbach.config.js` if you want it to differ by mode.
 
 `colors.brand` (a custom flat color) is typed `string | ColorScale`

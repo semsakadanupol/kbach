@@ -14,7 +14,7 @@ underlying engine is built, see the repo root's
 > silently resolves to nothing (an "Unknown class ... Typo?" dev warning,
 > not a visible color, and ONLY if the string was actually reachable by
 > the static scanner — see §2). The real class is `bg-blue-6`. Full
-> palette: root AGENTS.md §6. Everything else in real Tailwind's utility
+> palette: root AGENTS.md §7. Everything else in real Tailwind's utility
 > vocabulary works here essentially as-is — unlike `@kbach/react-native`,
 > web has the full modifier set with no native-platform gaps.
 

@@ -3,6 +3,7 @@ dist/
 coverage/
 .turbo/
 *.tsbuildinfo
+*.vsix
 
 # Local secrets — never commit.
 .env

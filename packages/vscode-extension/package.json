@@ -1,0 +1,42 @@
+{
+  "name": "kbach-vscode",
+  "displayName": "Kbach IntelliSense",
+  "description": "className autocomplete, hover previews, and inline typo diagnostics for Kbach — the Rust-powered utility-class styling engine for React and React Native.",
+  "version": "0.1.0-beta.1",
+  "publisher": "semsakadanupol",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/semsakadanupol/kbach.git",
+    "directory": "packages/vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages", "Linters", "Snippets"],
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {},
+  "scripts": {
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsup && node scripts/copy-engine.mjs",
+    "dev": "tsup --watch",
+    "generate:vocabulary": "node scripts/generate-vocabulary.mjs src/generatedVocabulary.ts",
+    "generate:colors": "node ../core-engine/scripts/generate-palette.mjs src/generatedPalette.ts",
+    "test": "vitest run --passWithNoTests",
+    "lint": "tsc --noEmit",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@kbach/core-engine": "1.0.0-beta.15",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "tsup": "^8.0.0",
+    "typescript": "^6.0.0",
+    "vitest": "^1.0.0"
+  }
+}

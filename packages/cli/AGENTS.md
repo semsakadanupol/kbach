@@ -72,7 +72,7 @@ checks happen to run first" carries none of `init`'s file-mutation risk.
 | React Native CLI | `@kbach/react-native@beta` | `babel.config.js` (object-export form) | `npx react-native start --reset-cache` |
 | Next.js | `@kbach/react@beta` | `postcss.config.{js,mjs,cjs}`; `globals.css` marker pair | — |
 
-Every flow ends with the shared dark-mode-strategy step (§5 of the root
+Every flow ends with the shared dark-mode-strategy step (§6 of the root
 AGENTS.md's config reference) via `resolveDarkModeStrategy()` +
 `writeKbachConfigIfNeeded()` (`src/configFile.ts`) — `kbach.config.js` is
 only ever created if a non-default strategy is chosen, and only if the
@@ -254,7 +254,7 @@ resolve.
 | `checkDuplicateInstances()` | Expo, RN CLI | Walks `node_modules` for a second, nested copy of `react-native`/`react` under some other package's own `node_modules` — the exact shape `packages/react-native/AGENTS.md` §11 documents (Metro ending up with two physical module instances). A plain non-monorepo install never triggers this. |
 | `checkPostcssConfigWiring()` | Next.js | `'@kbach/react/postcss'` is in `postcss.config.js`'s plugins (read-only reuse of `patchPostcssConfig()`). |
 | `checkGlobalsCssMarkers()` | Next.js | The marker pair exists in whichever `globals.css` path `findGlobalsCssFile()` finds (§3). |
-| `checkConfigSyntax()` | all | `kbach.config.js` parses via `@babel/parser` — never `require()`s it, so a syntax error can't execute arbitrary code either. On failure, hints at the unquoted-hyphenated-key trap (root AGENTS.md §5) when the source contains a hyphen. `null` (not a failure) if there's no `kbach.config.js` at all — a valid, common state. |
+| `checkConfigSyntax()` | all | `kbach.config.js` parses via `@babel/parser` — never `require()`s it, so a syntax error can't execute arbitrary code either. On failure, hints at the unquoted-hyphenated-key trap (root AGENTS.md §6) when the source contains a hyphen. `null` (not a failure) if there's no `kbach.config.js` at all — a valid, common state. |
 
 Exit code: **0** if every check passes, **1** if any fails
 (`runDoctor()`'s return value, propagated to `process.exitCode` in

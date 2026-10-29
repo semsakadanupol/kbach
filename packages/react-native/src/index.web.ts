@@ -53,3 +53,11 @@ export { useDynamicToken } from './useDynamicToken';
 
 export { clsx } from './clsx';
 export type { ClassValue, ClassDictionary, ClassArray } from './clsx';
+
+// Optional convenience components for a real semantic DOM tag on Expo
+// Web (a real <button>/<h1>-<h6>/<p> instead of react-native-web's own
+// <div>/<span> default) — see semanticElements.tsx's own doc comment for
+// what these actually are (a pre-set accessibilityRole/role, nothing
+// Kbach-specific) and why there's no Div/Input here.
+export { Button, Paragraph, H1, H2, H3, H4, H5, H6 } from './semanticElements';
+export type { ButtonProps, ParagraphProps, HeadingProps } from './semanticElements';

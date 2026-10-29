@@ -108,8 +108,70 @@ export const defaultTheme: ThemeConfig = {
   container: {},
 };
 
-let activeTheme: ThemeConfig = defaultTheme;
-let activeThemeJson: string = JSON.stringify(defaultTheme);
+// Named distinctly from the ALSO-named-`ThemeState` public type useTheme.ts
+// exports (an unrelated `{isDark, mode, ...}` hook-return shape) — this one
+// is purely internal to this module (never exported), but sharing the bare
+// name across two different types in the same package risked real
+// confusion, caught while writing this fix.
+interface ActiveThemeState {
+  theme: ThemeConfig;
+  json: string;
+}
+
+/**
+ * NOT a plain module-scope `let` — that was the actual bug (confirmed live
+ * on Expo Web): `kbach.config.js`'s custom colors silently never reached
+ * `useColors()`, with `colors.get('brandPrimary')` returning the literal
+ * string `"brandPrimary"` instead of its real value — `useColors.ts`'s own
+ * "no matching entry -> return the name itself" fallback, firing because
+ * the entry genuinely was never there from THIS module instance's point of
+ * view.
+ *
+ * Root cause: on web, THIS package is loaded through two genuinely
+ * separate module instances in the SAME app bundle — Metro resolves a bare
+ * `import ... from '@kbach/react-native'` through package.json's `import`
+ * condition (`dist/index.web.mjs`) but the babel plugin's injected
+ * `require('@kbach/react-native').applyKbachConfig(...)` (babel-plugin.js,
+ * `buildConfigStatement`) always through `require` (`dist/index.web.js`)
+ * — ESM and CJS builds are ALWAYS separate module graphs (confirmed by
+ * tsup.config.ts's own module-level comment, written for a different but
+ * related bug), so each one gets its OWN copy of every module-scope `let`
+ * in this file, no matter what. `applyKbachConfig()` was writing the
+ * custom theme into the `require`-side copy's `activeTheme`, while every
+ * component's own `useColors()` — reached via a normal `import`, the same
+ * way the rest of the app does — read the UNTOUCHED `import`-side copy,
+ * which still had nothing but `defaultTheme`.
+ *
+ * `tsup.config.ts`'s own "web entries are unaffected... since dark:
+ * resolves to real CSS + a DOM attribute write, not JS-side singleton
+ * state" conclusion is correct for `darkModeStore.ts`, which is what that
+ * comment was actually about — but it never applied to THIS module's
+ * state, which IS plain JS-side data a component reads directly, not
+ * CSS-mediated. The two files' web-safety are NOT the same claim, which is
+ * exactly how this slipped through: the existing dual-instance fix (CJS-
+ * sibling `external`s, tsup.config.ts) only dedupes WITHIN one format
+ * (every CJS entry's `require('./theme')` resolves to the same `dist/
+ * theme.js`); it structurally cannot dedupe ACROSS formats, since an ESM
+ * build and a CJS build are never the same file on disk to begin with.
+ *
+ * `globalThis` is the one thing BOTH module instances can actually share
+ * regardless of format — same JS runtime (same browser tab), so a plain
+ * keyed slot on it works as a real cross-instance singleton with no build
+ * change needed. The key is a distinctive, unlikely-to-collide string
+ * rather than a bare property name, same spirit as how other libraries
+ * dedupe an accidentally-doubled instance of themselves this way.
+ */
+const GLOBAL_STATE_KEY = '__kbachReactNativeThemeState__';
+
+function getThemeState(): ActiveThemeState {
+  const g = globalThis as unknown as Record<string, ActiveThemeState | undefined>;
+  let state = g[GLOBAL_STATE_KEY];
+  if (!state) {
+    state = { theme: defaultTheme, json: JSON.stringify(defaultTheme) };
+    g[GLOBAL_STATE_KEY] = state;
+  }
+  return state;
+}
 
 /**
  * Idempotent by CONTENT, not just a plain assignment — deliberately, not a
@@ -138,16 +200,17 @@ let activeThemeJson: string = JSON.stringify(defaultTheme);
  */
 export function setTheme(theme: ThemeConfig): void {
   const json = JSON.stringify(theme);
-  if (json === activeThemeJson) return;
-  activeTheme = theme;
-  activeThemeJson = json;
+  const state = getThemeState();
+  if (json === state.json) return;
+  state.theme = theme;
+  state.json = json;
 }
 
 export function getTheme(): ThemeConfig {
-  return activeTheme;
+  return getThemeState().theme;
 }
 
 /** Memoized JSON serialization of the active theme — passed across the JNI boundary. */
 export function getThemeJson(): string {
-  return activeThemeJson;
+  return getThemeState().json;
 }

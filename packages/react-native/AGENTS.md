@@ -346,10 +346,11 @@ and `react` at `projectRoot/node_modules/...`. A plain non-monorepo
 `setDynamicToken`, `getDynamicToken`, `deleteDynamicToken`,
 `subscribeDynamicTokens`, `useDynamicToken`, `clsx`, `getGlobalDarkMode`,
 `getGlobalThemeMode`, `setGlobalThemeMode`, `toggleGlobalDarkMode`,
-`subscribeGlobalDarkMode`. Types: `ThemeConfig`, `ColorEntry`,
-`ContainerConfig`, `StyleObject`, `KbachConfig`, `ThemeState`,
-`ThemeProviderProps`, `ThemeStorageAdapter`, `ThemeMode`, `ColorsAPI`,
-`ColorScale`, `ClassValue`.
+`subscribeGlobalDarkMode`, `Button`, `Paragraph`, `H1`, `H2`, `H3`, `H4`,
+`H5`, `H6` (§14). Types: `ThemeConfig`, `ColorEntry`, `ContainerConfig`,
+`StyleObject`, `KbachConfig`, `ThemeState`, `ThemeProviderProps`,
+`ThemeStorageAdapter`, `ThemeMode`, `ColorsAPI`, `ColorScale`,
+`ClassValue`, `ButtonProps`, `ParagraphProps`, `HeadingProps`.
 
 Subpath exports: `@kbach/react-native/babel-plugin`,
 `@kbach/react-native/jsx-runtime`, `@kbach/react-native/jsx-dev-runtime`.
@@ -379,6 +380,19 @@ Subpath exports: `@kbach/react-native/babel-plugin`,
   missing. It's required on every target, not just Android/dev-client
   builds; without it nothing routes `className` through this package's
   jsx-runtime at all, so RN just silently ignores the unrecognized prop.
+- **`useColors().get('yourCustomColor')` returns the literal name, not
+  the color, on Expo Web — icons/fills using it render invisible** —
+  stale `@kbach/react-native` (`< 1.0.0-beta.53`). Root cause: on web,
+  this package loads as two separate module instances in the same
+  bundle — a bare `import` resolves through package.json's `import`
+  condition, but the babel plugin's injected
+  `require('@kbach/react-native').applyKbachConfig(...)` always resolves
+  through `require` — so `kbach.config.js`'s custom colors landed in one
+  instance's theme state while every component's own `useColors()` read
+  the other, untouched one. Fixed by routing `theme.ts`'s active-theme
+  state through a `globalThis`-backed slot instead of a plain
+  module-scope variable, so both instances share it regardless of which
+  one set it. Update.
 - **`ERROR [Error: Unable to find node on an unmounted component.]` on
   Expo Fast Refresh, especially right after editing `kbach.config.js`** —
   stale `@kbach/react-native` (`< 1.0.0-beta.51`). Root cause: the babel
@@ -403,3 +417,43 @@ Subpath exports: `@kbach/react-native/babel-plugin`,
   Fixed identically in both the Rust native dispatcher and its Expo Go JS-
   fallback mirror (`jsEngine/resolveUtilityNative.ts`) in beta.52; update.
   Web (including Expo Web) was never affected.
+
+## 14. Semantic HTML on Expo Web
+
+On Expo Web, `react-native-web` renders a bare `<View>`/`<Text>` as a
+plain `<div>`/`<span>` by default — confirmed directly in its own source.
+That's **not** a Kbach limitation: this package's jsx-runtime never reads
+or substitutes the JSX element type at all, so whatever tag shows up is
+exactly whatever component the app wrote.
+
+`react-native-web` already has a real fix for this that this package
+never gets in the way of: an `accessibilityRole`/`role` prop on ANY host
+component makes it render the matching real HTML element instead —
+`accessibilityRole="button"` → `<button>`, `accessibilityRole="header"` +
+`aria-level` (web-only; real native has no heading-LEVEL concept, only
+`header` itself) → `<h1>`-`<h6>`, `role="paragraph"` → `<p>`, and so on
+(`react-native-web`'s own `propsToAccessibilityComponent`). `role` covers
+every value in React Native's own typed `Role` union (`button`,
+`heading`, `list`, `listitem`, `navigation`, `main`, `form`, `article`,
+`banner`, `contentinfo`, `complementary`, `region`, ...); `"paragraph"`
+is the one react-native-web additionally supports that isn't in that
+union at all.
+
+This package exports a handful of convenience components that are just
+that prop, pre-set on the right underlying component — nothing beyond
+that, and writing `<Pressable accessibilityRole="button">` directly
+instead of `<Button>` behaves identically:
+
+```tsx
+import { Button, Paragraph, H1, H2, H3, H4, H5, H6 } from '@kbach/react-native';
+
+<Button className="px-4 py-2 rounded bg-blue-6" onPress={...}>Save</Button>
+<H1 className="text-2xl font-bold">Page title</H1>
+<Paragraph className="text-sm text-gray-7">Body copy.</Paragraph>
+```
+
+`className` keeps working on every one of these exactly like it does on
+a bare `Pressable`/`Text`. No `Div` or `Input` here on purpose: a plain
+`<View>` already is the right generic container, and `<TextInput>`
+already renders a real `<input>` (or `<textarea>` when `multiline`) by
+default, with no role needed at all.

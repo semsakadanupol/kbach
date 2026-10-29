@@ -29,9 +29,26 @@ import { defineConfig } from 'tsup';
 // only way to make this NOT depend on Metro consistently picking one
 // condition across every subpath (which turned out to be false) is to not
 // offer a second format to inconsistently pick between. Web entries are
-// unaffected (kept as ESM+CJS, both formats) since dark: resolves to real
-// CSS + a DOM attribute write there, not JS-side singleton state — see
-// darkModeStore.ts's own `applyToDom` doc comment.
+// kept as ESM+CJS (both formats) specifically for darkModeStore.ts's own
+// state — dark: resolves to real CSS + a DOM attribute write there (see
+// its own `applyToDom` doc comment), so a SECOND independent copy of
+// `mode`/`isDark` across the two formats is harmless: whichever copy last
+// wrote to the DOM is what every reader (any format, any instance) sees,
+// since there's only one real DOM.
+//
+// That reasoning does NOT extend to theme.ts's own state (`activeTheme`/
+// `activeThemeJson`, now a `globalThis`-backed slot — see its own
+// extended doc comment) — confirmed as a REAL bug, not a hypothetical: on
+// Expo Web, the babel plugin's injected
+// `require('@kbach/react-native').applyKbachConfig(...)` (always
+// resolving through the CJS `require` condition) wrote a
+// `kbach.config.js`'s custom colors into one instance's `activeTheme`,
+// while every component's own `useColors()` — reached through a normal
+// `import`, the ESM condition — read the OTHER, untouched instance, so
+// every custom color silently stayed unresolved. theme.ts's own fix
+// (routing through `globalThis` instead of a plain module-scope `let`) is
+// what actually closes that gap; this file's dual-format web build didn't
+// need to change at all.
 const nativeEntries = {
   index: 'src/index.ts',
   'jsx-runtime': 'src/jsx-runtime.tsx',

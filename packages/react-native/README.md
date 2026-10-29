@@ -145,6 +145,22 @@ colors.blue['6/50'];   // same at 50% opacity
 colors.get('brand');   // a custom color, typed as plain `string`
 ```
 
+## Semantic HTML on web
+
+On Expo Web, `<View>`/`<Text>` render as a plain `<div>`/`<span>` by
+default (`react-native-web`'s own choice, not this package's). For a real
+`<button>`/`<h1>`-`<h6>`/`<p>` instead, use these — each is just the
+right underlying component with its semantic role pre-set, so `className`
+keeps working exactly like it does on a bare `Pressable`/`Text`:
+
+```tsx
+import { Button, H1, Paragraph } from '@kbach/react-native';
+
+<H1 className="text-2xl font-bold">Page title</H1>
+<Paragraph className="text-sm text-gray-7">Body copy.</Paragraph>
+<Button className="px-4 py-2 rounded bg-blue-6" onPress={...}>Save</Button>
+```
+
 ## What differs on native
 
 React Native has no CSS cascade, so a fixed subset of modifiers is

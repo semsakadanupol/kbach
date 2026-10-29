@@ -3,7 +3,7 @@
   "displayName": "Kbach IntelliSense",
   "description": "className autocomplete, hover previews, and inline typo diagnostics for Kbach — the Rust-powered utility-class styling engine for React and React Native.",
   "version": "0.1.0-beta.1",
-  "publisher": "semsakadanupol",
+  "publisher": "kbach",
   "license": "MIT",
   "repository": {
     "type": "git",

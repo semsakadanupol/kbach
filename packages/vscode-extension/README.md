@@ -11,14 +11,27 @@ real Rust-powered engine, not a hand-maintained copy of its rules.
 
 - **Hover** a class (`p-4`, `bg-blue-6`, `dark:bg-blue-8`, ...) to see its
   resolved CSS value — a real color swatch for color classes.
-- **Inline diagnostics** for an unknown class, right as you type — the
-  same validation the dev-server's own "Unknown class ... Typo?" warning
-  uses, just surfaced at edit time instead of at runtime. Includes a
-  "did you mean" suggestion when a real one-character-typo match exists.
+- **Inline diagnostics** for an unknown class, right as you type, with a
+  one-click "Replace with ..." fix when a real one-character-typo match
+  exists — the same validation the dev-server's own "Unknown class ...
+  Typo?" warning uses, just surfaced at edit time instead of at runtime.
+  On a React Native project specifically, also flags a class that parses
+  fine but applies **zero style there** (`group-*`, `peer-*`, `has-[…]`,
+  container queries, grid, pseudo-elements).
 - **Autocomplete** inside `className="..."`, `kb="..."`, and
   `clsx()`/`cn()`/`kb()` call arguments — modifiers (`dark:`, `hover:`,
-  `sm:`, ...), utilities, and full color-shade completion (with a swatch
-  preview) right after typing a color prefix like `bg-`/`text-`/`border-`.
+  `sm:`, ...), utilities (each with its resolved value shown), and full
+  color-shade completion (with a swatch preview) right after typing a
+  color prefix like `bg-`/`text-`/`border-`.
+- **Color picker** — a native, draggable color wheel for an arbitrary
+  value (`bg-[#ff0000]`). A named palette shade (`bg-blue-6`) shows its
+  color on hover but is deliberately NOT picker-editable — rewriting a
+  curated theme color into a raw literal hex one drag at a time isn't
+  something a wheel should make one click away.
+- **Reads your own `kbach.config.js`** — a project's custom colors (and
+  everything else it extends/replaces) show up correctly everywhere
+  above instead of being flagged as unknown, automatically re-applied
+  the moment you save that file.
 
 ```tsx
 <div className="flex items-center bg-blue-500">  {/* ← flagged: Kbach's shades are 1-12, not Tailwind's 50-950 */}

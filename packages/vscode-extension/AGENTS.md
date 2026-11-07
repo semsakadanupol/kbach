@@ -164,9 +164,15 @@ shade's color is still visible via the HOVER provider's own static
 starting at the picker's original anchor offset on every call, rather
 than trusting VS Code's own `context.range` — necessary, not just
 defensive: VS Code reuses that same range across every tick of a drag,
-and a length-changing edit (which an arbitrary-to-arbitrary edit usually
-isn't, but was confirmed live to matter) silently breaks every edit past
-the first tick otherwise.
+and an arbitrary-to-arbitrary edit can still change the token's length
+(`#fff` -> `#ff0000`, or an alpha < 1 switching to `rgba(...)`), which
+silently breaks every edit past the first tick otherwise (confirmed
+live).
+
+`splitRespectingBrackets` (modifier/base splitting) lives once, in
+`scanTokens.ts`, shared by `colorToken.ts` and `nativeUnsupported.ts`;
+`scripts/generate-vocabulary.mjs` keeps a plain-JS copy only because it
+runs before any TS build — keep the two in sync.
 
 `COLOR_PREFIXES` (`colorPrefixes.ts`) is `divide-color`, not bare
 `divide` — confirmed against the real engine: `divide-x`/`divide-y`/
@@ -206,17 +212,51 @@ every run), this extension's host process stays alive for the whole
 editor session, so a stale cached copy of a since-edited config file
 would otherwise serve its OLD contents forever.
 
+`require()` reloads also evict every project-local file the config
+`require()`d on its previous load (`./tokens.js`, `./colors.json` —
+tracked per root as `configDependencies` in `kbachConfigLoader.ts`), not
+just the config's own cache entry. **Known limit:** an ESM config's
+`import`ed children can't be tracked or evicted (Node's ESM loader has no
+cache eviction, and the `?t=` bust only applies to the top-level file) —
+after editing a helper that an `.mjs`/ESM config imports, reload the
+window. `ERR_REQUIRE_ASYNC_MODULE` (Node 22.12+'s `require(esm)` hitting
+top-level `await`) also counts as "fall back to `import()`" — a
+deliberate divergence from `@kbach/react`'s original, which only checks
+`ERR_REQUIRE_ESM`.
+
+**Default theme is per binding** (`engine.ts`'s `baseThemeForRoot`): a
+root whose `package.json` depends on `@kbach/react` (and NOT
+`@kbach/react-native`, since Expo Web runs on the native defaults) merges
+over `WEB_DEFAULT_THEME`, which adds the `surface` color `@kbach/react`'s
+own `defaultTheme` ships; everything else uses `DEFAULT_THEME` (the
+native binding's set). `defaultTheme.test.ts` reads
+`packages/react/src/theme.ts` directly and fails if the two drift.
+
 Resolved per project root and cached (`engine.ts`'s `themeJsonCache`) —
 real disk I/O and a `require()`/`import()` of a whole file, not
-something to redo on every keystroke. Invalidated automatically when
-that root's `kbach.config.(js|cjs|mjs)` is SAVED (`extension.ts`'s
-`onDidSaveTextDocument` hook), which also clears the completion/color
-parsing caches and re-runs diagnostics on every open document — editing
-the config and saving it updates the editor live, no reload needed. A
-genuine load failure (most likely a syntax error) shows ONE warning
-notification per root per session (not re-spammed every keystroke) and
-falls back to the default theme for that root until the file is saved
-again.
+something to redo on every keystroke. The cache holds the in-flight
+PROMISE, so simultaneous first requests (diagnostics + color provider +
+hover on file open) share one load, and an invalidation that lands while
+a load is pending can't be overwritten by that load's stale result.
+
+Invalidated automatically by `extension.ts`'s `handleFileChanged`, fed
+by BOTH a workspace `FileSystemWatcher` (`**/*.{js,cjs,mjs,json}` —
+catches `git checkout`/`pull`, deletes, edits from other tools) and
+`onDidSaveTextDocument` (for files outside every workspace folder, which
+get no watcher events). It invalidates a root when its `kbach.config.*`
+is created/changed/deleted, when its `package.json` changes (binding
+default, above — this also clears the whole React-Native-project cache,
+§7), or when any file its last CommonJS config load `require()`d
+changes. Then it clears the completion/color parsing caches and re-runs
+diagnostics on every open document — each document has its OWN 300 ms
+debounce timer, so all of them really are re-run (a single shared timer
+used to cancel every document's run but the last). A run whose document
+was closed or edited again while it awaited the theme drops its result
+instead of setting stale diagnostics.
+
+A genuine load failure (most likely a syntax error) shows ONE warning
+notification per root (not re-spammed every keystroke), and that root
+serves its default theme until one of the inputs above changes again.
 
 ## 7. Native-unsupported-on-RN diagnostic
 
@@ -275,7 +315,9 @@ nothing until reload.
   notification appear when the file was first touched (a genuine
   load/syntax error in the config — check its exact message); (3) did
   you SAVE the config after editing it (an in-progress, unsaved edit in
-  another tab isn't picked up, same as any file-based resolution). If
+  another tab isn't picked up, same as any file-based resolution);
+  (4) is the change in a helper that an ESM config `import`s (§6's known
+  limit — reload the window). If
   none of those explain it, verify the merge logic itself end-to-end for
   that exact config shape against `kbachConfigResolve.ts` before
   assuming the extension is broken — the whole pipeline (discovery,

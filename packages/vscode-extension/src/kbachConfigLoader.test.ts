@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfigFile } from './kbachConfigLoader';
+import { loadConfigFile, rootsDependingOn } from './kbachConfigLoader';
 
 describe('loadConfigFile', () => {
   let dir: string;
@@ -49,5 +49,30 @@ describe('loadConfigFile', () => {
     writeFileSync(join(dir, 'kbach.config.js'), "export default { extend: { colors: { brand: '#abc' } } };", 'utf-8');
     const config = await loadConfigFile(dir);
     expect(config?.extend?.colors).toEqual({ brand: '#abc' });
+  });
+
+  it("re-reads a require()d helper on reload — not just the config file's own cache entry", async () => {
+    writeFileSync(join(dir, 'colors.js'), "module.exports = { brand: '#111111' };", 'utf-8');
+    writeFileSync(join(dir, 'kbach.config.js'), "module.exports = { extend: { colors: require('./colors') } };", 'utf-8');
+    expect((await loadConfigFile(dir))?.extend?.colors).toEqual({ brand: '#111111' });
+    writeFileSync(join(dir, 'colors.js'), "module.exports = { brand: '#222222' };", 'utf-8');
+    expect((await loadConfigFile(dir))?.extend?.colors).toEqual({ brand: '#222222' });
+  });
+
+  it("tracks the config's own project-local require()s, so a change to a helper can invalidate that root", async () => {
+    writeFileSync(join(dir, 'colors.js'), "module.exports = { brand: '#111111' };", 'utf-8');
+    writeFileSync(join(dir, 'kbach.config.js'), "module.exports = { extend: { colors: require('./colors') } };", 'utf-8');
+    await loadConfigFile(dir);
+    expect(rootsDependingOn(join(dir, 'colors.js'))).toEqual([dir]);
+    expect(rootsDependingOn(join(dir, 'kbach.config.js'))).toEqual([dir]);
+    expect(rootsDependingOn(join(dir, 'unrelated.js'))).toEqual([]);
+  });
+
+  it('falls back to import() for an ESM kbach.config.js that uses top-level await (ERR_REQUIRE_ASYNC_MODULE on Node 22.12+)', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ type: 'module' }), 'utf-8');
+    writeFileSync(join(dir, 'tokens.js'), "export const brand = '#abcdef';", 'utf-8');
+    writeFileSync(join(dir, 'kbach.config.js'), "const { brand } = await import('./tokens.js');\nexport default { extend: { colors: { brand } } };", 'utf-8');
+    const config = await loadConfigFile(dir);
+    expect(config?.extend?.colors).toEqual({ brand: '#abcdef' });
   });
 });

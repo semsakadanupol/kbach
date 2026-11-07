@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { MODIFIERS, BASE_UTILITIES } from './generatedVocabulary';
-import { isKnownToken, describeToken, resolveThemeJsonForDir, invalidateThemeJsonForRoot, setThemeJsonForRoot, DEFAULT_THEME_JSON } from './engine';
+import { isKnownToken, describeToken, resolveThemeJsonForDir, invalidateThemeJsonForRoot, DEFAULT_THEME_JSON } from './engine';
+import { rootsDependingOn } from './kbachConfigLoader';
 import { scanClassTokens } from './scanTokens';
 import { isInsideClassNameContext } from './completionContext';
 import { suggestCorrection } from './suggestCorrection';
@@ -59,9 +60,9 @@ function colorEntryHex(entry: ColorEntry): string {
 
 // Warned-about roots — so a broken kbach.config.js gets exactly ONE
 // warning per session, not one on every debounced diagnostics pass,
-// hover, and completion request until it's fixed. Cleared on the next
-// save of that root's config file (see activate()'s onDidSaveTextDocument
-// hook), so a renewed failure after an attempted fix warns again.
+// hover, and completion request until it's fixed. Cleared whenever that
+// root's theme is invalidated (`handleFileChanged` below), so a renewed
+// failure after an attempted fix warns again.
 const warnedConfigRoots = new Set<string>();
 
 /**
@@ -71,9 +72,9 @@ const warnedConfigRoots = new Set<string>();
  * otherwise. A load/evaluate failure (a real syntax error in the config
  * file, most likely) is caught HERE rather than in engine.ts, which has
  * no access to `vscode.window` to actually surface it — shown once per
- * root via a warning notification, and the failure result is cached
- * (`setThemeJsonForRoot`) so a broken config doesn't get re-attempted on
- * every keystroke until the file is saved again.
+ * root via a warning notification. engine.ts itself caches the default
+ * theme as that root's fallback after a failure, so a broken config isn't
+ * re-attempted on every keystroke until it (or a file it loads) changes.
  */
 async function resolveEffectiveThemeJson(document: vscode.TextDocument): Promise<string> {
   if (document.uri.scheme !== 'file') return DEFAULT_THEME_JSON;
@@ -82,13 +83,10 @@ async function resolveEffectiveThemeJson(document: vscode.TextDocument): Promise
     return await resolveThemeJsonForDir(startDir);
   } catch (err) {
     const root = findProjectRoot(startDir);
-    if (root) {
-      setThemeJsonForRoot(root, DEFAULT_THEME_JSON);
-      if (!warnedConfigRoots.has(root)) {
-        warnedConfigRoots.add(root);
-        const message = err instanceof Error ? err.message : String(err);
-        void vscode.window.showWarningMessage(`Kbach: couldn't load kbach.config.js — using the default theme instead. (${message})`);
-      }
+    if (root && !warnedConfigRoots.has(root)) {
+      warnedConfigRoots.add(root);
+      const message = err instanceof Error ? err.message : String(err);
+      void vscode.window.showWarningMessage(`Kbach: couldn't load kbach.config.js — using the default theme instead. (${message})`);
     }
     return DEFAULT_THEME_JSON;
   }
@@ -216,24 +214,19 @@ class KbachColorProvider implements vscode.DocumentColorProvider {
     // NOT `context.document.getText(context.range)` — this runs on every
     // tick while the user drags the wheel, and VS Code keeps re-using the
     // SAME `range` object from the picker's original `ColorInformation`
-    // for every call in that session. A named-shade token (`bg-blue-6`)
-    // rewrites to a DIFFERENT-LENGTH arbitrary-value token
-    // (`bg-[#ff0000]`), so the moment the first edit lands, that original
-    // range no longer covers the (now-longer/shorter) token — every
-    // later tick in the same drag reads a stale, wrong substring, fails
-    // to parse as a color-utility token, and silently returns `[]` from
-    // here on: the picker "does nothing" past the very first tick. An
-    // arbitrary-to-arbitrary edit (same hex length) happened to dodge
-    // this by accident, which is why only named shades looked broken.
-    // Re-scanning the CURRENT document for the token that starts at the
-    // same offset the picker originally opened on — rather than trusting
-    // `context.range` to still be accurate — sidesteps that: it finds the
-    // token's real, current boundaries every single tick, however much
-    // its length has changed since the last one. The explicit `textEdit`
-    // below (rather than the default label-over-`context.range`
-    // insertion `ColorPresentation`'s own doc comment describes) is what
-    // actually targets THIS freshly-computed range instead of the stale
-    // one VS Code would otherwise use.
+    // for every call in that session. The replacement token's length can
+    // differ from the original's (`bg-[#fff]` -> `bg-[#ff0000]`, or any
+    // alpha < 1 switching to an `rgba(...)` form — see
+    // `buildColorReplacement`), so the moment such an edit lands, that
+    // original range no longer covers the token — every later tick in the
+    // same drag would read a stale, wrong substring, fail to parse as a
+    // color-utility token, and silently return `[]`: the picker "does
+    // nothing" past the very first tick (confirmed live). Re-scanning the
+    // CURRENT document for the token that starts at the same offset the
+    // picker originally opened on finds the token's real, current
+    // boundaries every tick. The explicit `textEdit` below (rather than
+    // the default label-over-`context.range` insertion) is what actually
+    // targets THIS freshly-computed range instead of the stale one.
     const anchorOffset = context.document.offsetAt(context.range.start);
     const liveMatch = scanClassTokens(context.document.getText()).find((m) => m.start === anchorOffset);
     const token = liveMatch ? liveMatch.token : context.document.getText(context.range);
@@ -294,6 +287,7 @@ function isReactNativeWorkspace(document: vscode.TextDocument): boolean {
 
 async function runDiagnostics(document: vscode.TextDocument, collection: vscode.DiagnosticCollection): Promise<void> {
   if (!LANGUAGES.includes(document.languageId)) return;
+  const versionAtStart = document.version;
   const diagnostics: vscode.Diagnostic[] = [];
   const checkNativeSupport = isReactNativeWorkspace(document);
   const themeJson = await resolveEffectiveThemeJson(document);
@@ -337,12 +331,52 @@ async function runDiagnostics(document: vscode.TextDocument, collection: vscode.
       }
     }
   }
+  // The theme await above can outlive the document: a tab closed while a
+  // config import was still pending had its diagnostics deleted by
+  // onDidCloseTextDocument FIRST, and setting them here would resurrect
+  // stale warnings for a closed file that nothing ever clears. A newer
+  // edit (version bump) already has its own run scheduled.
+  if (document.isClosed || document.version !== versionAtStart) return;
   collection.set(document.uri, diagnostics);
 }
 
-function isKbachConfigFile(uri: vscode.Uri): boolean {
-  const base = path.basename(uri.fsPath);
-  return base === 'kbach.config.js' || base === 'kbach.config.cjs' || base === 'kbach.config.mjs';
+const KBACH_CONFIG_BASENAMES = new Set(['kbach.config.js', 'kbach.config.cjs', 'kbach.config.mjs']);
+
+/**
+ * One handler for every way a file that feeds a theme can change — a save
+ * inside VS Code AND a file-system event (`git checkout`/`pull`, another
+ * tool's edit, a delete, a newly created config), which the save hook
+ * alone never saw. Invalidates the theme of every root affected:
+ * - a `kbach.config.*` itself (created, edited, or deleted) -> its dir;
+ * - a `package.json` -> its dir (which binding's default theme applies,
+ *   engine.ts's `baseThemeForRoot`), plus the whole React-Native-project
+ *   cache (adding/removing `react-native`/`expo`, or a new package.json
+ *   moving which root a file walks up to);
+ * - any file a root's last-loaded CommonJS config `require()`d
+ *   (`rootsDependingOn`, kbachConfigLoader.ts) -> that root.
+ * Returns whether anything was invalidated.
+ */
+function handleFileChanged(uri: vscode.Uri): boolean {
+  if (uri.scheme !== 'file') return false;
+  const fsPath = uri.fsPath;
+  if (fsPath.split(/[\\/]/).includes('node_modules')) return false;
+  const base = path.basename(fsPath);
+  const roots = new Set(rootsDependingOn(fsPath));
+  if (KBACH_CONFIG_BASENAMES.has(base)) roots.add(path.dirname(fsPath));
+  if (base === 'package.json') {
+    roots.add(path.dirname(fsPath));
+    reactNativeProjectCache.clear();
+  }
+  if (roots.size === 0) return false;
+  for (const root of roots) {
+    invalidateThemeJsonForRoot(root);
+    warnedConfigRoots.delete(root);
+  }
+  // Both keyed by theme-JSON content, so never WRONG after a change —
+  // cleared only so superseded themes' entries don't pile up.
+  staticCompletionItemsCache.clear();
+  parsedColorsCache.clear();
+  return true;
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -358,32 +392,56 @@ export function activate(context: vscode.ExtensionContext): void {
   const diagnosticCollection = vscode.languages.createDiagnosticCollection('kbach');
   context.subscriptions.push(diagnosticCollection);
 
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  // One debounce timer PER DOCUMENT — a single shared timer meant every
+  // call cancelled the previous document's pending run, so "re-diagnose
+  // every open document" (activation, a config change, several tabs
+  // restored at once) actually re-diagnosed only the LAST one.
+  const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const scheduleDiagnostics = (document: vscode.TextDocument) => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => runDiagnostics(document, diagnosticCollection), 300);
+    const key = document.uri.toString();
+    const existing = debounceTimers.get(key);
+    if (existing) clearTimeout(existing);
+    debounceTimers.set(
+      key,
+      setTimeout(() => {
+        debounceTimers.delete(key);
+        void runDiagnostics(document, diagnosticCollection);
+      }, 300),
+    );
+  };
+  const rediagnoseAll = () => {
+    for (const doc of vscode.workspace.textDocuments) scheduleDiagnostics(doc);
+  };
+  const onThemeInputChanged = (uri: vscode.Uri) => {
+    if (handleFileChanged(uri)) rediagnoseAll();
   };
 
-  for (const doc of vscode.workspace.textDocuments) scheduleDiagnostics(doc);
+  rediagnoseAll();
 
+  // Every JS-ish/JSON file, not just kbach.config.*: a config's own
+  // require()d helper (`./tokens.js`) is just as much an input to its
+  // theme. handleFileChanged filters to the few that actually matter.
+  const watcher = vscode.workspace.createFileSystemWatcher('**/*.{js,cjs,mjs,json}');
   context.subscriptions.push(
+    watcher,
+    watcher.onDidCreate(onThemeInputChanged),
+    watcher.onDidChange(onThemeInputChanged),
+    watcher.onDidDelete(onThemeInputChanged),
     vscode.workspace.onDidOpenTextDocument(scheduleDiagnostics),
     vscode.workspace.onDidChangeTextDocument((e) => scheduleDiagnostics(e.document)),
-    vscode.workspace.onDidCloseTextDocument((doc) => diagnosticCollection.delete(doc.uri)),
-    // A saved kbach.config.(js|cjs|mjs) makes that project's cached theme
-    // (engine.ts's own cache, plus this file's completion/color caches,
-    // all keyed off it) stale — without this, an edit to the config would
-    // silently keep being ignored for the rest of the editor session,
-    // since nothing else ever re-reads the file once cached.
-    vscode.workspace.onDidSaveTextDocument((doc) => {
-      if (doc.uri.scheme !== 'file' || !isKbachConfigFile(doc.uri)) return;
-      const root = path.dirname(doc.uri.fsPath);
-      invalidateThemeJsonForRoot(root);
-      warnedConfigRoots.delete(root);
-      staticCompletionItemsCache.clear();
-      parsedColorsCache.clear();
-      for (const openDoc of vscode.workspace.textDocuments) scheduleDiagnostics(openDoc);
+    vscode.workspace.onDidCloseTextDocument((doc) => {
+      const key = doc.uri.toString();
+      const pending = debounceTimers.get(key);
+      if (pending) clearTimeout(pending);
+      debounceTimers.delete(key);
+      diagnosticCollection.delete(doc.uri);
     }),
+    // Kept alongside the watcher: a file OUTSIDE every workspace folder
+    // (opened on its own) gets no watcher events at all, but still saves.
+    // A save inside a folder fires both — harmless, invalidation is
+    // idempotent and each document's diagnostics debounce collapses the
+    // duplicate schedule into one run.
+    vscode.workspace.onDidSaveTextDocument((doc) => onThemeInputChanged(doc.uri)),
   );
 }
 

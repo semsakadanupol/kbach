@@ -31,14 +31,12 @@ export interface EngineTheme {
  * `extend.spacing` needs to override a specific step away from that
  * formula (kbachConfigResolve.ts's whole job).
  *
- * NOT `@kbach/react`'s own `defaultTheme` — that one additionally bakes
- * in a JS-side-only `surface: { light, dark }` color entry that
- * `@kbach/react-native`'s `defaultTheme` does NOT have (confirmed by
- * reading both packages' theme.ts directly) — a real, undocumented
- * divergence between the two bindings' defaults, not something safe to
- * silently pick a side on here. This extension is binding-agnostic, so it
- * intentionally matches neither binding's divergent extra and only ever
- * reflects what a project's OWN `kbach.config.js` actually declares.
+ * This is the BINDING-AGNOSTIC default — what `@kbach/react-native`'s
+ * own `defaultTheme` ships, and what a project that doesn't depend on
+ * either binding gets. A `@kbach/react` project resolves against
+ * `WEB_DEFAULT_THEME` below instead (engine.ts's `baseThemeForRoot`
+ * picks per project root), since that binding's defaults add one extra
+ * color the native one doesn't have.
  */
 export const DEFAULT_THEME: EngineTheme = {
   colors: PALETTE,
@@ -47,4 +45,18 @@ export const DEFAULT_THEME: EngineTheme = {
   fontFamily: {},
   darkMode: 'media',
   container: {},
+};
+
+/**
+ * `@kbach/react`'s own default theme, as far as the engine can tell the
+ * difference: `DEFAULT_THEME` plus the one JS-side-only extra color that
+ * binding's `defaultTheme` bakes in (packages/react/src/theme.ts) —
+ * `surface`, a mode-aware pair. Without it, `bg-surface` (valid at
+ * runtime in every `@kbach/react` project) was flagged as an unknown
+ * class. `defaultTheme.test.ts` reads that file directly to catch the two
+ * drifting apart.
+ */
+export const WEB_DEFAULT_THEME: EngineTheme = {
+  ...DEFAULT_THEME,
+  colors: { ...PALETTE, surface: { light: '#f9fafb', dark: '#111827' } },
 };

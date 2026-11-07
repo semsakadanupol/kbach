@@ -1,24 +1,6 @@
 import { COLOR_PREFIXES } from './colorPrefixes';
 import { formatColor, type RgbaColor } from './colorValue';
-
-/** Splits on ':' outside `[...]` brackets — same rule every real splitter in this codebase uses (see generate-vocabulary.mjs's own copy of this). */
-function splitRespectingBrackets(token: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let current = '';
-  for (const ch of token) {
-    if (ch === '[') depth++;
-    else if (ch === ']') depth = Math.max(0, depth - 1);
-    if (ch === ':' && depth === 0) {
-      parts.push(current);
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  parts.push(current);
-  return parts;
-}
+import { splitRespectingBrackets } from './scanTokens';
 
 /**
  * True when `token`'s base is an ARBITRARY bracket color value
@@ -43,17 +25,19 @@ export function isArbitraryColorToken(token: string): boolean {
 
 /**
  * Builds the replacement token for when a color is picked from VS Code's
- * native color picker on an EXISTING named color class (`bg-blue-6`) —
- * there's no 1:1 "literal value" to overwrite in place, since the class
- * names a palette entry, not a color itself, so this instead rewrites it
- * to the equivalent arbitrary-value class for the picked color
- * (`bg-[#ff0000]`), preserving every modifier prefix (`dark:`, `sm:`, ...)
- * and the original color-utility name (`bg`/`text`/`border`/...)
- * unchanged. Returns null if `token`'s base doesn't start with one of
- * `COLOR_PREFIXES` — shouldn't happen in practice, since the color
- * provider only ever offers this for a token it already resolved to a
- * color value in the first place, but a safe `null` is better than
- * guessing at an edit that might not make sense.
+ * native color picker on an arbitrary-value color class — the only kind
+ * the color provider ever offers the picker for (`isArbitraryColorToken`
+ * above): `bg-[#fff]` + a picked red -> `bg-[#ff0000]`, preserving every
+ * modifier prefix (`dark:`, `sm:`, ...) and the original color-utility
+ * name (`bg`/`text`/`border`/...) unchanged. Note the replacement's
+ * LENGTH can differ from the original's (`#fff` -> `#ff0000`, or any
+ * picked alpha < 1 switching to an `rgba(...)` form) — see
+ * `provideColorPresentations`' own comment in extension.ts for why that
+ * matters. Returns null if `token`'s base doesn't start with one of
+ * `COLOR_PREFIXES` — shouldn't happen in practice, since the provider
+ * only ever offers this for a token it already resolved to a color, but a
+ * safe `null` is better than guessing at an edit that might not make
+ * sense.
  */
 export function buildColorReplacement(token: string, color: RgbaColor): string | null {
   const segments = splitRespectingBrackets(token);

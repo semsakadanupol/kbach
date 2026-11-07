@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isKnownToken, describeToken, resolveThemeJsonForDir, invalidateThemeJsonForRoot, setThemeJsonForRoot } from './engine';
+import { isKnownToken, describeToken, resolveThemeJsonForDir, invalidateThemeJsonForRoot } from './engine';
 
 describe('isKnownToken', () => {
   it('is true for a real static utility', () => {
@@ -98,11 +98,61 @@ describe('resolveThemeJsonForDir', () => {
     expect(isKnownToken('bg-brand2', refreshed)).toBe(true);
   });
 
-  it('setThemeJsonForRoot forces a cached value directly (used to cache a fallback after a load failure)', async () => {
+  it('a failed load rejects for its caller, then serves the default theme until invalidated (no re-attempt per keystroke)', async () => {
     writeFileSync(join(dir, 'package.json'), '{}', 'utf-8');
-    setThemeJsonForRoot(dir, JSON.stringify({ colors: { onlythis: '#fff' }, spacing: {}, screens: {}, fontFamily: {}, darkMode: 'media', container: {} }));
+    writeFileSync(join(dir, 'kbach.config.js'), 'module.exports = { extend: { colors: { brand: ', 'utf-8');
+    await expect(resolveThemeJsonForDir(dir)).rejects.toThrow();
+    // let the cache swap its rejected entry for the fallback
+    await new Promise((r) => setTimeout(r, 0));
+    writeFileSync(join(dir, 'kbach.config.js'), "module.exports = { extend: { colors: { brand: '#ff6b35' } } };", 'utf-8');
+    const fallback = await resolveThemeJsonForDir(dir);
+    expect(isKnownToken('bg-blue-6', fallback)).toBe(true);
+    expect(isKnownToken('bg-brand', fallback)).toBe(false);
+
+    invalidateThemeJsonForRoot(dir);
+    expect(isKnownToken('bg-brand', await resolveThemeJsonForDir(dir))).toBe(true);
+  });
+
+  it('concurrent first requests share ONE load (the in-flight promise is cached, not just the result)', async () => {
+    writeFileSync(join(dir, 'package.json'), '{}', 'utf-8');
+    writeFileSync(join(dir, 'kbach.config.js'), "module.exports = { extend: { colors: { brand: '#ff6b35' } } };", 'utf-8');
+    const a = resolveThemeJsonForDir(dir);
+    const b = resolveThemeJsonForDir(dir);
+    expect(b).toBe(a);
+    await a;
+  });
+
+  it('a load still in flight when the root is invalidated never writes its stale result back into the cache', async () => {
+    writeFileSync(join(dir, 'package.json'), '{}', 'utf-8');
+    writeFileSync(join(dir, 'kbach.config.mjs'), "export default { extend: { colors: { brand: '#ff6b35' } } };", 'utf-8');
+    const stale = resolveThemeJsonForDir(dir);
+    // the "save" lands while the first (async import()) load is still pending
+    writeFileSync(join(dir, 'kbach.config.mjs'), "export default { extend: { colors: { brand2: '#000000' } } };", 'utf-8');
+    invalidateThemeJsonForRoot(dir);
+    await stale;
+    const fresh = await resolveThemeJsonForDir(dir);
+    expect(isKnownToken('bg-brand2', fresh)).toBe(true);
+    expect(isKnownToken('bg-brand', fresh)).toBe(false);
+  });
+
+  it("a @kbach/react project gets that binding's default surface color; a native or binding-less one doesn't", async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { '@kbach/react': '1.0.0' } }), 'utf-8');
+    expect(isKnownToken('bg-surface', await resolveThemeJsonForDir(dir))).toBe(true);
+
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { '@kbach/react-native': '1.0.0', '@kbach/react': '1.0.0' } }), 'utf-8');
+    invalidateThemeJsonForRoot(dir);
+    expect(isKnownToken('bg-surface', await resolveThemeJsonForDir(dir))).toBe(false);
+
+    writeFileSync(join(dir, 'package.json'), '{}', 'utf-8');
+    invalidateThemeJsonForRoot(dir);
+    expect(isKnownToken('bg-surface', await resolveThemeJsonForDir(dir))).toBe(false);
+  });
+
+  it("a @kbach/react project's kbach.config.js merges over the WEB default (surface survives extend)", async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ devDependencies: { '@kbach/react': '1.0.0' } }), 'utf-8');
+    writeFileSync(join(dir, 'kbach.config.js'), "module.exports = { extend: { colors: { brand: '#ff6b35' } } };", 'utf-8');
     const themeJson = await resolveThemeJsonForDir(dir);
-    expect(isKnownToken('bg-onlythis', themeJson)).toBe(true);
-    expect(isKnownToken('bg-blue-6', themeJson)).toBe(false);
+    expect(isKnownToken('bg-surface', themeJson)).toBe(true);
+    expect(isKnownToken('bg-brand', themeJson)).toBe(true);
   });
 });

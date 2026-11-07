@@ -82,3 +82,31 @@ export function scanClassTokens(code: string): TokenMatch[] {
 
   return found;
 }
+
+/**
+ * Splits a single class token on ':' outside `[...]` brackets — modifier
+ * segments first, the base utility last (`dark:bg-[url(a:b)]` ->
+ * `['dark', 'bg-[url(a:b)]']`). The ONE copy every TypeScript caller in
+ * this package uses (`colorToken.ts`, `nativeUnsupported.ts`), so the
+ * color decorator and the native-unsupported diagnostic can never split
+ * the same token two different ways. `scripts/generate-vocabulary.mjs`
+ * keeps its own plain-JS copy only because it runs as a standalone Node
+ * script, before any TypeScript build — keep it in sync with this one.
+ */
+export function splitRespectingBrackets(token: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of token) {
+    if (ch === '[') depth++;
+    else if (ch === ']') depth = Math.max(0, depth - 1);
+    if (ch === ':' && depth === 0) {
+      parts.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+  return parts;
+}

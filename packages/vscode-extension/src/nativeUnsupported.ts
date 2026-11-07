@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { findProjectRoot } from './projectRoot';
+import { splitRespectingBrackets } from './scanTokens';
 
 /**
  * Same signal `@kbach/cli`'s own `detect.ts` already uses to tell Expo/
@@ -26,28 +27,6 @@ export function isReactNativeProject(startDir: string): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * Splits on ':' outside `[...]` brackets — same rule every real splitter
- * in this codebase uses.
- */
-function splitRespectingBrackets(token: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let current = '';
-  for (const ch of token) {
-    if (ch === '[') depth++;
-    else if (ch === ']') depth = Math.max(0, depth - 1);
-    if (ch === ':' && depth === 0) {
-      parts.push(current);
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  parts.push(current);
-  return parts;
 }
 
 const UNSUPPORTED_MODIFIER_RE = /^(group(-|$|\/)|peer(-|$|\/)|has-\[|@)/;

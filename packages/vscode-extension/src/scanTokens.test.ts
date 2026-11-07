@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scanClassTokens } from './scanTokens';
+import { scanClassTokens, splitRespectingBrackets } from './scanTokens';
 
 function tokenAt(code: string, match: { start: number; end: number }): string {
   return code.slice(match.start, match.end);
@@ -60,5 +60,13 @@ describe('scanClassTokens', () => {
     for (const m of matches) {
       expect(tokenAt(code, m)).toBe(m.token);
     }
+  });
+});
+
+describe('splitRespectingBrackets', () => {
+  it('splits modifiers from the base on top-level colons only', () => {
+    expect(splitRespectingBrackets('dark:hover:bg-blue-6')).toEqual(['dark', 'hover', 'bg-blue-6']);
+    expect(splitRespectingBrackets('sm:bg-[url(a:b)]')).toEqual(['sm', 'bg-[url(a:b)]']);
+    expect(splitRespectingBrackets('flex')).toEqual(['flex']);
   });
 });

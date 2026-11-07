@@ -1,6 +1,6 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_THEME } from './defaultTheme';
+import { DEFAULT_THEME, WEB_DEFAULT_THEME, type EngineTheme } from './defaultTheme';
 import { findProjectRoot } from './projectRoot';
 import { loadConfigFile } from './kbachConfigLoader';
 import { resolveKbachConfig } from './kbachConfigResolve';
@@ -43,6 +43,7 @@ const { generate_css } = require(existsSync(vendoredPath) ? vendoredPath : '@kba
 };
 
 export const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
+const WEB_DEFAULT_THEME_JSON = JSON.stringify(WEB_DEFAULT_THEME);
 
 interface GenerateCssResult {
   className: string;
@@ -50,50 +51,85 @@ interface GenerateCssResult {
 }
 
 /**
- * Per-project-root resolved theme JSON cache (see `resolveThemeJsonForDir`
+ * Which binding's default theme a project root resolves against when its
+ * `kbach.config.*` doesn't replace `theme.colors` — `WEB_DEFAULT_THEME`
+ * (adds `@kbach/react`'s extra `surface` color) for a project that
+ * depends on `@kbach/react` and NOT `@kbach/react-native` (an Expo Web
+ * app runs on the native binding's defaults even in a browser);
+ * `DEFAULT_THEME` for everything else, including no readable package.json.
+ */
+function baseThemeForRoot(root: string): { theme: EngineTheme; json: string } {
+  try {
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.peerDependencies };
+    if (deps['@kbach/react'] && !deps['@kbach/react-native']) return { theme: WEB_DEFAULT_THEME, json: WEB_DEFAULT_THEME_JSON };
+  } catch {
+    // unreadable/malformed package.json — the binding-agnostic default is the safe answer
+  }
+  return { theme: DEFAULT_THEME, json: DEFAULT_THEME_JSON };
+}
+
+/**
+ * Per-project-root resolved theme cache (see `resolveThemeJsonForDir`
  * below) — `loadConfigFile` + `resolveKbachConfig` do real disk I/O and a
  * `require()`/`import()` of a whole JS file; not something to redo on
- * every hover/completion/diagnostics pass. `undefined` would collide with
- * "not yet looked up" if stored directly, so absence from the map IS "not
- * yet looked up" and every lookup (including the no-config case) always
- * stores a real string.
+ * every hover/completion/diagnostics pass.
+ *
+ * Holds the PROMISE, not the finished string, deliberately:
+ * - Opening a file fires diagnostics, the color provider and often hover
+ *   at once — all three missing a string-only cache simultaneously would
+ *   each load the config separately (and, for an ESM config, each leave
+ *   another `?t=`-busted module instance in memory for the session).
+ * - `invalidateThemeJsonForRoot` just drops the map entry. A load that
+ *   was still in flight when the file was saved resolves only for the
+ *   callers already awaiting it — it can never write its now-stale result
+ *   back into the cache after the invalidation, which a "set the string
+ *   when done" cache would.
  */
-const themeJsonCache = new Map<string, string>();
+const themeJsonCache = new Map<string, Promise<string>>();
 
-/** Drops a cached theme for `root` — called when that project's `kbach.config.*` is saved, so the next resolution re-reads it instead of serving a stale cached value indefinitely. */
+/** Drops a cached theme for `root` — called when that project's `kbach.config.*` (or a file it loads, or its package.json) changes, so the next resolution re-reads it instead of serving a stale cached value indefinitely. */
 export function invalidateThemeJsonForRoot(root: string): void {
   themeJsonCache.delete(root);
 }
 
-/** Forces `root`'s cached theme to `json` directly — used to cache a fallback (the default theme) after a `kbach.config.js` load failure, so a broken config doesn't get re-attempted (and re-warned about) on every single keystroke until the next save. */
-export function setThemeJsonForRoot(root: string, json: string): void {
-  themeJsonCache.set(root, json);
+async function loadThemeJson(root: string): Promise<string> {
+  const base = baseThemeForRoot(root);
+  const config = await loadConfigFile(root);
+  return config ? JSON.stringify(resolveKbachConfig(config, base.theme)) : base.json;
 }
 
 /**
  * Resolves the effective theme JSON for a document living under
  * `startDir` — `DEFAULT_THEME_JSON` if `startDir` isn't inside a
- * recognizable project (no ancestor `package.json`) or that project has
- * no `kbach.config.*` of its own; otherwise the real `kbach.config.*`
- * merged over `DEFAULT_THEME` via the same algorithm `@kbach/react`'s own
- * `resolveKbachConfig` uses (see kbachConfigResolve.ts's top comment).
- * Cached per project root — see `themeJsonCache`'s own comment.
+ * recognizable project (no ancestor `package.json`); that project's
+ * binding default (`baseThemeForRoot`) if it has no `kbach.config.*` of
+ * its own; otherwise the real `kbach.config.*` merged over that default
+ * via the same algorithm `@kbach/react`'s own `resolveKbachConfig` uses
+ * (see kbachConfigResolve.ts's top comment). Cached per project root —
+ * see `themeJsonCache`'s own comment.
  *
- * Can reject (a genuine error loading/evaluating the config file, e.g. a
+ * Rejects on a genuine error loading/evaluating the config file (e.g. a
  * syntax error) — deliberately NOT swallowed here, so the caller (which
  * has access to `vscode.window` to actually surface it) decides how to
- * degrade, rather than this module silently guessing.
+ * tell the user. Only the caller(s) awaiting THAT load see the rejection:
+ * the cache entry is swapped for the root's default theme, so a broken
+ * config isn't re-attempted (and re-reported) on every keystroke until
+ * the next invalidation.
  */
-export async function resolveThemeJsonForDir(startDir: string): Promise<string> {
+export function resolveThemeJsonForDir(startDir: string): Promise<string> {
   const root = findProjectRoot(startDir);
-  if (!root) return DEFAULT_THEME_JSON;
+  if (!root) return Promise.resolve(DEFAULT_THEME_JSON);
   const cached = themeJsonCache.get(root);
   if (cached !== undefined) return cached;
 
-  const config = await loadConfigFile(root);
-  const themeJson = config ? JSON.stringify(resolveKbachConfig(config, DEFAULT_THEME)) : DEFAULT_THEME_JSON;
-  themeJsonCache.set(root, themeJson);
-  return themeJson;
+  const pending = loadThemeJson(root);
+  themeJsonCache.set(root, pending);
+  pending.catch(() => {
+    // Only if nothing invalidated (and re-started) this root in the meantime.
+    if (themeJsonCache.get(root) === pending) themeJsonCache.set(root, Promise.resolve(baseThemeForRoot(root).json));
+  });
+  return pending;
 }
 
 /**

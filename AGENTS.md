@@ -107,23 +107,31 @@ behavior, failure modes — in
 ## 5. `kbach-vscode` (editor extension)
 
 VS Code `className` completion, hover (resolved CSS value + a color
-swatch), and inline typo diagnostics — all validated against the real
+swatch), inline diagnostics (unknown class with a one-click typo
+quick-fix, plus a React-Native-only "parses but applies no style here"
+warning for `group-*`/`peer-*`/grid/pseudo-elements/etc.), and a native
+color picker for arbitrary color values — all validated against the real
 engine (via its Node-target WASM build, vendored into the extension's
 own `dist/` rather than depended on live — see that package's own
 AGENTS.md §1 for a real, confirmed gotcha around that), not a second
-hand-maintained copy of its rules. Autocomplete's general utility list is
-a seed scraped from the Rust engine's own test fixtures, not an
-exhaustive enumeration — a known, documented limit, not an oversight.
-Full detail in
+hand-maintained copy of its rules. It reads each project's own
+`kbach.config.js` (§6) through a PORT of `@kbach/react`'s loader + merge
+algorithm, so a change to §6's semantics has to be mirrored in
+`packages/vscode-extension/src/kbachConfigResolve.ts` /
+`kbachConfigLoader.ts` too. Autocomplete's utility list is scraped
+fixture tokens plus an engine-verified generated spacing-scale set — not
+an exhaustive enumeration, a known, documented limit. Full detail in
 [`packages/vscode-extension/AGENTS.md`](packages/vscode-extension/AGENTS.md).
 
 ---
 
-## 6. `kbach.config.js` (shared by both bindings)
+## 6. `kbach.config.js` (shared by both bindings, and read by `kbach-vscode`)
 
 A plain JS module exporting a `KbachConfig`. On web the plugin
 auto-discovers it at the project root; on native the babel plugin
-auto-applies it. Same shape either way.
+auto-applies it. Same shape either way. `kbach-vscode` (§5) also loads it
+(from the nearest `package.json` directory above the edited file) so
+editor diagnostics/completion know about custom colors and values.
 
 ```js
 module.exports = {

@@ -26,7 +26,7 @@ The script loads the Rust/WASM engine (about 7 KB of JS plus 158 KB of
 WASM, gzipped), styles every `class` already on the page, and keeps
 watching: elements added later and `class` changes are styled
 automatically. Pin a version in production
-(`https://cdn.jsdelivr.net/npm/@kbach/browser@1.0.0-beta.0`).
+(`https://cdn.jsdelivr.net/npm/@kbach/browser@1.0.0-beta.1`).
 `https://unpkg.com/@kbach/browser` works too.
 
 ## Config

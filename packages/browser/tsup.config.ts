@@ -1,4 +1,7 @@
+import { readFileSync } from 'fs';
 import { defineConfig } from 'tsup';
+
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8')) as { version: string };
 
 /**
  * ONE self-contained classic-script file, `dist/kbach.js`, for
@@ -27,4 +30,7 @@ export default defineConfig({
   clean: true,
   noExternal: [/.*/],
   outExtension: () => ({ js: '.js' }),
+  // src/wasmUrl.ts pins a CDN package-root URL's .wasm to THIS exact
+  // version, so the binary always matches the glue bundled here.
+  define: { __KBACH_BROWSER_VERSION__: JSON.stringify(version) },
 });

@@ -1,6 +1,6 @@
 {
   "name": "@kbach/browser",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.2",
   "description": "Kbach from a CDN: one <script> tag styles a plain HTML page with Kbach's utility classes. No build step, no bundler, no React.",
   "keywords": [
     "css",

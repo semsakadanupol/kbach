@@ -68,6 +68,14 @@ pub(super) fn color_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<S
     let hex = lookup_hex(theme, name)?;
     Some(match (opacity, hex.strip_prefix('#').and_then(hex_to_rgb)) {
         (Some(pct), Some((r, g, b))) => format!("rgba({r},{g},{b},{})", pct as f64 / 100.0),
+        // Any color that isn't hex (a CSS-variable color such as the CDN's
+        // `rgb(var(--kb-color-card))`, a config color like `red` or
+        // `rgb(10 20 30)`, `currentColor`) gets its opacity through
+        // `color-mix`, as Tailwind v4 does. Regression: the opacity suffix
+        // was silently dropped (`bg-card/80` rendered fully opaque).
+        // `inherit` can't be mixed, so it stays as-is. Native strips this
+        // back to the plain color (resolve_style.rs `rn_style_value`).
+        (Some(pct), None) if hex != "inherit" => format!("color-mix(in srgb, {hex} {pct}%, transparent)"),
         _ => hex.to_string(),
     })
 }
@@ -487,14 +495,17 @@ mod tests {
     }
 
     #[test]
-    fn slash_opacity_falls_back_to_a_plain_value_for_a_non_hex_theme_color() {
+    fn slash_opacity_on_a_non_hex_theme_color_uses_color_mix() {
         let mut colors = HashMap::new();
         colors.insert("brand".to_string(), ColorValue::Plain("red".to_string()));
         let theme = ThemeConfig { colors, ..Default::default() };
-        // "red" can't be decomposed into rgb channels — color_value falls
-        // back to the plain value, silently dropping the opacity rather
-        // than producing broken CSS.
-        assert_eq!(color_value(&theme, &parse_class("bg-brand/50")), Some("red".to_string()));
+        // "red" can't be decomposed into rgb channels, so the opacity goes
+        // through color-mix (Tailwind v4's approach). This used to drop the
+        // opacity silently and return plain "red".
+        assert_eq!(
+            color_value(&theme, &parse_class("bg-brand/50")),
+            Some("color-mix(in srgb, red 50%, transparent)".to_string()),
+        );
     }
 
     #[test]

@@ -85,6 +85,21 @@ describe('startKbachCdn', () => {
     expect(document.getElementById('t')!.getAttribute('class')).toBe('bg-brand bg-panel');
   });
 
+  it('applies an opacity suffix to a mode-aware color (regression: bg-card/80 rendered opaque)', async () => {
+    document.body.innerHTML = '<div class="bg-card/80 text-card/50"></div>';
+    const api = startKbachCdn({
+      document,
+      wasmUrl: 'x.wasm',
+      config: { extend: { colors: { card: { light: '#ffffff', dark: '#151b2b' } } } },
+    });
+    await api.ready;
+    // jsdom's CSSOM drops color-mix() values, so check the rule source text the engine produced
+    const { generate_css } = await import('../../react/src/wasmLoader').then((m) => ({ generate_css: m.generateCss }));
+    const { getThemeJson } = await import('../../react/src/theme');
+    const rule = JSON.parse(generate_css('bg-card/80', getThemeJson())).rules[0].rule as string;
+    expect(rule).toContain('color-mix(in srgb, rgb(var(--kb-color-card)) 80%, transparent)');
+  });
+
   it('config() re-styles the page against the new theme', async () => {
     document.body.innerHTML = '<div class="bg-brand"></div>';
     const api = startKbachCdn({ document, wasmUrl: 'x.wasm' });

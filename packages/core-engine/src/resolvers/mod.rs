@@ -1266,3 +1266,49 @@ mod tailwind_v4_remaining_tests {
         one("stroke-blue-6", "stroke", "#2563eb");
     }
 }
+
+/// Opacity suffixes on colors that aren't hex (regression: `bg-card/80` on
+/// the CDN, and any `kbach.config.js` color like `red`, rendered opaque).
+#[cfg(test)]
+mod non_hex_opacity_tests {
+    use super::*;
+    use crate::parser::parse_class;
+    use crate::resolve_style::resolve_style;
+    use crate::theme::ColorValue;
+    use serde_json::json;
+
+    fn theme() -> ThemeConfig {
+        let mut t = ThemeConfig::default();
+        for (k, v) in [("card", "rgb(var(--kb-color-card))"), ("named", "red"), ("fn", "rgb(10 20 30)"), ("brand", "#ff6b35"), ("current", "currentColor")] {
+            t.colors.insert(k.to_string(), ColorValue::Plain(v.to_string()));
+        }
+        t
+    }
+    fn web(class: &str) -> Vec<Declaration> {
+        resolve_utility(&parse_class(class), &theme()).unwrap_or_else(|| panic!("{class}"))
+    }
+
+    #[test]
+    fn non_hex_colors_get_their_opacity_through_color_mix_on_every_color_utility() {
+        let mix = |c: &str, p: u8| format!("color-mix(in srgb, {c} {p}%, transparent)");
+        assert!(web("bg-card/80").contains(&decl("background-color", &mix("rgb(var(--kb-color-card))", 80))));
+        assert!(web("text-card/50").contains(&decl("color", &mix("rgb(var(--kb-color-card))", 50))));
+        assert!(web("border-card/30").contains(&decl("border-color", &mix("rgb(var(--kb-color-card))", 30))));
+        assert!(web("ring-card/50").contains(&decl("--kb-ring-color", &mix("rgb(var(--kb-color-card))", 50))));
+        assert!(web("bg-named/50").contains(&decl("background-color", &mix("red", 50))));
+        assert!(web("bg-fn/50").contains(&decl("background-color", &mix("rgb(10 20 30)", 50))));
+        assert!(web("bg-current/50").contains(&decl("background-color", &mix("currentColor", 50))));
+        // hex keeps its rgba, no-suffix stays plain, inherit can't be mixed
+        assert!(web("bg-brand/80").contains(&decl("background-color", "rgba(255,107,53,0.8)")));
+        assert!(web("bg-card").contains(&decl("background-color", "rgb(var(--kb-color-card))")));
+        assert!(web("bg-inherit/50").contains(&decl("background-color", "inherit")));
+    }
+
+    #[test]
+    fn native_keeps_the_plain_color_since_rn_has_no_color_mix() {
+        let n = |c: &str| resolve_style(c, &theme(), "light", false, 400.0);
+        assert_eq!(n("bg-named/50").get("backgroundColor"), Some(&json!("red")));
+        assert_eq!(n("border-fn/50").get("borderColor"), Some(&json!("rgb(10 20 30)")));
+        assert_eq!(n("bg-brand/80").get("backgroundColor"), Some(&json!("rgba(255,107,53,0.8)")));
+    }
+}

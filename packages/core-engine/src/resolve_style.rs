@@ -382,6 +382,16 @@ fn is_plain_percentage(value: &str) -> bool {
 /// never dropped, since this validation is specifically about RN's numeric
 /// style fields, the one place a free-text CSS value can't just work as-is.
 fn rn_style_value(property: &str, value: &str) -> (Option<Value>, Option<String>) {
+    // `color-mix(in srgb, <color> N%, transparent)` is how a non-hex color
+    // gets an opacity suffix on web (color.rs `color_value`). React Native
+    // can't parse color-mix, so native keeps the plain color, exactly what
+    // it received before that web fix (hex and light/dark colors already
+    // arrive here as real `rgba(...)`).
+    if let Some(inner) = value.strip_prefix("color-mix(in srgb, ").and_then(|v| v.strip_suffix(", transparent)")) {
+        if let Some((color, _pct)) = inner.rsplit_once(' ') {
+            return rn_style_value(property, color);
+        }
+    }
     // `aspect-ratio` is a CSS ratio (`3 / 4`, `16/9`, `1.5`) on the web
     // side, but RN's New-Architecture prop parser only reliably accepts a
     // plain NUMBER for `aspectRatio` — a ratio STRING silently fails to

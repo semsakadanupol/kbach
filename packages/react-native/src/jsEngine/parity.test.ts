@@ -60,6 +60,8 @@ const CASES = [
   // remaining Tailwind v4.3 classes that reach native
   '-top-full', '-inset-x-full', '-translate-x-full', '-translate-full', 'translate-4 translate-none',
   'leading-px',
+  // opacity on a non-hex color: web uses color-mix, native keeps the plain color
+  'bg-current/50', 'border-current/30',
   // a realistic combined string
   'flex-2 border-2 border-x p-px -translate-1/2 rounded-4xl leading-12',
   'rounded-sm shadow-sm outline-2 ring-2 text-sm leading-6',

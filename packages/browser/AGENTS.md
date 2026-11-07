@@ -52,8 +52,9 @@ only for that text, which `kb()` callers handle by using the returned
 className. A CDN script can't rewrite the page's own `class` attributes, so
 each hex pair becomes `rgb(var(--kb-color-<name>))`, and
 `ensureColorVariablesInjected` supplies the light/dark values for the
-configured strategy. Known limit: `bg-surface/50` (opacity on a mode-aware
-color) renders at full opacity.
+configured strategy. Opacity suffixes on them (`bg-surface/50`) go through
+`color-mix(in srgb, …)`; `@kbach/browser` 1.0.0-beta.2 and earlier bundled
+an engine that dropped the opacity, so `bg-card/80` rendered fully opaque.
 
 ## 2. How it's built — it bundles `@kbach/react`'s SOURCE
 

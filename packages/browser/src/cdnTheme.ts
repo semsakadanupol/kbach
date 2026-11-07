@@ -24,9 +24,9 @@ import { parseHexRgb } from '../../react/src/colorVariables';
  * written. Anything else is left as-is, falling back to the engine's normal
  * expansion.
  *
- * Known limit: an opacity suffix on a mode-aware color (`bg-surface/50`)
- * resolves to the full-opacity color, since the engine can't apply alpha to
- * a `var()` value.
+ * Opacity suffixes (`bg-surface/50`) work: the engine applies them to any
+ * non-hex color through `color-mix(in srgb, <color> 50%, transparent)`
+ * (core-engine 1.0.0-beta.17+; earlier engines dropped the opacity).
  */
 export function toCdnTheme(theme: ThemeConfig): ThemeConfig {
   let changed = false;

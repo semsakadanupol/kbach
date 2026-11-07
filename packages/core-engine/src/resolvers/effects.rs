@@ -26,12 +26,64 @@ use crate::theme::ThemeConfig;
 /// unset variable falls back to the tier's own default color. `"none"` has
 /// no color to vary at all (`0 0 #0000` isn't a real shadow layer with a
 /// color channel), so it's a flat literal with no `var()`.
+/// A `transition-*` utility: the property list plus Tailwind v4's defaults,
+/// 150ms and `cubic-bezier(0.4, 0, 0.2, 1)`. Without them (this engine's
+/// behavior before), `transition-colors` alone had a 0s duration and
+/// animated nothing until a `duration-*` was added. The defaults are read
+/// through `--kb-duration`/`--kb-ease`, which `duration-*`/`ease-*` set, so
+/// those always win regardless of stylesheet order (Tailwind's own
+/// `--tw-duration`/`--tw-ease` technique).
+fn transition(properties: &str) -> Vec<Declaration> {
+    vec![
+        decl("transition-property", properties),
+        decl("transition-timing-function", "var(--kb-ease, cubic-bezier(0.4, 0, 0.2, 1))"),
+        decl("transition-duration", "var(--kb-duration, 150ms)"),
+    ]
+}
+
+/// Tailwind v4's single composed `box-shadow`: every shadow-producing
+/// utility (`inset-shadow-*`, `inset-ring-*`, `ring-offset-*`, `ring-*`,
+/// `shadow-*`) sets only its own layer variable, and the ones that should
+/// draw emit this identical value. So `shadow-lg ring-2 inset-shadow-sm` on
+/// one element shows all three, whatever order the rules land in. (Before,
+/// `shadow-*` and `ring-*` each set `box-shadow` outright and the later one
+/// silently erased the other.) An unset layer falls back to an invisible
+/// `0 0 #0000`.
+pub(super) const BOX_SHADOW_COMPOSE: &str = "var(--kb-inset-shadow, 0 0 #0000), var(--kb-inset-ring-shadow, 0 0 #0000), var(--kb-ring-offset-shadow, 0 0 #0000), var(--kb-ring-shadow, 0 0 #0000), var(--kb-shadow, 0 0 #0000)";
+
+/// The inner-ring layer at a given width, colored by `--kb-inset-ring-color`
+/// (default `currentColor`, like rings).
+fn inset_ring_shadow(width: &str) -> String {
+    format!("inset 0 0 0 {width} var(--kb-inset-ring-color, currentColor)")
+}
+
+/// One layer of `BOX_SHADOW_COMPOSE`: set the variable, emit the composition.
+fn shadow_layer(variable: &str, value: &str) -> Vec<Declaration> {
+    vec![decl(variable, value), decl("box-shadow", BOX_SHADOW_COMPOSE)]
+}
+
+/// Tailwind v4's `--inset-shadow-*` scale, recolorable through
+/// `--kb-inset-shadow-color` (`inset-shadow-blue-6`).
+fn inset_shadow_value(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "2xs" => "inset 0 1px var(--kb-inset-shadow-color, rgb(0 0 0 / 0.05))",
+        "xs" => "inset 0 1px 1px var(--kb-inset-shadow-color, rgb(0 0 0 / 0.05))",
+        "sm" => "inset 0 2px 4px var(--kb-inset-shadow-color, rgb(0 0 0 / 0.05))",
+        "none" => "0 0 #0000",
+        _ => return None,
+    })
+}
+
 fn shadow_value(key: &str) -> Option<String> {
     let var = "var(--kb-shadow-color, rgb(0 0 0 / 0.1))";
     let var_light = "var(--kb-shadow-color, rgb(0 0 0 / 0.05))";
     let var_heavy = "var(--kb-shadow-color, rgb(0 0 0 / 0.25))";
     Some(match key {
-        "sm" => format!("0 1px 2px 0 {var_light}"),
+        // Tailwind v4.3's shadow scale. v4 renamed v3's `shadow-sm` to
+        // `xs`, and its `sm` is the two-layer shadow bare `shadow` also is.
+        "2xs" => format!("0 1px {var_light}"),
+        "xs" => format!("0 1px 2px 0 {var_light}"),
+        "sm" => format!("0 1px 3px 0 {var}, 0 1px 2px -1px {var}"),
         "DEFAULT" => format!("0 1px 3px 0 {var}, 0 1px 2px -1px {var}"),
         "md" => format!("0 4px 6px -1px {var}, 0 2px 4px -2px {var}"),
         "lg" => format!("0 10px 15px -3px {var}, 0 4px 6px -4px {var}"),
@@ -86,7 +138,11 @@ struct NativeShadow {
 
 fn native_shadow_value(key: &str) -> Option<NativeShadow> {
     Some(match key {
-        "sm" => NativeShadow { offset_y: 1.0, radius: 2.0, opacity: 0.05, elevation: 1.0 },
+        // Tailwind v4.3's scale (see `shadow_value`): `sm` is now the
+        // default shadow, v3's `sm` is `xs`.
+        "2xs" => NativeShadow { offset_y: 1.0, radius: 0.0, opacity: 0.05, elevation: 1.0 },
+        "xs" => NativeShadow { offset_y: 1.0, radius: 2.0, opacity: 0.05, elevation: 1.0 },
+        "sm" => NativeShadow { offset_y: 1.0, radius: 3.0, opacity: 0.1, elevation: 2.0 },
         "DEFAULT" => NativeShadow { offset_y: 1.0, radius: 3.0, opacity: 0.1, elevation: 2.0 },
         "md" => NativeShadow { offset_y: 4.0, radius: 6.0, opacity: 0.1, elevation: 4.0 },
         "lg" => NativeShadow { offset_y: 10.0, radius: 15.0, opacity: 0.1, elevation: 8.0 },
@@ -131,12 +187,23 @@ pub(super) fn native_shadow_declarations(parsed: &ParsedClass) -> Option<Vec<Dec
 /// worth the extra declaration complexity); text-shadow's effect is subtle
 /// enough at typical font sizes that the single-layer approximation still
 /// reads correctly, so it's kept as-is here.
-fn text_shadow_value(key: &str) -> Option<&'static str> {
+///
+/// The sized steps are Tailwind v4.3's `--text-shadow-*` scale (2xs-lg,
+/// multi-layer from sm up). Bare `text-shadow` (no size) isn't a Tailwind
+/// class at all; it's kept as a Kbach extra so existing pages don't lose it.
+fn text_shadow_value(key: &str) -> Option<String> {
+    // Every layer reads --kb-text-shadow-color (Tailwind v4), so
+    // `text-shadow-lg text-shadow-blue-6` is a blue lg shadow.
+    let c = |default: &str| format!("var(--kb-text-shadow-color, {default})");
+    let (a, b) = (c("rgb(0 0 0 / 0.075)"), c("rgb(0 0 0 / 0.1)"));
     Some(match key {
-        "sm" => "0 1px 1px rgba(0,0,0,0.15)",
-        "DEFAULT" => "0 1px 2px rgba(0,0,0,0.2)",
-        "lg" => "0 2px 4px rgba(0,0,0,0.25)",
-        "none" => "none",
+        "2xs" => format!("0px 1px 0px {}", c("rgb(0 0 0 / 0.15)")),
+        "xs" => format!("0px 1px 1px {}", c("rgb(0 0 0 / 0.2)")),
+        "sm" => format!("0px 1px 0px {a}, 0px 1px 1px {a}, 0px 2px 2px {a}"),
+        "md" => format!("0px 1px 1px {b}, 0px 1px 2px {b}, 0px 2px 4px {b}"),
+        "lg" => format!("0px 1px 2px {b}, 0px 3px 2px {b}, 0px 4px 8px {b}"),
+        "DEFAULT" => format!("0 1px 2px {}", c("rgba(0,0,0,0.2)")),
+        "none" => "none".to_string(),
         _ => return None,
     })
 }
@@ -144,7 +211,7 @@ fn text_shadow_value(key: &str) -> Option<&'static str> {
 /// Bare `text-shadow` (no explicit tier) — consulted by `color::resolve_text`
 /// for its special-cased "shadow" value, since "text-" is already the
 /// registered catchall prefix bare `text-shadow` falls under.
-pub(super) fn text_shadow_default() -> &'static str {
+pub(super) fn text_shadow_default() -> String {
     text_shadow_value("DEFAULT").expect("\"DEFAULT\" is a real text_shadow_value key")
 }
 
@@ -155,16 +222,21 @@ fn text_shadow_dash_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<V
     let value = parsed.value.as_deref()?;
     if !parsed.is_arbitrary {
         if let Some(v) = text_shadow_value(value) {
-            return Some(vec![decl("text-shadow", v)]);
+            return Some(vec![decl("text-shadow", &v)]);
         }
-        return color_value(theme, parsed).map(|c| vec![decl("text-shadow", &format!("0 1px 2px {c}"))]);
+        // `text-shadow-<color>` / `text-shadow-initial` only set the color
+        // the sizes read (Tailwind v4); on their own they draw nothing.
+        if value == "initial" {
+            return Some(vec![decl("--kb-text-shadow-color", "initial")]);
+        }
+        return color_value(theme, parsed).map(|c| vec![decl("--kb-text-shadow-color", &c)]);
     }
     Some(vec![decl("text-shadow", value)])
 }
 
 const BLEND_MODES: &[&str] = &[
     "normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light",
-    "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity", "plus-lighter",
+    "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity", "plus-lighter", "plus-darker",
 ];
 
 fn blend_mode_value(key: &str) -> Option<&'static str> {
@@ -217,19 +289,52 @@ fn ease_value(key: &str) -> Option<&'static str> {
 
 pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
     match parsed.utility.as_str() {
-        "shadow" if parsed.value.is_none() => shadow_value("DEFAULT").map(|v| vec![decl("box-shadow", &v)]),
+        "shadow" if parsed.value.is_none() => shadow_value("DEFAULT").map(|v| shadow_layer("--kb-shadow", &v)),
         "shadow" => {
             let value = parsed.value.as_deref()?;
             if parsed.is_arbitrary {
-                return Some(vec![decl("box-shadow", value)]);
+                return Some(shadow_layer("--kb-shadow", value));
+            }
+            if value == "initial" {
+                return Some(vec![decl("--kb-shadow-color", "initial")]);
             }
             // "shadow-*" is two-way ambiguous, same shape as "border-*": a
-            // recognized tier name means `box-shadow`, anything else is a
+            // recognized tier name means a shadow layer, anything else is a
             // `shadow-{color}` (see `shadow_color_declarations`'s own doc
             // comment for how the two compose).
             shadow_value(value)
-                .map(|v| vec![decl("box-shadow", &v)])
+                .map(|v| shadow_layer("--kb-shadow", &v))
                 .or_else(|| shadow_color_declarations(theme, parsed))
+        }
+        // Inner shadows and inner rings (Tailwind v4), the first two layers
+        // of BOX_SHADOW_COMPOSE. Web-only: the native dispatcher only calls
+        // `native_shadow_declarations`.
+        "inset-shadow" => {
+            let value = parsed.value.as_deref()?;
+            if parsed.is_arbitrary {
+                return Some(shadow_layer("--kb-inset-shadow", value));
+            }
+            if value == "initial" {
+                return Some(vec![decl("--kb-inset-shadow-color", "initial")]);
+            }
+            inset_shadow_value(value)
+                .map(|v| shadow_layer("--kb-inset-shadow", v))
+                .or_else(|| color_value(theme, parsed).map(|c| vec![decl("--kb-inset-shadow-color", &c)]))
+        }
+        // Bare `inset-ring` parses as utility "inset" + value "ring" (the
+        // "inset-" prefix): layout.rs's inset arm can't read "ring" as a
+        // length and passes it on to here.
+        "inset" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("ring") => {
+            Some(shadow_layer("--kb-inset-ring-shadow", &inset_ring_shadow("1px")))
+        }
+        "inset-ring" => {
+            let value = parsed.value.as_deref()?;
+            if !parsed.is_arbitrary {
+                if let Some(w) = super::border::whole_px(value) {
+                    return Some(shadow_layer("--kb-inset-ring-shadow", &inset_ring_shadow(&w)));
+                }
+            }
+            color_value(theme, parsed).map(|c| vec![decl("--kb-inset-ring-color", &c)])
         }
         "text-shadow" => text_shadow_dash_value(theme, parsed),
         "mix-blend" => {
@@ -248,15 +353,24 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
             animation_value(value).map(|v| vec![decl("animation", v)])
         }
         "opacity" => resolve_percent(parsed).map(|v| vec![decl("opacity", &v)]),
-        "transition" if parsed.value.is_none() => Some(vec![decl("transition-property", "all")]),
+        // Bare `transition`: Tailwind v4.3's explicit property list (the
+        // usual visual properties, NOT layout ones like width/height; use
+        // `transition-all` for those). Gradient stops use this engine's
+        // --kb-gradient-* names.
+        "transition" if parsed.value.is_none() => Some(transition(
+            "color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --kb-gradient-from, --kb-gradient-via, --kb-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events",
+        )),
+        "transition-all" => Some(transition("all")),
         // Real Tailwind's named transition-property scale — "transition-"
         // isn't a VALUE_PREFIXES entry (same reasoning "transition-none"
         // below already documents), so these are standalone literal
         // utility names, not utility="transition" + a value.
-        "transition-colors" => Some(vec![decl("transition-property", "color, background-color, border-color, text-decoration-color, fill, stroke")]),
-        "transition-opacity" => Some(vec![decl("transition-property", "opacity")]),
-        "transition-shadow" => Some(vec![decl("transition-property", "box-shadow")]),
-        "transition-transform" => Some(vec![decl("transition-property", "transform")]),
+        "transition-colors" => Some(transition(
+            "color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --kb-gradient-from, --kb-gradient-via, --kb-gradient-to",
+        )),
+        "transition-opacity" => Some(transition("opacity")),
+        "transition-shadow" => Some(transition("box-shadow")),
+        "transition-transform" => Some(transition("transform")),
         // "transition-" isn't a VALUE_PREFIXES entry, so "transition-none"
         // parses as its own standalone utility name (like "hidden"/"static"),
         // not utility="transition" + value="none" — matched as a literal
@@ -268,12 +382,13 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // the shared "transition-" spelling.
         "transition-normal" => Some(vec![decl("transition-behavior", "normal")]),
         "transition-discrete" => Some(vec![decl("transition-behavior", "allow-discrete")]),
+        // `duration-*`/`ease-*` also set `--kb-duration`/`--kb-ease`, which
+        // every `transition-*` reads (see `transition()`): the result is the
+        // same whichever of the two classes lands later in the stylesheet.
         "duration" => {
             let value = parsed.value.as_deref()?;
-            if parsed.is_arbitrary {
-                return Some(vec![decl("transition-duration", value)]);
-            }
-            Some(vec![decl("transition-duration", &format!("{value}ms"))])
+            let ms = if parsed.is_arbitrary { value.to_string() } else { format!("{value}ms") };
+            Some(vec![decl("--kb-duration", &ms), decl("transition-duration", &ms)])
         }
         "delay" => {
             let value = parsed.value.as_deref()?;
@@ -282,12 +397,14 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
             }
             Some(vec![decl("transition-delay", &format!("{value}ms"))])
         }
+        // `ease-initial`: drop back to the transition's default easing.
+        "ease" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("initial") => {
+            Some(vec![decl("--kb-ease", "initial")])
+        }
         "ease" => {
             let value = parsed.value.as_deref()?;
-            if parsed.is_arbitrary {
-                return Some(vec![decl("transition-timing-function", value)]);
-            }
-            ease_value(value).map(|v| vec![decl("transition-timing-function", v)])
+            let timing = if parsed.is_arbitrary { value } else { ease_value(value)? };
+            Some(vec![decl("--kb-ease", timing), decl("transition-timing-function", timing)])
         }
         "cursor" => parsed.value.as_deref().map(|v| vec![decl("cursor", v)]),
         "select-none" => Some(vec![decl("user-select", "none")]),
@@ -305,9 +422,34 @@ mod tests {
     use crate::parser::parse_class;
 
     #[test]
+    fn shadows_rings_and_inset_layers_share_one_composed_box_shadow() {
+        let t = ThemeConfig::default();
+        // every drawing layer emits the identical composition, so any
+        // combination on one element shows every layer, in any order
+        for class in ["shadow-lg", "inset-shadow-sm", "inset-ring-2", "inset-ring"] {
+            let decls = resolve(&parse_class(class), &t).unwrap();
+            assert!(decls.contains(&decl("box-shadow", BOX_SHADOW_COMPOSE)), "{class}");
+        }
+        assert_eq!(
+            resolve(&parse_class("inset-shadow-sm"), &t),
+            Some(shadow_layer("--kb-inset-shadow", "inset 0 2px 4px var(--kb-inset-shadow-color, rgb(0 0 0 / 0.05))")),
+        );
+        assert_eq!(
+            resolve(&parse_class("inset-ring-2"), &t),
+            Some(shadow_layer("--kb-inset-ring-shadow", "inset 0 0 0 2px var(--kb-inset-ring-color, currentColor)")),
+        );
+        assert_eq!(
+            resolve(&parse_class("inset-ring"), &t),
+            Some(shadow_layer("--kb-inset-ring-shadow", "inset 0 0 0 1px var(--kb-inset-ring-color, currentColor)")),
+        );
+        assert_eq!(resolve(&parse_class("shadow-initial"), &t), Some(vec![decl("--kb-shadow-color", "initial")]));
+        assert_eq!(resolve(&parse_class("inset-shadow-none"), &t), Some(shadow_layer("--kb-inset-shadow", "0 0 #0000")));
+    }
+
+    #[test]
     fn bare_shadow_resolves_to_the_default_tier() {
         let t = ThemeConfig::default();
-        assert_eq!(resolve(&parse_class("shadow"), &t), Some(vec![decl("box-shadow", &shadow_value("DEFAULT").unwrap())]));
+        assert_eq!(resolve(&parse_class("shadow"), &t), Some(shadow_layer("--kb-shadow", &shadow_value("DEFAULT").unwrap())));
     }
 
     #[test]
@@ -317,7 +459,7 @@ mod tests {
             let class = format!("shadow-{key}");
             assert_eq!(
                 resolve(&parse_class(&class), &t),
-                Some(vec![decl("box-shadow", &shadow_value(key).unwrap())]),
+                Some(shadow_layer("--kb-shadow", &shadow_value(key).unwrap())),
                 "shadow-{key} should resolve",
             );
         }
@@ -346,7 +488,7 @@ mod tests {
         // own doc comment for why the two can't be disambiguated.
         assert_eq!(
             resolve(&parse_class("shadow-[#112233]"), &t),
-            Some(vec![decl("box-shadow", "#112233")]),
+            Some(shadow_layer("--kb-shadow", "#112233")),
         );
     }
 
@@ -420,9 +562,10 @@ mod tests {
     fn resolves_named_transition_property_scale() {
         let t = ThemeConfig::default();
         assert!(resolve(&parse_class("transition-colors"), &t).unwrap()[0].value.contains("background-color"));
-        assert_eq!(resolve(&parse_class("transition-opacity"), &t), Some(vec![decl("transition-property", "opacity")]));
-        assert_eq!(resolve(&parse_class("transition-shadow"), &t), Some(vec![decl("transition-property", "box-shadow")]));
-        assert_eq!(resolve(&parse_class("transition-transform"), &t), Some(vec![decl("transition-property", "transform")]));
+        assert_eq!(resolve(&parse_class("transition-opacity"), &t), Some(transition("opacity")));
+        assert_eq!(resolve(&parse_class("transition-shadow"), &t), Some(transition("box-shadow")));
+        assert_eq!(resolve(&parse_class("transition-transform"), &t), Some(transition("transform")));
+        assert_eq!(resolve(&parse_class("transition-all"), &t), Some(transition("all")));
     }
 
     #[test]
@@ -440,7 +583,7 @@ mod tests {
         let t = ThemeConfig::default();
         assert_eq!(
             resolve(&parse_class("ease-[cubic-bezier(0.1,0.2,0.3,0.4)]"), &t),
-            Some(vec![decl("transition-timing-function", "cubic-bezier(0.1,0.2,0.3,0.4)")]),
+            Some(vec![decl("--kb-ease", "cubic-bezier(0.1,0.2,0.3,0.4)"), decl("transition-timing-function", "cubic-bezier(0.1,0.2,0.3,0.4)")]),
         );
         assert_eq!(
             resolve(&parse_class("animate-[wiggle_1s_ease-in-out_infinite]"), &t),
@@ -452,19 +595,59 @@ mod tests {
     fn resolves_transition_none_as_its_own_standalone_utility() {
         let t = ThemeConfig::default();
         assert_eq!(resolve(&parse_class("transition-none"), &t), Some(vec![decl("transition-property", "none")]));
-        assert_eq!(resolve(&parse_class("transition"), &t), Some(vec![decl("transition-property", "all")]));
+        // Tailwind v4.3: bare `transition` is an explicit property list, not `all`.
+        let bare = resolve(&parse_class("transition"), &t).unwrap();
+        assert!(bare[0].value.starts_with("color, background-color, border-color, outline-color"));
+        assert!(bare[0].value.contains("--kb-gradient-from") && bare[0].value.ends_with("pointer-events"));
+        assert!(!bare[0].value.contains("all"));
+        assert_eq!(resolve(&parse_class("transition-all"), &t), Some(transition("all")));
     }
 
     #[test]
     fn resolves_duration_with_auto_appended_ms() {
         let t = ThemeConfig::default();
-        assert_eq!(resolve(&parse_class("duration-300"), &t), Some(vec![decl("transition-duration", "300ms")]));
+        assert_eq!(
+            resolve(&parse_class("duration-300"), &t),
+            Some(vec![decl("--kb-duration", "300ms"), decl("transition-duration", "300ms")]),
+        );
     }
 
     #[test]
     fn arbitrary_duration_is_passed_through_without_double_unit() {
         let t = ThemeConfig::default();
-        assert_eq!(resolve(&parse_class("duration-[0.3s]"), &t), Some(vec![decl("transition-duration", "0.3s")]));
+        assert_eq!(
+            resolve(&parse_class("duration-[0.3s]"), &t),
+            Some(vec![decl("--kb-duration", "0.3s"), decl("transition-duration", "0.3s")]),
+        );
+    }
+
+    #[test]
+    fn every_transition_utility_gets_tailwinds_default_timing_unless_overridden() {
+        // Regression: transition-colors etc. used to emit only
+        // transition-property, so a 0s duration meant nothing animated.
+        let t = ThemeConfig::default();
+        for class in ["transition", "transition-all", "transition-colors", "transition-opacity", "transition-shadow", "transition-transform"] {
+            let decls = resolve(&parse_class(class), &t).unwrap();
+            assert!(decls.contains(&decl("transition-duration", "var(--kb-duration, 150ms)")), "{class}");
+            assert!(decls.contains(&decl("transition-timing-function", "var(--kb-ease, cubic-bezier(0.4, 0, 0.2, 1))")), "{class}");
+        }
+        // transition-none stays a pure reset
+        assert_eq!(resolve(&parse_class("transition-none"), &t), Some(vec![decl("transition-property", "none")]));
+        // ease-* sets the variable the defaults read
+        assert_eq!(
+            resolve(&parse_class("ease-in-out"), &t),
+            Some(vec![decl("--kb-ease", "cubic-bezier(0.4, 0, 0.2, 1)"), decl("transition-timing-function", "cubic-bezier(0.4, 0, 0.2, 1)")]),
+        );
+    }
+
+    #[test]
+    fn resolves_tailwind_v4_extra_small_shadows() {
+        let t = ThemeConfig::default();
+        assert_eq!(
+            resolve(&parse_class("shadow-2xs"), &t).unwrap()[0].value,
+            "0 1px var(--kb-shadow-color, rgb(0 0 0 / 0.05))",
+        );
+        assert!(resolve(&parse_class("shadow-xs"), &t).is_some());
     }
 
     #[test]
@@ -483,9 +666,11 @@ mod tests {
     #[test]
     fn resolves_text_shadow_named_size_color_and_arbitrary() {
         let t = theme_with_color();
-        assert_eq!(resolve(&parse_class("text-shadow-sm"), &t), Some(vec![decl("text-shadow", text_shadow_value("sm").unwrap())]));
+        assert_eq!(resolve(&parse_class("text-shadow-sm"), &t), Some(vec![decl("text-shadow", &text_shadow_value("sm").unwrap())]));
         assert_eq!(resolve(&parse_class("text-shadow-none"), &t), Some(vec![decl("text-shadow", "none")]));
-        assert_eq!(resolve(&parse_class("text-shadow-blue-6"), &t), Some(vec![decl("text-shadow", "0 1px 2px #2563eb")]));
+        // Tailwind v4: a color only sets the variable the sizes read
+        assert_eq!(resolve(&parse_class("text-shadow-blue-6"), &t), Some(vec![decl("--kb-text-shadow-color", "#2563eb")]));
+        assert_eq!(resolve(&parse_class("text-shadow-initial"), &t), Some(vec![decl("--kb-text-shadow-color", "initial")]));
         assert_eq!(resolve(&parse_class("text-shadow-[0_0_2px_red]"), &t), Some(vec![decl("text-shadow", "0 0 2px red")]));
     }
 
@@ -493,8 +678,9 @@ mod tests {
     fn resolves_inline_slash_opacity_on_text_shadow_color() {
         let t = theme_with_color();
         assert_eq!(
+            // Tailwind v4: the color (with its opacity) only sets the variable
             resolve(&parse_class("text-shadow-blue-6/50"), &t),
-            Some(vec![decl("text-shadow", "0 1px 2px rgba(37,99,235,0.5)")]),
+            Some(vec![decl("--kb-text-shadow-color", "rgba(37,99,235,0.5)")]),
         );
     }
 

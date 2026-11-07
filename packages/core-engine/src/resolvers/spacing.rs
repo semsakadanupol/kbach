@@ -1,4 +1,4 @@
-use super::{decl, fraction_percent, resolve_length, resolve_negatable_length, Declaration};
+use super::{decl, fraction_percent, resolve_length, resolve_negatable_length, resolve_negatable_size, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
 
@@ -19,6 +19,11 @@ use crate::theme::ThemeConfig;
 /// fields the parser already keeps apart.
 fn named_size(key: &str) -> Option<&'static str> {
     Some(match key {
+        // Tailwind v4's three smallest container sizes (`--container-3xs`
+        // … `--container-xs`), below `sm`.
+        "3xs" => "16rem",
+        "2xs" => "18rem",
+        "xs" => "20rem",
         "sm" => "24rem",
         "md" => "28rem",
         "lg" => "32rem",
@@ -113,6 +118,35 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // resolution as width — real Tailwind's own basis-* scale is
         // literally the width scale.
         "basis" => resolve_size(theme, parsed).map(|v| vec![decl("flex-basis", &v)]),
+        _ => None,
+    }
+}
+
+/// Logical (writing-direction-aware) padding and margin: `ps-4` is the
+/// padding on the side text starts from (left in LTR, right in RTL), `pe-4`
+/// the side it ends on, same for `ms-*`/`me-*` (negatable, like every
+/// margin). Same spacing scale as their physical counterparts.
+///
+/// WEB-ONLY on purpose: called from `resolve_utility`, never from the
+/// native dispatcher (which shares `resolve` above), so React Native is
+/// never handed a `padding-inline-start` it may not support.
+pub fn resolve_logical(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
+    match parsed.utility.as_str() {
+        "ps" => resolve_length(theme, parsed).map(|v| vec![decl("padding-inline-start", &v)]),
+        "pe" => resolve_length(theme, parsed).map(|v| vec![decl("padding-inline-end", &v)]),
+        "ms" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("margin-inline-start", &v)]),
+        "me" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("margin-inline-end", &v)]),
+        // Block axis (Tailwind v4.2): top/bottom in horizontal writing modes.
+        "pbs" => resolve_length(theme, parsed).map(|v| vec![decl("padding-block-start", &v)]),
+        "pbe" => resolve_length(theme, parsed).map(|v| vec![decl("padding-block-end", &v)]),
+        "mbs" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("margin-block-start", &v)]),
+        "mbe" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("margin-block-end", &v)]),
+        // Logical insets: `inset-s`/`inset-e` (same as `start-`/`end-`) and
+        // the block-axis `inset-bs`/`inset-be`. Same scale as `top-*`.
+        "inset-s" => resolve_negatable_size(theme, parsed).map(|v| vec![decl("inset-inline-start", &v)]),
+        "inset-e" => resolve_negatable_size(theme, parsed).map(|v| vec![decl("inset-inline-end", &v)]),
+        "inset-bs" => resolve_negatable_size(theme, parsed).map(|v| vec![decl("inset-block-start", &v)]),
+        "inset-be" => resolve_negatable_size(theme, parsed).map(|v| vec![decl("inset-block-end", &v)]),
         _ => None,
     }
 }

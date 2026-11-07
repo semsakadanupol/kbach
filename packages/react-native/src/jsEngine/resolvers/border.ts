@@ -12,15 +12,30 @@ import type { ThemeConfig } from '../../theme';
 function radiusSize(key: string): string | null {
   switch (key) {
     case 'none': return '0px';
-    case 'sm': return '0.125rem';
+    // Tailwind v4.3's radius scale: `sm` is 0.25rem (v3's 0.125rem is `xs`).
+    case 'xs': return '0.125rem';
+    case 'sm': return '0.25rem';
     case 'md': return '0.375rem';
     case 'lg': return '0.5rem';
     case 'xl': return '0.75rem';
     case '2xl': return '1rem';
     case '3xl': return '1.5rem';
+    case '4xl': return '2rem';
     case 'full': return '9999px';
     default: return null;
   }
+}
+
+/**
+ * A numeric border width: `border-2` / `border-t-4` / `border-x-8` mean
+ * exactly N px, NOT a spacing-scale step. Mirrors resolvers/border.rs's
+ * `border_width_px` — both engines used to run these through the spacing
+ * scale (n * 4px), so `border-2` came out 8px.
+ */
+function borderWidthPx(parsed: ParsedClass): string | null {
+  if (parsed.negative || parsed.isArbitrary || parsed.value === null) return null;
+  const n = Number(parsed.value);
+  return Number.isFinite(n) && n >= 0 && parsed.value.trim() !== '' ? `${n}px` : null;
 }
 
 function borderSideProperty(side: string): string | null {
@@ -42,6 +57,16 @@ function borderValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | n
     if (side !== null) {
       return [decl(`${side}-width`, '1px'), decl(`${side}-style`, 'solid')];
     }
+    // Bare `border-x` / `border-y`: 1px solid on both sides, like `border-t`.
+    const pair = value === 'x' ? ['border-left', 'border-right'] : value === 'y' ? ['border-top', 'border-bottom'] : null;
+    if (pair !== null) {
+      return [
+        decl(`${pair[0]}-width`, '1px'),
+        decl(`${pair[1]}-width`, '1px'),
+        decl(`${pair[0]}-style`, 'solid'),
+        decl(`${pair[1]}-style`, 'solid'),
+      ];
+    }
     if (value === 'collapse') return [decl('border-collapse', 'collapse')];
     if (value === 'separate') return [decl('border-collapse', 'separate')];
   }
@@ -57,7 +82,7 @@ function borderValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | n
     return color === null ? null : [decl('border-color', color)];
   }
   if (Number.isFinite(Number(value)) && value.trim() !== '') {
-    const v = resolveLength(theme, parsed);
+    const v = borderWidthPx(parsed);
     return v === null ? null : [decl('border-width', v)];
   }
   if (value === 'solid' || value === 'dashed' || value === 'dotted' || value === 'double' || value === 'hidden' || value === 'none') {
@@ -79,7 +104,7 @@ function borderSideValue(theme: ThemeConfig, parsed: ParsedClass, sideProperty: 
     return color === null ? null : [decl(`${sideProperty}-color`, color)];
   }
   if (Number.isFinite(Number(value)) && value.trim() !== '') {
-    const v = resolveLength(theme, parsed);
+    const v = borderWidthPx(parsed);
     return v === null ? null : [decl(`${sideProperty}-width`, v)];
   }
   if (value === 'solid' || value === 'dashed' || value === 'dotted' || value === 'double' || value === 'hidden' || value === 'none') {
@@ -100,7 +125,7 @@ function borderAxisValue(theme: ThemeConfig, parsed: ParsedClass, sideA: string,
     return color === null ? null : [decl(`${sideA}-color`, color), decl(`${sideB}-color`, color)];
   }
   if (Number.isFinite(Number(value)) && value.trim() !== '') {
-    const v = resolveLength(theme, parsed);
+    const v = borderWidthPx(parsed);
     return v === null ? null : [decl(`${sideA}-width`, v), decl(`${sideB}-width`, v)];
   }
   if (value === 'solid' || value === 'dashed' || value === 'dotted' || value === 'double' || value === 'hidden' || value === 'none') {
@@ -143,15 +168,9 @@ function resolveRadiusSide(theme: ThemeConfig, parsed: ParsedClass, side: string
 
 const OUTLINE_STYLES = ['solid', 'dashed', 'dotted', 'double'];
 
+/** Any whole number of px (`outline-3`), as in Tailwind v4 — mirrors border.rs's `whole_px`. */
 function outlineWidthValue(key: string): string | null {
-  switch (key) {
-    case '0': return '0px';
-    case '1': return '1px';
-    case '2': return '2px';
-    case '4': return '4px';
-    case '8': return '8px';
-    default: return null;
-  }
+  return /^\d+$/.test(key) ? `${Number(key)}px` : null;
 }
 
 function outlineValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | null {
@@ -178,46 +197,7 @@ function outlineOffsetValue(parsed: ParsedClass): Declaration[] | null {
   return w === null ? null : [decl('outline-offset', w)];
 }
 
-const RING_BOX_SHADOW =
-  'var(--kb-ring-inset,) 0 0 0 var(--kb-ring-offset-width, 0px) var(--kb-ring-offset-color, #fff), var(--kb-ring-inset,) 0 0 0 calc(var(--kb-ring-width, 0px) + var(--kb-ring-offset-width, 0px)) var(--kb-ring-color, rgba(59,130,246,0.5))';
-
-function ringWidth(key: string): string | null {
-  switch (key) {
-    case '0': return '0px';
-    case '1': return '1px';
-    case '2': return '2px';
-    case '4': return '4px';
-    case '8': return '8px';
-    default: return null;
-  }
-}
-
-function ringValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | null {
-  const value = parsed.value;
-  if (value === null) return null;
-  if (value === 'inset') {
-    return [decl('--kb-ring-inset', 'inset'), decl('box-shadow', RING_BOX_SHADOW)];
-  }
-  if (!parsed.isArbitrary) {
-    const w = ringWidth(value);
-    if (w !== null) return [decl('--kb-ring-width', w), decl('box-shadow', RING_BOX_SHADOW)];
-  }
-  const color = colorValue(theme, parsed);
-  if (color === null) return null;
-  return [decl('--kb-ring-color', color), decl('box-shadow', RING_BOX_SHADOW)];
-}
-
-function ringOffsetValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | null {
-  const value = parsed.value;
-  if (value === null) return null;
-  if (!parsed.isArbitrary) {
-    const w = ringWidth(value);
-    if (w !== null) return [decl('--kb-ring-offset-width', w), decl('box-shadow', RING_BOX_SHADOW)];
-  }
-  const color = colorValue(theme, parsed);
-  if (color === null) return null;
-  return [decl('--kb-ring-offset-color', color), decl('box-shadow', RING_BOX_SHADOW)];
-}
+// (No ring helpers: rings are web-only on native, see the 'ring' case below.)
 
 const RADIUS_SIDES = new Set(['t', 'r', 'b', 'l', 'tl', 'tr', 'br', 'bl']);
 
@@ -248,14 +228,19 @@ export function resolve(parsed: ParsedClass, theme: ThemeConfig): Declaration[] 
       const v = resolveLength(theme, parsed);
       return v === null ? null : [decl('border-radius', v)];
     }
+    // Rings are web-only (a var()-composed CSS box-shadow React Native can't
+    // parse) — same as resolvers/mod.rs's native dispatcher.
     case 'ring':
-      if (parsed.value === null) return [decl('--kb-ring-width', '3px'), decl('box-shadow', RING_BOX_SHADOW)];
-      return ringValue(theme, parsed);
     case 'ring-offset':
-      return ringOffsetValue(theme, parsed);
+      return null;
+    // Outlines: the same final native style the Rust engine produces once
+    // its var()-based web declarations are filtered out (resolve_style.rs):
+    // bare `outline` is a 1px width, `outline-none` is outline-style: none,
+    // `outline-hidden` keeps only its offset (RN has no `outline` shorthand).
     case 'outline':
-      if (parsed.value === null) return [decl('outline-style', 'solid')];
-      if (parsed.value === 'none') return [decl('outline', 'none')];
+      if (parsed.value === null) return [decl('outline-width', '1px')];
+      if (parsed.value === 'none') return [decl('outline-style', 'none')];
+      if (!parsed.isArbitrary && parsed.value === 'hidden') return [decl('outline-offset', '2px')];
       return outlineValue(theme, parsed);
     case 'outline-offset':
       return outlineOffsetValue(parsed);

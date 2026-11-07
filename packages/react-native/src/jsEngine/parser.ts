@@ -43,7 +43,9 @@ const VALUE_PREFIXES: readonly string[] = [
   'place-items-', 'place-content-', 'place-self-', 'justify-items-', 'justify-self-',
   'scale-x-', 'scale-y-', 'scale-z-', 'scale-',
   'rotate-x-', 'rotate-y-', 'rotate-z-', 'rotate-',
-  'translate-x-', 'translate-y-', 'translate-z-', 'skew-x-', 'skew-y-',
+  // Bare 'translate-'/'skew-' (both axes) after their per-axis forms, same
+  // longer-before-shorter rule as resolvers/parser.rs.
+  'translate-x-', 'translate-y-', 'translate-z-', 'translate-', 'skew-x-', 'skew-y-', 'skew-',
   'perspective-origin-', 'perspective-', 'origin-',
   'blur-', 'brightness-', 'contrast-', 'grayscale-', 'hue-rotate-',
   'invert-', 'saturate-', 'sepia-', 'drop-shadow-', 'filter-',

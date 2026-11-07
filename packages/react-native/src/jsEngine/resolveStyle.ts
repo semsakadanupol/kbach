@@ -289,6 +289,18 @@ export function resolveStyleJsWithWarnings(
         // divide/space markers — no RN child-combinator equivalent, out of scope.
         continue;
       }
+      if (
+        d.property.startsWith('--') ||
+        d.value.includes('var(') ||
+        d.property === 'outline' ||
+        d.property === 'object-position' ||
+        d.property === 'container-type'
+      ) {
+        // Same filter as resolve_style.rs: CSS variables and var()-built
+        // values are web-cascade machinery RN can't parse, and RN has no
+        // `outline` shorthand.
+        continue;
+      }
       if (d.property === 'shadow-offset-x' || d.property === 'shadow-offset-y') {
         // One nested `{width, height}` key — treat as a single unit for
         // specificity, same as resolve_style.rs.

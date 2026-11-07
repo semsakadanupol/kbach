@@ -22,6 +22,8 @@ export function decl(property: string, value: string): Declaration {
 function spacingPx(theme: ThemeConfig, value: string): number | undefined {
   const fromTable = theme.spacing[value];
   if (fromTable !== undefined) return fromTable;
+  // Tailwind's one named non-formula step: `p-px`, `-mt-px`, `h-px`, … = 1px.
+  if (value === 'px') return 1;
   const n = Number(value);
   return Number.isFinite(n) && value.trim() !== '' ? n * 4 : undefined;
 }
@@ -123,6 +125,8 @@ export function fractionPercent(value: string): string | null {
  */
 export function resolveNegatableSize(theme: ThemeConfig, parsed: ParsedClass): string | null {
   if (!parsed.isArbitrary && parsed.value !== null) {
+    // `-top-full`, `-translate-x-full`: -100% (only this inset/translate family; mirrors mod.rs).
+    if (parsed.negative && parsed.value === 'full') return '-100%';
     const pct = fractionPercent(parsed.value);
     if (pct !== null) return parsed.negative ? `-${pct}` : pct;
   }

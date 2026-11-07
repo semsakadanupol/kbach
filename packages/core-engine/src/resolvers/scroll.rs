@@ -15,7 +15,7 @@
 //! own independent variable, so there's no cross-rule ordering dependency
 //! here at all.
 
-use super::{decl, resolve_length, Declaration};
+use super::{decl, resolve_length, resolve_negatable_length, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
 
@@ -27,13 +27,22 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
     match parsed.utility.as_str() {
         "scroll-auto" => Some(vec![decl("scroll-behavior", "auto")]),
         "scroll-smooth" => Some(vec![decl("scroll-behavior", "smooth")]),
-        "scroll-m" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-margin", &v)]),
-        "scroll-mx" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-margin-left", &v), decl("scroll-margin-right", &v)]),
-        "scroll-my" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-margin-top", &v), decl("scroll-margin-bottom", &v)]),
-        "scroll-mt" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-margin-top", &v)]),
-        "scroll-mr" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-margin-right", &v)]),
-        "scroll-mb" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-margin-bottom", &v)]),
-        "scroll-ml" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-margin-left", &v)]),
+        "scroll-m" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("scroll-margin", &v)]),
+        "scroll-mx" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("scroll-margin-left", &v), decl("scroll-margin-right", &v)]),
+        "scroll-my" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("scroll-margin-top", &v), decl("scroll-margin-bottom", &v)]),
+        "scroll-mt" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("scroll-margin-top", &v)]),
+        "scroll-mr" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("scroll-margin-right", &v)]),
+        "scroll-mb" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("scroll-margin-bottom", &v)]),
+        "scroll-ml" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("scroll-margin-left", &v)]),
+        // Logical sides (Tailwind v4.2).
+        "scroll-ms" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("scroll-margin-inline-start", &v)]),
+        "scroll-me" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("scroll-margin-inline-end", &v)]),
+        "scroll-mbs" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("scroll-margin-block-start", &v)]),
+        "scroll-mbe" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("scroll-margin-block-end", &v)]),
+        "scroll-ps" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-padding-inline-start", &v)]),
+        "scroll-pe" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-padding-inline-end", &v)]),
+        "scroll-pbs" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-padding-block-start", &v)]),
+        "scroll-pbe" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-padding-block-end", &v)]),
         "scroll-p" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-padding", &v)]),
         "scroll-px" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-padding-left", &v), decl("scroll-padding-right", &v)]),
         "scroll-py" => resolve_length(theme, parsed).map(|v| vec![decl("scroll-padding-top", &v), decl("scroll-padding-bottom", &v)]),

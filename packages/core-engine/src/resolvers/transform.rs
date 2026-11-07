@@ -136,6 +136,45 @@ const ORIGIN_KEYWORDS: &[(&str, &str)] = &[
 pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
     match parsed.utility.as_str() {
         "transform-none" => Some(vec![decl("transform", "none")]),
+        // Bare `transform`: applies the compose chain with nothing set, the
+        // Tailwind v4 meaning (turn the transform pipeline on). Same CPU
+        // shape every other transform utility here emits.
+        "transform" if parsed.value.is_none() => Some(vec![decl("transform", TRANSFORM_COMPOSE_CPU)]),
+        // `rotate-none`/`scale-none`: Tailwind v4 sets the standalone CSS
+        // `rotate`/`scale` property to `none`. This engine composes into
+        // `transform` instead, so the equivalent is the identity value for
+        // that slot: it cancels an earlier `rotate-*`/`scale-*` the same way.
+        "rotate" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("none") => {
+            Some(composed(vec![decl("--kb-rotate", "rotate(0deg)")]))
+        }
+        "scale" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("none") => {
+            Some(composed(vec![decl("--kb-scale-x", "scaleX(1)"), decl("--kb-scale-y", "scaleY(1)")]))
+        }
+        // `translate-none`: no translation (Tailwind v4 sets `translate: none`).
+        "translate" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("none") => {
+            Some(composed(vec![decl("--kb-translate-x", "0"), decl("--kb-translate-y", "0")]))
+        }
+        // `translate-3d`/`scale-3d` turn on the z axis in Tailwind v4. This
+        // engine's composed transform always includes the z slots, so they
+        // just apply it.
+        "translate" | "scale" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("3d") => {
+            Some(vec![decl("transform", TRANSFORM_COMPOSE_CPU)])
+        }
+        "transform-content" => Some(vec![decl("transform-box", "content-box")]),
+        "transform-border" => Some(vec![decl("transform-box", "border-box")]),
+        "transform-fill" => Some(vec![decl("transform-box", "fill-box")]),
+        "transform-stroke" => Some(vec![decl("transform-box", "stroke-box")]),
+        "transform-view" => Some(vec![decl("transform-box", "view-box")]),
+        // Both axes at once (`translate-4`, `-translate-1/2`, `translate-px`),
+        // same scale as translate-x/y below.
+        "translate" => {
+            let v = resolve_negatable_size(theme, parsed)?;
+            Some(composed(vec![decl("--kb-translate-x", &v), decl("--kb-translate-y", &v)]))
+        }
+        "skew" => {
+            let deg = angle(parsed)?;
+            Some(composed(vec![decl("--kb-skew-x", &format!("skewX({deg})")), decl("--kb-skew-y", &format!("skewY({deg})"))]))
+        }
         // Byte-for-byte real Tailwind's own technique: swap the WHOLE
         // compose chain's translate call between `translate()` (CPU) and
         // `translate3d(x, y, 0)` (GPU, promoting the element onto its own
@@ -275,6 +314,24 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
 pub fn native_resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
     match parsed.utility.as_str() {
         "transform-none" => Some(vec![decl("transform-op-none", "1")]),
+        // Same identity values as the web `resolve()` above.
+        "rotate" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("none") => {
+            Some(vec![decl("transform-op-rotate", "0deg")])
+        }
+        "scale" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("none") => {
+            Some(vec![decl("transform-op-scale-x", "1"), decl("transform-op-scale-y", "1")])
+        }
+        "translate" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("none") => {
+            Some(vec![decl("transform-op-translate-x", "0"), decl("transform-op-translate-y", "0")])
+        }
+        "translate" => {
+            let v = resolve_negatable_size(theme, parsed)?;
+            Some(vec![decl("transform-op-translate-x", &v), decl("transform-op-translate-y", &v)])
+        }
+        "skew" => {
+            let deg = angle(parsed)?;
+            Some(vec![decl("transform-op-skew-x", &deg), decl("transform-op-skew-y", &deg)])
+        }
         "backface-visible" => Some(vec![decl("backface-visibility", "visible")]),
         "backface-hidden" => Some(vec![decl("backface-visibility", "hidden")]),
         "translate-x" => {

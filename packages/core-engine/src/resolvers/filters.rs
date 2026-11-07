@@ -22,6 +22,7 @@
 
 use super::{decl, Declaration};
 use crate::parser::ParsedClass;
+use crate::theme::ThemeConfig;
 
 const FILTER_COMPOSE: &str = "var(--kb-blur,) var(--kb-brightness,) var(--kb-contrast,) var(--kb-grayscale,) var(--kb-hue-rotate,) var(--kb-invert,) var(--kb-saturate,) var(--kb-sepia,) var(--kb-drop-shadow,)";
 const BACKDROP_FILTER_COMPOSE: &str = "var(--kb-backdrop-blur,) var(--kb-backdrop-brightness,) var(--kb-backdrop-contrast,) var(--kb-backdrop-grayscale,) var(--kb-backdrop-hue-rotate,) var(--kb-backdrop-invert,) var(--kb-backdrop-opacity,) var(--kb-backdrop-saturate,) var(--kb-backdrop-sepia,)";
@@ -34,7 +35,10 @@ fn composed(var_name: &str, var_value: String, compose: &str) -> Vec<Declaration
 fn blur_size(key: &str) -> Option<&'static str> {
     Some(match key {
         "" => "8px",
-        "sm" => "4px",
+        // Tailwind v4.3's `--blur-*` scale: `sm` moved from v3's 4px to 8px
+        // (v3's value is now `xs`).
+        "xs" => "4px",
+        "sm" => "8px",
         "md" => "12px",
         "lg" => "16px",
         "xl" => "24px",
@@ -89,17 +93,38 @@ fn resolve_hue_rotate(parsed: &ParsedClass, var_name: &str, compose: &str) -> Op
     Some(composed(var_name, format!("hue-rotate({deg})"), compose))
 }
 
-fn drop_shadow_preset(key: &str) -> Option<&'static str> {
+/// Tailwind v4.3's `--drop-shadow-*` scale (single-layer from xs to 2xl;
+/// v3's two-layer values are gone, v3's `sm` is now `xs`). Each shadow color
+/// reads `--kb-drop-shadow-color`, so `drop-shadow-lg drop-shadow-blue-6`
+/// is a blue lg shadow (see `resolve_drop_shadow_color`).
+fn drop_shadow_preset(key: &str) -> Option<String> {
+    let c = |default: &str| format!("var(--kb-drop-shadow-color, {default})");
     Some(match key {
-        "" => "drop-shadow(0 1px 2px rgba(0,0,0,0.1)) drop-shadow(0 1px 1px rgba(0,0,0,0.06))",
-        "sm" => "drop-shadow(0 1px 1px rgba(0,0,0,0.05))",
-        "md" => "drop-shadow(0 4px 3px rgba(0,0,0,0.07)) drop-shadow(0 2px 2px rgba(0,0,0,0.06))",
-        "lg" => "drop-shadow(0 10px 8px rgba(0,0,0,0.04)) drop-shadow(0 4px 3px rgba(0,0,0,0.1))",
-        "xl" => "drop-shadow(0 20px 13px rgba(0,0,0,0.03)) drop-shadow(0 8px 5px rgba(0,0,0,0.08))",
-        "2xl" => "drop-shadow(0 25px 25px rgba(0,0,0,0.15))",
-        "none" => "drop-shadow(0 0 #0000)",
+        "" => format!("drop-shadow(0 1px 2px {}) drop-shadow(0 1px 1px {})", c("rgb(0 0 0 / 0.1)"), c("rgb(0 0 0 / 0.06)")),
+        "xs" => format!("drop-shadow(0 1px 1px {})", c("rgb(0 0 0 / 0.05)")),
+        "sm" => format!("drop-shadow(0 1px 2px {})", c("rgb(0 0 0 / 0.15)")),
+        "md" => format!("drop-shadow(0 3px 3px {})", c("rgb(0 0 0 / 0.12)")),
+        "lg" => format!("drop-shadow(0 4px 4px {})", c("rgb(0 0 0 / 0.15)")),
+        "xl" => format!("drop-shadow(0 9px 7px {})", c("rgb(0 0 0 / 0.1)")),
+        "2xl" => format!("drop-shadow(0 25px 25px {})", c("rgb(0 0 0 / 0.15)")),
+        "none" => "drop-shadow(0 0 #0000)".to_string(),
         _ => return None,
     })
+}
+
+/// `drop-shadow-<color>` (Tailwind v4): recolors whichever size the element
+/// has, by setting the color variable and reapplying that size. Separate
+/// from `resolve` because colors need the theme. Web-only, like every filter.
+pub fn resolve_drop_shadow_color(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
+    if parsed.utility != "drop-shadow" || parsed.is_arbitrary {
+        return None;
+    }
+    let color = super::color::color_value(theme, parsed)?;
+    Some(vec![
+        decl("--kb-drop-shadow-color", &color),
+        decl("--kb-drop-shadow", "var(--kb-drop-shadow-size,)"),
+        decl("filter", FILTER_COMPOSE),
+    ])
 }
 
 pub fn resolve(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
@@ -152,7 +177,11 @@ pub fn resolve(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
                 return Some(composed("--kb-drop-shadow", format!("drop-shadow({value})"), FILTER_COMPOSE));
             }
             let value = parsed.value.as_deref().unwrap_or("");
-            drop_shadow_preset(value).map(|v| composed("--kb-drop-shadow", v.to_string(), FILTER_COMPOSE))
+            drop_shadow_preset(value).map(|v| {
+                let mut d = vec![decl("--kb-drop-shadow-size", &v)];
+                d.extend(composed("--kb-drop-shadow", v, FILTER_COMPOSE));
+                d
+            })
         }
 
         _ => None,
@@ -229,7 +258,11 @@ mod tests {
     fn resolves_drop_shadow_presets_and_arbitrary() {
         assert_eq!(
             resolve(&parse_class("drop-shadow-none")),
-            Some(vec![decl("--kb-drop-shadow", "drop-shadow(0 0 #0000)"), decl("filter", FILTER_COMPOSE)]),
+            Some(vec![
+                decl("--kb-drop-shadow-size", "drop-shadow(0 0 #0000)"),
+                decl("--kb-drop-shadow", "drop-shadow(0 0 #0000)"),
+                decl("filter", FILTER_COMPOSE),
+            ]),
         );
         assert_eq!(
             resolve(&parse_class("drop-shadow-[0_4px_3px_red]")),
@@ -240,8 +273,9 @@ mod tests {
     #[test]
     fn resolves_backdrop_variants_including_opacity() {
         assert_eq!(
+            // Tailwind v4.3: `sm` is 8px (v3's 4px is now `xs`).
             resolve(&parse_class("backdrop-blur-sm")),
-            Some(vec![decl("--kb-backdrop-blur", "blur(4px)"), decl("backdrop-filter", BACKDROP_FILTER_COMPOSE)]),
+            Some(vec![decl("--kb-backdrop-blur", "blur(8px)"), decl("backdrop-filter", BACKDROP_FILTER_COMPOSE)]),
         );
         assert_eq!(
             resolve(&parse_class("backdrop-opacity-50")),

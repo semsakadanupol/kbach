@@ -1,7 +1,8 @@
 # @kbach/react
 
 A utility-first styling engine for React, powered by a Rust/WASM core.
-Tailwind CSS v4 feature parity, plus Kbach's own color palette.
+Uses Tailwind CSS-compatible utility class names, plus Kbach's own color
+palette.
 
 > Beta — API may still change before 1.0.0.
 
@@ -321,3 +322,8 @@ correct across theme changes with zero re-render.
 ## License
 
 MIT
+
+Tailwind CSS is a trademark of Tailwind Labs Inc. Kbach is an independent
+project and is not affiliated with, sponsored by, or endorsed by Tailwind Labs.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the Tailwind CSS
+license notice.

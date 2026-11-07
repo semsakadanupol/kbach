@@ -10,15 +10,35 @@ use crate::theme::ThemeConfig;
 fn radius_size(key: &str) -> Option<&'static str> {
     Some(match key {
         "none" => "0px",
-        "sm" => "0.125rem",
+        // Tailwind v4.3's radius scale (`--radius-*`). `sm` moved from v3's
+        // 0.125rem to 0.25rem in v4; v3's value is now `xs`.
+        "xs" => "0.125rem",
+        "sm" => "0.25rem",
         "md" => "0.375rem",
         "lg" => "0.5rem",
         "xl" => "0.75rem",
         "2xl" => "1rem",
         "3xl" => "1.5rem",
+        "4xl" => "2rem",
         "full" => "9999px",
         _ => return None,
     })
+}
+
+/// A numeric border width: `border-2` / `border-t-4` / `border-x-8` /
+/// `divide-x-2` mean exactly N px in Tailwind, NOT a spacing-scale step.
+/// They used to go through `resolve_length` (n * 4px), so `border-2` came
+/// out 8px on web and native. That shipped from @kbach/core-engine
+/// 1.0.0-beta.2 until this fix; the old test hid it by overriding the
+/// theme's spacing so "2" meant 2px. Theme-independent on purpose:
+/// customizing spacing must not change border widths.
+pub(super) fn border_width_px(parsed: &ParsedClass) -> Option<String> {
+    let value = parsed.value.as_deref()?;
+    if parsed.negative || parsed.is_arbitrary {
+        return None;
+    }
+    let n: f64 = value.parse().ok()?;
+    (n >= 0.0).then(|| format!("{n}px"))
 }
 
 /// `t`/`r`/`b`/`l` -> the CSS side each bare `border-t`/`border-r`/
@@ -50,7 +70,7 @@ fn border_side_value(theme: &ThemeConfig, parsed: &ParsedClass, side_property: &
         return color_value(theme, parsed).map(|v| vec![decl(&format!("{side_property}-color"), &v)]);
     }
     if value.parse::<f64>().is_ok() {
-        return resolve_length(theme, parsed).map(|v| vec![decl(&format!("{side_property}-width"), &v)]);
+        return border_width_px(parsed).map(|v| vec![decl(&format!("{side_property}-width"), &v)]);
     }
     if matches!(value, "solid" | "dashed" | "dotted" | "double" | "hidden" | "none") {
         return Some(vec![decl(&format!("{side_property}-style"), value)]);
@@ -73,7 +93,7 @@ fn border_axis_value(theme: &ThemeConfig, parsed: &ParsedClass, side_a: &str, si
         return Some(vec![decl(&format!("{side_a}-color"), &color), decl(&format!("{side_b}-color"), &color)]);
     }
     if value.parse::<f64>().is_ok() {
-        let v = resolve_length(theme, parsed)?;
+        let v = border_width_px(parsed)?;
         return Some(vec![decl(&format!("{side_a}-width"), &v), decl(&format!("{side_b}-width"), &v)]);
     }
     if matches!(value, "solid" | "dashed" | "dotted" | "double" | "hidden" | "none") {
@@ -100,6 +120,31 @@ fn border_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declara
         if let Some(side) = border_side_property(value) {
             return Some(vec![decl(&format!("{side}-width"), "1px"), decl(&format!("{side}-style"), "solid")]);
         }
+        // Bare two-side / logical-side borders, 1px solid like `border-t`.
+        // `border-x`/`border-y` use the same physical sides `border-x-2`
+        // already does; `border-s`/`border-e` the logical ones `border-s-2`
+        // already does.
+        let pair = match value {
+            "x" => Some(("border-left", "border-right")),
+            "y" => Some(("border-top", "border-bottom")),
+            _ => None,
+        };
+        if let Some((a, b)) = pair {
+            return Some(vec![
+                decl(&format!("{a}-width"), "1px"),
+                decl(&format!("{b}-width"), "1px"),
+                decl(&format!("{a}-style"), "solid"),
+                decl(&format!("{b}-style"), "solid"),
+            ]);
+        }
+        let logical = match value {
+            "s" => Some("border-inline-start"),
+            "e" => Some("border-inline-end"),
+            _ => None,
+        };
+        if let Some(side) = logical {
+            return Some(vec![decl(&format!("{side}-width"), "1px"), decl(&format!("{side}-style"), "solid")]);
+        }
         if value == "collapse" {
             return Some(vec![decl("border-collapse", "collapse")]);
         }
@@ -107,7 +152,7 @@ fn border_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declara
             return Some(vec![decl("border-collapse", "separate")]);
         }
         if value.parse::<f64>().is_ok() {
-            return resolve_length(theme, parsed).map(|v| vec![decl("border-width", &v)]);
+            return border_width_px(parsed).map(|v| vec![decl("border-width", &v)]);
         }
         if matches!(value, "solid" | "dashed" | "dotted" | "double" | "hidden" | "none") {
             return Some(vec![decl("border-style", value)]);
@@ -193,18 +238,28 @@ fn resolve_radius_side(theme: &ThemeConfig, parsed: &ParsedClass, side: &str) ->
 /// because they're the same concept (outline-width has no "3px" default the
 /// way bare `ring` does, for instance), so a future divergence in either
 /// scale shouldn't accidentally ripple into the other.
-fn outline_width_value(key: &str) -> Option<&'static str> {
-    Some(match key {
-        "0" => "0px",
-        "1" => "1px",
-        "2" => "2px",
-        "4" => "4px",
-        "8" => "8px",
-        _ => return None,
-    })
+///
+/// Any whole number of px (`outline-3`, `outline-offset-6`), as in Tailwind
+/// v4 — not just v3's fixed 0/1/2/4/8.
+fn outline_width_value(key: &str) -> Option<String> {
+    whole_px(key)
+}
+
+/// A non-negative whole number `N` -> `"Npx"`; shared by the ring and
+/// outline width scales (Tailwind v4 takes any integer for both).
+pub(super) fn whole_px(key: &str) -> Option<String> {
+    if key.is_empty() || !key.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    key.parse::<u32>().ok().map(|n| format!("{n}px"))
 }
 
 const OUTLINE_STYLES: &[&str] = &["solid", "dashed", "dotted", "double"];
+
+/// What every outline width (and bare `outline`) uses as its style, so a
+/// width alone draws a solid outline and an `outline-dashed`/etc. sets the
+/// variable to change it (see the "outline" arms in `resolve`).
+const OUTLINE_STYLE_VAR: &str = "var(--kb-outline-style, solid)";
 
 /// "outline-*" is three-way ambiguous, same shape as "border-*": a
 /// recognized width means `outline-width`, a recognized style keyword means
@@ -224,10 +279,10 @@ fn outline_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declar
         return color_value(theme, parsed).map(|v| vec![decl("outline-color", &v)]);
     }
     if let Some(w) = outline_width_value(value) {
-        return Some(vec![decl("outline-width", w)]);
+        return Some(vec![decl("outline-style", OUTLINE_STYLE_VAR), decl("outline-width", &w)]);
     }
     if OUTLINE_STYLES.contains(&value) {
-        return Some(vec![decl("outline-style", value)]);
+        return Some(vec![decl("--kb-outline-style", value), decl("outline-style", value)]);
     }
     color_value(theme, parsed).map(|v| vec![decl("outline-color", &v)])
 }
@@ -237,7 +292,7 @@ fn outline_offset_value(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
     if parsed.is_arbitrary {
         return Some(vec![decl("outline-offset", value)]);
     }
-    outline_width_value(value).map(|v| vec![decl("outline-offset", v)])
+    outline_width_value(value).map(|v| vec![decl("outline-offset", &v)])
 }
 
 /// The `box-shadow` declaration EVERY `ring-*`/`ring-offset-*` utility
@@ -253,42 +308,54 @@ fn outline_offset_value(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
 /// generated `box-shadow` shape (offset-shadow, then ring-shadow, then any
 /// plain `shadow-*`), simplified to two layers since this engine's
 /// `shadow-*` scale doesn't itself compose via a `--kb-shadow` variable.
-const RING_BOX_SHADOW: &str = "var(--kb-ring-inset,) 0 0 0 var(--kb-ring-offset-width, 0px) var(--kb-ring-offset-color, #fff), var(--kb-ring-inset,) 0 0 0 calc(var(--kb-ring-width, 0px) + var(--kb-ring-offset-width, 0px)) var(--kb-ring-color, rgba(59,130,246,0.5))";
+// Rings are two layers of effects.rs's BOX_SHADOW_COMPOSE, built from their
+// own variables so every ring utility composes in any order:
+// `ring-N` sets the width and the ring layer (and draws), `ring-offset-N`
+// sets the offset width and the offset layer, and `ring-inset`/the color
+// utilities only set their variable. Default ring color is `currentColor`
+// (Tailwind v4; v3 used a translucent blue-500).
+const RING_SHADOW: &str = "var(--kb-ring-inset,) 0 0 0 calc(var(--kb-ring-width, 0px) + var(--kb-ring-offset-width, 0px)) var(--kb-ring-color, currentColor)";
+const RING_OFFSET_SHADOW: &str = "var(--kb-ring-inset,) 0 0 0 var(--kb-ring-offset-width, 0px) var(--kb-ring-offset-color, #fff)";
 
-fn ring_width(key: &str) -> Option<&'static str> {
-    Some(match key {
-        "0" => "0px",
-        "1" => "1px",
-        "2" => "2px",
-        "4" => "4px",
-        "8" => "8px",
-        _ => return None,
-    })
+fn ring_with_width(width: &str) -> Vec<Declaration> {
+    vec![
+        decl("--kb-ring-width", width),
+        decl("--kb-ring-shadow", RING_SHADOW),
+        decl("box-shadow", super::effects::BOX_SHADOW_COMPOSE),
+    ]
+}
+
+/// Any whole number of px (`ring-3`, `ring-offset-6`), as in Tailwind v4.
+fn ring_width(key: &str) -> Option<String> {
+    whole_px(key)
 }
 
 fn ring_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declaration>> {
     let value = parsed.value.as_deref()?;
     if value == "inset" {
-        return Some(vec![decl("--kb-ring-inset", "inset"), decl("box-shadow", RING_BOX_SHADOW)]);
+        return Some(vec![decl("--kb-ring-inset", "inset")]);
     }
     if !parsed.is_arbitrary {
         if let Some(w) = ring_width(value) {
-            return Some(vec![decl("--kb-ring-width", w), decl("box-shadow", RING_BOX_SHADOW)]);
+            return Some(ring_with_width(&w));
         }
     }
     let color = color_value(theme, parsed)?;
-    Some(vec![decl("--kb-ring-color", &color), decl("box-shadow", RING_BOX_SHADOW)])
+    Some(vec![decl("--kb-ring-color", &color)])
 }
 
 fn ring_offset_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declaration>> {
     let value = parsed.value.as_deref()?;
     if !parsed.is_arbitrary {
         if let Some(w) = ring_width(value) {
-            return Some(vec![decl("--kb-ring-offset-width", w), decl("box-shadow", RING_BOX_SHADOW)]);
+            // No `box-shadow` of its own (Tailwind v4): an offset alone draws
+            // nothing; the ring that uses it emits the composition. (Before,
+            // `ring-offset-2` alone drew a visible 2px ring.)
+            return Some(vec![decl("--kb-ring-offset-width", &w), decl("--kb-ring-offset-shadow", RING_OFFSET_SHADOW)]);
         }
     }
     let color = color_value(theme, parsed)?;
-    Some(vec![decl("--kb-ring-offset-color", &color), decl("box-shadow", RING_BOX_SHADOW)])
+    Some(vec![decl("--kb-ring-offset-color", &color)])
 }
 
 pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
@@ -324,19 +391,57 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         | "rounded-s" | "rounded-e" | "rounded-ss" | "rounded-se" | "rounded-ee" | "rounded-es" => {
             resolve_radius_side(theme, parsed, &parsed.utility["rounded-".len()..])
         }
-        "ring" if parsed.value.is_none() => {
-            Some(vec![decl("--kb-ring-width", "3px"), decl("box-shadow", RING_BOX_SHADOW)])
-        }
+        // Bare `ring` is 1px in Tailwind v4 (v3: 3px; v3's look is `ring-3`).
+        "ring" if parsed.value.is_none() => Some(ring_with_width("1px")),
         "ring" => ring_value(theme, parsed),
         "ring-offset" => ring_offset_value(theme, parsed),
-        "outline" if parsed.value.is_none() => Some(vec![decl("outline-style", "solid")]),
+        // Outlines work like Tailwind v4: every width/bare utility sets
+        // `outline-style: var(--kb-outline-style, solid)` (so `outline-2`
+        // alone is visible), and the style utilities set the variable too,
+        // so `outline-2 outline-dashed` is dashed whichever rule lands later.
+        "outline" if parsed.value.is_none() => {
+            Some(vec![decl("outline-style", OUTLINE_STYLE_VAR), decl("outline-width", "1px")])
+        }
+        // An outline that is invisible normally but still shows in
+        // forced-colors (high-contrast) mode, where `transparent` becomes a
+        // real color: Tailwind v4's `outline-hidden` behavior. (`outline-none`
+        // removes the outline outright.)
+        "outline" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("hidden") => Some(vec![
+            decl("--kb-outline-style", "none"),
+            decl("outline", "2px solid transparent"),
+            decl("outline-offset", "2px"),
+        ]),
         // "outline-none" parses as utility="outline", value="none" — "outline-"
         // is a VALUE_PREFIXES entry, so the standalone-name match above never
         // actually fires for it (the same class of bug isSafeArbitraryValue's
         // sibling checks exist to catch — see parser.rs's module docs).
-        "outline" if parsed.value.as_deref() == Some("none") => Some(vec![decl("outline", "none")]),
+        // Tailwind v4: `outline-style: none` (v3 used `outline: none`, which
+        // is also not a valid React Native style).
+        "outline" if parsed.value.as_deref() == Some("none") => {
+            Some(vec![decl("--kb-outline-style", "none"), decl("outline-style", "none")])
+        }
         "outline" => outline_value(theme, parsed),
         "outline-offset" => outline_offset_value(parsed),
+        _ => None,
+    }
+}
+
+/// Block-axis logical borders (Tailwind v4.2): `border-bs`/`border-be`
+/// (1px solid) and `border-bs-2`/`border-be-blue-6`/… WEB-ONLY: called from
+/// `resolve_utility` only, so React Native is never handed a
+/// `border-block-start-width`.
+pub fn resolve_web_only(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
+    match parsed.utility.as_str() {
+        "border" if !parsed.is_arbitrary => {
+            let side = match parsed.value.as_deref()? {
+                "bs" => "border-block-start",
+                "be" => "border-block-end",
+                _ => return None,
+            };
+            Some(vec![decl(&format!("{side}-width"), "1px"), decl(&format!("{side}-style"), "solid")])
+        }
+        "border-bs" => border_side_value(theme, parsed, "border-block-start"),
+        "border-be" => border_side_value(theme, parsed, "border-block-end"),
         _ => None,
     }
 }
@@ -384,8 +489,24 @@ mod tests {
     #[test]
     fn resolves_outline_none_despite_the_shared_outline_prefix() {
         let t = theme();
-        assert_eq!(resolve(&parse_class("outline-none"), &t), Some(vec![decl("outline", "none")]));
-        assert_eq!(resolve(&parse_class("outline"), &t), Some(vec![decl("outline-style", "solid")]));
+        // Tailwind v4: outline-none is outline-style: none; bare outline is 1px.
+        assert_eq!(
+            resolve(&parse_class("outline-none"), &t),
+            Some(vec![decl("--kb-outline-style", "none"), decl("outline-style", "none")]),
+        );
+        assert_eq!(
+            resolve(&parse_class("outline"), &t),
+            Some(vec![decl("outline-style", OUTLINE_STYLE_VAR), decl("outline-width", "1px")]),
+        );
+        // outline-hidden: invisible, but still shown in forced-colors mode
+        assert_eq!(
+            resolve(&parse_class("outline-hidden"), &t),
+            Some(vec![
+                decl("--kb-outline-style", "none"),
+                decl("outline", "2px solid transparent"),
+                decl("outline-offset", "2px"),
+            ]),
+        );
     }
 
     #[test]
@@ -453,12 +574,14 @@ mod tests {
     }
 
     #[test]
-    fn bare_ring_defaults_to_a_3px_width() {
+    fn bare_ring_defaults_to_tailwind_v4s_1px_width() {
+        // Tailwind v4: bare `ring` is 1px (v3 was 3px), default color currentColor.
         let t = theme();
         assert_eq!(
             resolve(&parse_class("ring"), &t),
-            Some(vec![decl("--kb-ring-width", "3px"), decl("box-shadow", RING_BOX_SHADOW)]),
+            Some(ring_with_width("1px")),
         );
+        assert!(RING_SHADOW.ends_with("var(--kb-ring-color, currentColor)"));
     }
 
     #[test]
@@ -466,20 +589,12 @@ mod tests {
         let t = theme();
         assert_eq!(
             resolve(&parse_class("ring-2"), &t),
-            Some(vec![decl("--kb-ring-width", "2px"), decl("box-shadow", RING_BOX_SHADOW)]),
+            Some(ring_with_width("2px")),
         );
-        assert_eq!(
-            resolve(&parse_class("ring-inset"), &t),
-            Some(vec![decl("--kb-ring-inset", "inset"), decl("box-shadow", RING_BOX_SHADOW)]),
-        );
-        assert_eq!(
-            resolve(&parse_class("ring-blue-6"), &t),
-            Some(vec![decl("--kb-ring-color", "#2563eb"), decl("box-shadow", RING_BOX_SHADOW)]),
-        );
-        assert_eq!(
-            resolve(&parse_class("ring-[#f00]"), &t),
-            Some(vec![decl("--kb-ring-color", "#f00"), decl("box-shadow", RING_BOX_SHADOW)]),
-        );
+        // modifier-only utilities set just their variable
+        assert_eq!(resolve(&parse_class("ring-inset"), &t), Some(vec![decl("--kb-ring-inset", "inset")]));
+        assert_eq!(resolve(&parse_class("ring-blue-6"), &t), Some(vec![decl("--kb-ring-color", "#2563eb")]));
+        assert_eq!(resolve(&parse_class("ring-[#f00]"), &t), Some(vec![decl("--kb-ring-color", "#f00")]));
     }
 
     #[test]
@@ -487,12 +602,9 @@ mod tests {
         let t = theme();
         assert_eq!(
             resolve(&parse_class("ring-offset-4"), &t),
-            Some(vec![decl("--kb-ring-offset-width", "4px"), decl("box-shadow", RING_BOX_SHADOW)]),
+            Some(vec![decl("--kb-ring-offset-width", "4px"), decl("--kb-ring-offset-shadow", RING_OFFSET_SHADOW)]),
         );
-        assert_eq!(
-            resolve(&parse_class("ring-offset-blue-6"), &t),
-            Some(vec![decl("--kb-ring-offset-color", "#2563eb"), decl("box-shadow", RING_BOX_SHADOW)]),
-        );
+        assert_eq!(resolve(&parse_class("ring-offset-blue-6"), &t), Some(vec![decl("--kb-ring-offset-color", "#2563eb")]));
     }
 
     #[test]
@@ -522,8 +634,10 @@ mod tests {
 
     #[test]
     fn resolves_border_x_and_y_axis_shorthands() {
-        let mut t = theme();
-        t.spacing.insert("2".to_string(), 2.0);
+        // No spacing override: border-x-2 is 2px from the default theme.
+        // (This test used to insert spacing "2" -> 2px, which is exactly what
+        // hid the n * 4px border-width bug.)
+        let t = theme();
         assert_eq!(
             resolve(&parse_class("border-x-2"), &t),
             Some(vec![decl("border-left-width", "2px"), decl("border-right-width", "2px")]),
@@ -579,14 +693,28 @@ mod tests {
     #[test]
     fn resolves_outline_width_style_color_and_offset() {
         let t = theme();
-        assert_eq!(resolve(&parse_class("outline-2"), &t), Some(vec![decl("outline-width", "2px")]));
-        assert_eq!(resolve(&parse_class("outline-dashed"), &t), Some(vec![decl("outline-style", "dashed")]));
+        // A width alone draws a visible (solid) outline, like Tailwind v4;
+        // a style utility changes it through the same variable.
+        assert_eq!(
+            resolve(&parse_class("outline-2"), &t),
+            Some(vec![decl("outline-style", OUTLINE_STYLE_VAR), decl("outline-width", "2px")]),
+        );
+        assert_eq!(
+            resolve(&parse_class("outline-dashed"), &t),
+            Some(vec![decl("--kb-outline-style", "dashed"), decl("outline-style", "dashed")]),
+        );
         assert_eq!(resolve(&parse_class("outline-blue-6"), &t), Some(vec![decl("outline-color", "#2563eb")]));
         assert_eq!(resolve(&parse_class("outline-offset-4"), &t), Some(vec![decl("outline-offset", "4px")]));
         assert_eq!(resolve(&parse_class("outline-offset-[3px]"), &t), Some(vec![decl("outline-offset", "3px")]));
-        // Bare/none still resolve exactly as before — unaffected by the new dispatch.
-        assert_eq!(resolve(&parse_class("outline"), &t), Some(vec![decl("outline-style", "solid")]));
-        assert_eq!(resolve(&parse_class("outline-none"), &t), Some(vec![decl("outline", "none")]));
+        // Bare/none: Tailwind v4 values (see resolves_outline_none_despite_the_shared_outline_prefix).
+        assert_eq!(
+            resolve(&parse_class("outline"), &t),
+            Some(vec![decl("outline-style", OUTLINE_STYLE_VAR), decl("outline-width", "1px")]),
+        );
+        assert_eq!(
+            resolve(&parse_class("outline-none"), &t),
+            Some(vec![decl("--kb-outline-style", "none"), decl("outline-style", "none")]),
+        );
     }
 
     #[test]
@@ -617,11 +745,11 @@ mod tests {
         );
         assert_eq!(
             resolve(&parse_class("ring-blue-6/50"), &t),
-            Some(vec![decl("--kb-ring-color", "rgba(37,99,235,0.5)"), decl("box-shadow", RING_BOX_SHADOW)]),
+            Some(vec![decl("--kb-ring-color", "rgba(37,99,235,0.5)")]),
         );
         assert_eq!(
             resolve(&parse_class("ring-offset-blue-6/50"), &t),
-            Some(vec![decl("--kb-ring-offset-color", "rgba(37,99,235,0.5)"), decl("box-shadow", RING_BOX_SHADOW)]),
+            Some(vec![decl("--kb-ring-offset-color", "rgba(37,99,235,0.5)")]),
         );
     }
 }

@@ -207,3 +207,8 @@ for `kbach.config.js` and how the underlying engine is built.
 ## License
 
 MIT
+
+Tailwind CSS is a trademark of Tailwind Labs Inc. Kbach is an independent
+project and is not affiliated with, sponsored by, or endorsed by Tailwind Labs.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the Tailwind CSS
+license notice.

@@ -609,6 +609,21 @@ pub fn resolve_style_with_warnings(
                 // divide/space markers — no RN child-combinator equivalent, out of scope.
                 continue;
             }
+            if d.property.starts_with("--")
+                || d.value.contains("var(")
+                || matches!(d.property.as_str(), "outline" | "object-position" | "container-type")
+            {
+                // CSS custom properties (`--kb-outline-style`, `--kb-leading`,
+                // …) and any value built from `var()` only exist to make web
+                // cascades order-independent. RN styles have no variables;
+                // passing them through produced bogus keys like `KbRingWidth`
+                // and unparseable values like `outlineStyle: "var(...)"`. RN
+                // also has no `outline` shorthand (`outline-hidden`), and no
+                // `objectPosition`/`containerType` style at all (those used to
+                // leak through from `object-top`/`@container`). An outline
+                // width alone still draws: RN's outline style defaults to solid.
+                continue;
+            }
             // RN's `shadowOffset` is the one shadow property that isn't a
             // flat key — it's `{width, height}`. effects.rs's
             // native_shadow_declarations emits it as two synthetic flat

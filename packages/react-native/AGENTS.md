@@ -189,6 +189,24 @@ also unavailable in Expo Go (no full-vocabulary resolver to check against).
 This is also exactly what iOS gets in every build type (§3) — the coverage
 gap isn't Expo-Go-specific, it's "whatever the JS-fallback engine covers."
 
+Within that scope it must match the Rust native engine exactly.
+`src/jsEngine/parity.test.ts` runs class strings through both (Rust via
+`packages/core-engine/dist-node`, so core-engine must be built first) and
+fails on any difference. Extend its `CASES` whenever a native-reaching
+resolver changes in either engine; the 2026-11 Tailwind v4 pass (exact-px
+border widths, `px`, two-axis `translate-*`/`skew-*`, `rotate-none`/
+`scale-none`, `flex-N`, formula `leading-N`, `rounded-xs`/`rounded-4xl`)
+and the Tailwind v4.3 values (`rounded-sm`, the `shadow-*` scale, outlines)
+are covered there. See root AGENTS.md §8.1 for what's web-only by design.
+
+**Rings (`ring-*`, `ring-offset-*`) apply no style on native**, on purpose:
+they're a `var()`-built CSS `box-shadow`. Both engines also drop every CSS
+custom property and `var()`-containing value before building the RN style
+(it used to leak through as keys like `KbRingWidth`). Use `border-*` or
+`shadow-*` for a native focus/selection outline. Text sizes on native set
+`fontSize` only (no Tailwind default line-height); add `leading-*` for an
+explicit native line height.
+
 ## 6. Dark mode
 
 Zero setup on all targets. On native `dark:` is resolved from a live

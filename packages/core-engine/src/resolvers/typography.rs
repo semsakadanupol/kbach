@@ -1,10 +1,31 @@
-use super::{decl, resolve_length, Declaration};
+use super::{decl, resolve_negatable_length, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
 
 /// `pub(super)` — consulted by color.rs's "text-" disambiguation before it
 /// falls back to color resolution. Not part of this module's own `resolve`
 /// dispatch, since "text" itself is owned by color.rs (see its docs).
+/// The line-height Tailwind v4.3 pairs with each `text-*` size
+/// (`--text-*--line-height`), as a unitless ratio. Web-only: emitted as
+/// `line-height: var(--kb-leading, <ratio>)`, so any `leading-*` class wins
+/// regardless of order (it sets `--kb-leading`). Native keeps only the font
+/// size, since RN line heights are absolute and a later `text-*` would
+/// otherwise override an explicit `leading-*` by source order.
+pub(super) fn text_size_line_height(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "xs" => "calc(1 / 0.75)",
+        "sm" => "calc(1.25 / 0.875)",
+        "base" => "calc(1.5 / 1)",
+        "lg" => "calc(1.75 / 1.125)",
+        "xl" => "calc(1.75 / 1.25)",
+        "2xl" => "calc(2 / 1.5)",
+        "3xl" => "calc(2.25 / 1.875)",
+        "4xl" => "calc(2.5 / 2.25)",
+        "5xl" | "6xl" | "7xl" | "8xl" | "9xl" => "1",
+        _ => return None,
+    })
+}
+
 pub(super) fn text_size(key: &str) -> Option<&'static str> {
     Some(match key {
         "xs" => "0.75rem",
@@ -36,18 +57,16 @@ pub(super) fn text_size(key: &str) -> Option<&'static str> {
 /// with no unitless-multiplier concept — resolving one needs the OTHER
 /// class token's font-size, a cross-token lookup this per-token dispatch
 /// doesn't do.
-pub(super) fn line_height_size(key: &str) -> Option<&'static str> {
-    Some(match key {
-        "3" => "0.75rem",
-        "4" => "1rem",
-        "5" => "1.25rem",
-        "6" => "1.5rem",
-        "7" => "1.75rem",
-        "8" => "2rem",
-        "9" => "2.25rem",
-        "10" => "2.5rem",
-        _ => return None,
-    })
+///
+/// Tailwind v4's formula, `N * 0.25rem` for any non-negative number
+/// (`leading-0`, `leading-0.5`, `leading-12`, …), not v3's fixed 3-10
+/// table. Identical output for 3-10, which is all this table used to cover.
+pub(super) fn line_height_size(key: &str) -> Option<String> {
+    if key == "px" {
+        return Some("1px".to_string());
+    }
+    let n: f64 = key.parse().ok()?;
+    (n >= 0.0 && n.is_finite()).then(|| format!("{}rem", n * 0.25))
 }
 
 /// Web-only named `line-height` multipliers — see `line_height_size`'s doc
@@ -333,11 +352,13 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "leading" => {
             let value = parsed.value.as_deref()?;
             if parsed.is_arbitrary {
-                return Some(vec![decl("line-height", value)]);
+                return Some(vec![decl("--kb-leading", value), decl("line-height", value)]);
             }
+            // Also sets --kb-leading, which every `text-*` size's default
+            // line-height reads, so `leading-*` wins whichever rule is later.
             line_height_size(value)
-                .or_else(|| leading_named(value))
-                .map(|v| vec![decl("line-height", v)])
+                .or_else(|| leading_named(value).map(str::to_string))
+                .map(|v| vec![decl("--kb-leading", &v), decl("line-height", &v)])
         }
         "tracking" => {
             let value = parsed.value.as_deref()?;
@@ -396,8 +417,13 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
             }
             underline_offset_value(value).map(|v| vec![decl("text-underline-offset", v)])
         }
-        "indent" => resolve_length(theme, parsed).map(|v| vec![decl("text-indent", &v)]),
+        // Negatable (`-indent-4`, a hanging indent), like margin.
+        "indent" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("text-indent", &v)]),
 
+        // overflow-wrap (Tailwind v4).
+        "wrap-normal" => Some(vec![decl("overflow-wrap", "normal")]),
+        "wrap-break-word" => Some(vec![decl("overflow-wrap", "break-word")]),
+        "wrap-anywhere" => Some(vec![decl("overflow-wrap", "anywhere")]),
         "whitespace-normal" => Some(vec![decl("white-space", "normal")]),
         "whitespace-nowrap" => Some(vec![decl("white-space", "nowrap")]),
         "whitespace-pre" => Some(vec![decl("white-space", "pre")]),
@@ -480,18 +506,20 @@ mod tests {
 
     #[test]
     fn line_height_size_resolves_the_numeric_scale() {
-        assert_eq!(line_height_size("6"), Some("1.5rem"));
-        assert_eq!(line_height_size("10"), Some("2.5rem"));
+        assert_eq!(line_height_size("6").as_deref(), Some("1.5rem"));
+        assert_eq!(line_height_size("10").as_deref(), Some("2.5rem"));
         assert_eq!(line_height_size("tight"), None);
     }
 
     #[test]
     fn resolves_leading_numeric_named_and_arbitrary_on_web() {
         let t = theme();
-        assert_eq!(resolve(&parse_class("leading-6"), &t), Some(vec![decl("line-height", "1.5rem")]));
-        assert_eq!(resolve(&parse_class("leading-tight"), &t), Some(vec![decl("line-height", "1.25")]));
-        assert_eq!(resolve(&parse_class("leading-none"), &t), Some(vec![decl("line-height", "1")]));
-        assert_eq!(resolve(&parse_class("leading-[3rem]"), &t), Some(vec![decl("line-height", "3rem")]));
+        // every leading-* also sets --kb-leading, which text-* sizes read
+        let lh = |v: &str| Some(vec![decl("--kb-leading", v), decl("line-height", v)]);
+        assert_eq!(resolve(&parse_class("leading-6"), &t), lh("1.5rem"));
+        assert_eq!(resolve(&parse_class("leading-tight"), &t), lh("1.25"));
+        assert_eq!(resolve(&parse_class("leading-none"), &t), lh("1"));
+        assert_eq!(resolve(&parse_class("leading-[3rem]"), &t), lh("3rem"));
     }
 
     #[test]

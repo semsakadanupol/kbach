@@ -23,6 +23,11 @@ const OBJECT_POSITION: &[(&str, &str)] = &[
     ("left-bottom", "left bottom"),
     ("right-top", "right top"),
     ("right-bottom", "right bottom"),
+    // Tailwind v4's spelling of the same four corners.
+    ("top-left", "left top"),
+    ("top-right", "right top"),
+    ("bottom-left", "left bottom"),
+    ("bottom-right", "right bottom"),
 ];
 
 /// "object-" is two-way ambiguous, same shape as "bg-": a recognized
@@ -131,6 +136,7 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // meaningful added complexity for a rarely-needed feature; the bare
         // (unnamed, `container-type` only) form covers the common case.
         "@container" => Some(vec![decl("container-type", "inline-size")]),
+        "@container-normal" => Some(vec![decl("container-type", "normal")]),
         "items-center" => Some(vec![decl("align-items", "center")]),
         "items-start" => Some(vec![decl("align-items", "flex-start")]),
         "items-end" => Some(vec![decl("align-items", "flex-end")]),
@@ -356,10 +362,20 @@ pub fn resolve_flex(parsed: &ParsedClass, web: bool) -> Option<Vec<Declaration>>
         "grow-0" => Some(vec![decl("flex-grow", "0")]),
         "shrink" => Some(vec![decl("flex-shrink", "1")]),
         "shrink-0" => Some(vec![decl("flex-shrink", "0")]),
+        // `flex-2`, `flex-3`, … — a plain `flex: N` grow factor (Tailwind
+        // v4). RN reads a numeric `flex` the same way, so web and native match.
+        v if !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()) => Some(vec![decl("flex", v)]),
+        // `flex-1/2`: a percentage flex-basis shorthand, web-only (RN's `flex`
+        // is a number).
+        v if web && super::fraction_percent(v).is_some() => Some(vec![decl("flex", &format!("calc({v} * 100%)"))]),
         _ => None,
     }
 }
 
+/// Also every web-only size VALUE with no RN equivalent: the explicit
+/// viewport units (`h-dvh`, `w-svw`, `size-lvh`, …), `h-lh`, `max-w-none`
+/// and `max-w-prose`. Same web-only reasoning as `screen` below.
+///
 /// `w-screen`/`h-screen`/`min-w-screen`/`max-w-screen`/`min-h-screen`/
 /// `max-h-screen` — dynamic viewport units (`dvw`/`dvh`) instead of static
 /// `vw`/`vh`: on mobile browsers, `vh`/`vw` are pinned to the *largest*
@@ -378,18 +394,45 @@ pub fn resolve_flex(parsed: &ParsedClass, web: bool) -> Option<Vec<Declaration>>
 /// at the JS layer, a fundamentally different (runtime, not static-class)
 /// mechanism outside this resolver's scope.
 pub fn resolve_screen_size(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
-    if parsed.is_arbitrary || parsed.value.as_deref() != Some("screen") {
+    if parsed.is_arbitrary || parsed.negative {
         return None;
     }
-    match parsed.utility.as_str() {
-        "w" => Some(vec![decl("width", "100dvw")]),
-        "h" => Some(vec![decl("height", "100dvh")]),
-        "min-w" => Some(vec![decl("min-width", "100dvw")]),
-        "max-w" => Some(vec![decl("max-width", "100dvw")]),
-        "min-h" => Some(vec![decl("min-height", "100dvh")]),
-        "max-h" => Some(vec![decl("max-height", "100dvh")]),
-        _ => None,
-    }
+    let value = parsed.value.as_deref()?;
+    let props: &[&str] = match parsed.utility.as_str() {
+        "w" => &["width"],
+        "h" => &["height"],
+        "min-w" => &["min-width"],
+        "max-w" => &["max-width"],
+        "min-h" => &["min-height"],
+        "max-h" => &["max-height"],
+        "size" => &["width", "height"],
+        // Logical sizes (Tailwind v4.2): inline = horizontal, block = vertical.
+        "inline" => &["inline-size"],
+        "min-inline" => &["min-inline-size"],
+        "max-inline" => &["max-inline-size"],
+        "block" => &["block-size"],
+        "min-block" => &["min-block-size"],
+        "max-block" => &["max-block-size"],
+        _ => return None,
+    };
+    let horizontal = matches!(parsed.utility.as_str(), "w" | "min-w" | "max-w" | "inline" | "min-inline" | "max-inline");
+    let block_axis = matches!(parsed.utility.as_str(), "block" | "min-block" | "max-block");
+    let css = match value {
+        "screen" if parsed.utility == "size" => return None,
+        "screen" if horizontal => "100dvw".to_string(),
+        "screen" => "100dvh".to_string(),
+        // Explicit viewport units (Tailwind v4): dynamic, large, small.
+        // Web-only like `screen`, since React Native has no viewport units.
+        "dvh" | "dvw" | "lvh" | "lvw" | "svh" | "svw" => format!("100{value}"),
+        // One line-height of the element's font (`h-lh`, `max-h-lh`).
+        "lh" if matches!(parsed.utility.as_str(), "h" | "min-h" | "max-h") || block_axis => "1lh".to_string(),
+        // `max-w-none` / `max-w-prose` (a comfortable ~65-character measure).
+        // Web-only here because RN has no `none` max-width or `ch` unit.
+        "none" if matches!(parsed.utility.as_str(), "max-w" | "max-h" | "max-inline" | "max-block") => "none".to_string(),
+        "prose" if parsed.utility == "max-w" => "65ch".to_string(),
+        _ => return None,
+    };
+    Some(props.iter().map(|p| decl(p, &css)).collect())
 }
 
 #[cfg(test)]

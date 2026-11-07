@@ -1,7 +1,7 @@
 {
   "name": "@kbach/react",
   "version": "1.0.0-beta.26",
-  "description": "A utility-first styling engine for React, powered by a real Rust/WASM core — Tailwind CSS v4 feature parity with Kbach's own color palette.",
+  "description": "A utility-first styling engine for React, powered by a Rust/WASM core: Tailwind CSS-compatible utility class names with Kbach's own color palette.",
   "keywords": [
     "css",
     "react",
@@ -26,7 +26,8 @@
   },
   "files": [
     "dist",
-    "AGENTS.md"
+    "AGENTS.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "source": "./src/index.ts",
   "main": "./dist/index.js",

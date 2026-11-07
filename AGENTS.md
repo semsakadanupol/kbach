@@ -259,6 +259,122 @@ gets cascade/specificity for free from CSS + the registry's per-modifier
 `order` tiers; native reconstructs a small specificity model
 (satisfied-modifier count) in `resolve_style.rs`.
 
+### 8.1 Tailwind v4 parity: what matches, and the known differences
+
+**Naming and licensing.** "Tailwind CSS" is a trademark of Tailwind Labs;
+Kbach is independent and not endorsed by them. Public text says
+"Tailwind CSS-compatible class names", never "Tailwind parity" or anything
+implying affiliation, and every README carries the non-affiliation line.
+Default theme values derived from Tailwind (MIT) require its notice:
+`THIRD_PARTY_NOTICES.md` at the repo root is the single source, copied into
+each package that ships the engine (`core-engine`, `react`,
+`react-native`, `browser`, `vscode-extension`) by
+`packages/core-engine/scripts/generate-notices.mjs` and listed in each
+`files`. `npm run verify:generated` fails if a copy drifts. Edit only the
+root file.
+
+**Measured, not assumed.** Coverage is checked by running Tailwind's own
+complete class list (`__unstable__loadDesignSystem(...).getClassList()`
+from the `tailwindcss` package) through `generate_css`, with Tailwind's
+palette rewritten to Kbach's (`red-500` → `blue-6`) so the check measures
+utilities, not color names. As of 2026-11-07, against Tailwind 4.3.5:
+**all 8,751 distinct utilities resolve (100%)**, up from 59.9%.
+"Resolves" is necessary, not sufficient: each family was also checked
+against Tailwind's own output, value by value. Re-run the comparison when
+moving to a new Tailwind release; new families show up as gaps.
+
+**How the newer families are built** (same designs as Tailwind's, with
+`var()` fallbacks standing in for Tailwind's `@property` defaults, since
+this engine emits no `@property` rules):
+- **One composed `box-shadow`** (effects.rs `BOX_SHADOW_COMPOSE`): five
+  layers, `inset-shadow`, `inset-ring`, `ring-offset`, `ring`, `shadow`.
+  Each utility sets only its layer variable, and the drawing ones emit the
+  identical composition, so `shadow-lg ring-2 inset-shadow-sm` shows all
+  three in any order. (Before, `shadow-*` and `ring-*` each set
+  `box-shadow` and erased each other.) `ring-offset-*`, `ring-inset` and
+  the ring/shadow color utilities set only their variable.
+- **Gradient masks** (mask.rs `resolve_gradient`): `mask-image` is always
+  linear ∩ radial ∩ conic layers; the edge masks (`mask-t-from-50%`,
+  `mask-x-to-20`) feed the linear layer, one gradient per side.
+- **Recolorable shadows:** every `drop-shadow-*` and `text-shadow-*` size
+  reads `--kb-drop-shadow-color`/`--kb-text-shadow-color`, which the color
+  utilities set. A color class on its own draws nothing (Tailwind v4).
+- **Composed `contain`:** `contain-size`/`-layout`/`-paint`/`-style` each
+  set a slot, so any combination works.
+- **`placeholder-<color>`** is parsed as `placeholder:text-<color>`
+  (parser.rs), keeping the class as written for the selector.
+  `divide-<color>` is an alias of `divide-color-<color>`.
+
+**Values follow Tailwind v4.3**, including the scales v4 renamed or changed
+from v3 (as of core-engine 1.0.0-beta.16; earlier releases used the v3
+values). Checked value by value against Tailwind's own output:
+- `rounded-sm` 0.25rem (v3's 0.125rem is `rounded-xs`); `rounded-4xl` 2rem.
+- `shadow-sm` is v4's two-layer shadow (v3's `shadow-sm` is `shadow-xs`);
+  `shadow-2xs` exists. Native's `shadowRadius`/`shadowOpacity` table
+  follows the same scale.
+- `blur-sm`/`backdrop-blur-sm` 8px (v3's 4px is `-xs`).
+- `drop-shadow-xs` … `drop-shadow-2xl` and `text-shadow-2xs` …
+  `text-shadow-lg` use v4's values. (Bare `text-shadow` isn't a Tailwind
+  class; Kbach keeps it as an extra.)
+- Bare `ring` is 1px with a `currentColor` default (v3: 3px, translucent
+  blue). v3's look is `ring-3 ring-blue-6/50`. Ring, ring-offset, outline
+  and outline-offset widths take any whole number (`ring-3`,
+  `outline-offset-6`), not just v3's 0/1/2/4/8.
+- `outline` is 1px; `outline-N` alone draws a solid outline; `outline-none`
+  is `outline-style: none`; `outline-hidden` is invisible but survives
+  forced-colors mode. Styles go through `--kb-outline-style`, so
+  `outline-2 outline-dashed` works in either order.
+- `text-xs` … `text-9xl` carry v4's default line-height, as
+  `line-height: var(--kb-leading, <ratio>)`. Every `leading-*` sets
+  `--kb-leading`, so it wins in either order. Web only: native keeps
+  font-size alone, since RN line heights are absolute numbers.
+- Bare `transition` uses v4's explicit property list (visual properties,
+  not layout). `transition-all` is `all`.
+
+**Remaining differences** (not value changes, just naming/shape):
+- **Border colors between children** are `divide-color-*`, not
+  `divide-*` (`divide-x`/`divide-y` are the width utilities), and
+  `divide-x` uses physical left/right sides, not v4's logical inline ones.
+- **Gradient stop positions** accept both Tailwind's `from-10%` and
+  Kbach's original `from-10`.
+- **`rotate-none`/`scale-none`** set the identity transform rather than
+  the standalone CSS `rotate`/`scale` property, since Kbach composes every
+  transform into one `transform` value. Same visual result.
+
+**Never on native:** rings (a `var()`-built `box-shadow`), and generally
+any CSS custom property or `var()`-containing value, which
+`resolve_style.rs` (and the JS port's `resolveStyle.ts`) drop before
+building the RN style. They exist only to make web cascades
+order-independent; native used to receive them as bogus keys such as
+`KbRingWidth`.
+
+**Transitions get Tailwind's defaults:** every `transition-*` emits
+`transition-duration: var(--kb-duration, 150ms)` and
+`transition-timing-function: var(--kb-ease, cubic-bezier(0.4, 0, 0.2, 1))`,
+and `duration-*`/`ease-*` set those two variables. The result is the same
+whichever class lands later in the stylesheet (Tailwind's
+`--tw-duration` technique).
+
+**Web-only by design** (React Native has no equivalent, so these are
+resolved in web-only dispatch paths and never reach native): table and
+`list-item` displays, every logical utility (`ps`/`pe`/`ms`/`me`,
+`pbs`/`pbe`/`mbs`/`mbe`, `inset-s`/`-e`/`-bs`/`-be`, `scroll-ms`/…,
+`border-bs`/`-be`, `block-*`/`inline-*` viewport sizes), viewport units
+(`h-dvh`, `w-svw`, `size-lvh`, …), `h-lh`, `max-w-none`/`max-h-none`,
+`max-w-prose`, `*-safe`/last-baseline alignment, `flex-1/2`, masks,
+`inset-shadow-*`/`inset-ring-*`, `contain-*`, `wrap-*`, and the `inherit`
+color keyword. The native merge also drops `object-position` and
+`container-type` (not RN styles; they used to leak through from
+`object-*`/`@container`).
+
+**Three engines must agree** on everything native: the Rust web resolver,
+the Rust native resolver, and the Expo Go / iOS JS port
+(`packages/react-native/src/jsEngine/`).
+`packages/react-native/src/jsEngine/parity.test.ts` runs the same class
+strings through the JS port and through Rust's `resolve_style_json` (from
+`dist-node/`) and requires identical style objects. Add a case there for
+any native-reaching resolver change.
+
 ---
 
 ## 9. Cross-package differences at a glance
@@ -283,6 +399,31 @@ Shared across both packages, since `kbach.config.js` is read by both:
   hyphenated key. Quote it. (Web: `loadConfigFile` re-throws the syntax
   error, failing the build loudly. Native: surfaces as a Metro bundling
   error.)
+- **Borders 4× too thick: `border-2` renders 8px, `border-t-4` 16px,
+  `divide-x-2` 8px** — numbered border/divide widths went through the
+  spacing scale (n × 4px) instead of meaning N px, on web, native AND
+  Expo Go, in every release from `@kbach/core-engine` 1.0.0-beta.2 through
+  1.0.0-beta.15. Fixed in core-engine 1.0.0-beta.16 (`border_width_px` in
+  `resolvers/border.rs`, mirrored as `borderWidthPx` in the JS port);
+  upgrade `@kbach/react`/`@kbach/react-native`/`@kbach/browser` to the
+  releases built on it.
+- **`transition-colors` (or any `transition-*`) animates nothing** —
+  same releases as above: no default duration was emitted, so the
+  transition ran in 0s unless a `duration-*` class was added. Fixed in the
+  same release (Tailwind's 150ms default).
+- **After upgrading to core-engine 1.0.0-beta.16, some elements look
+  different** — that release moved every v3 value to Tailwind v4.3 (§8.1).
+  Expected changes: `rounded-sm` larger, `shadow-sm` stronger, `blur-sm` /
+  `backdrop-blur-sm` stronger, `drop-shadow-*` and `text-shadow-*` softer,
+  bare `ring` thinner and in the text color, `outline-N` now visible
+  without a style class, text sizes with tighter default line-heights, and
+  bare `transition` no longer animating width/height. To keep a v3 look,
+  use the renamed class (`rounded-xs`, `shadow-xs`, `blur-xs`,
+  `ring-3 ring-blue-6/50`, `transition-all`). Also in that release:
+  `shadow-*` and `ring-*` on the same element now both show (they used to
+  erase each other); `ring-offset-N` alone no longer draws a ring; and
+  `text-shadow-<color>` / `drop-shadow-<color>` alone draw nothing (pair
+  them with a size, e.g. `text-shadow-md text-shadow-blue-6`).
 
 Package-specific failure modes (stale-version symptoms, monorepo
 duplicate-instance issues, prebuilt-binary staleness, …) live in each

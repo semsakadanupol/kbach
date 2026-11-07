@@ -26,6 +26,12 @@ const targets = [
   { generator: 'generate-palette.mjs', committed: 'packages/react-native/src/generatedPalette.ts' },
   { generator: 'generate-wasm-base64.mjs', committed: 'packages/react-native/src/wasmBinary.generated.ts' },
   { generator: 'generate-web-glue.mjs', committed: 'packages/react-native/src/wasmGlue.generated.ts' },
+  // Tailwind CSS MIT notice, copied into every published package that ships the engine.
+  { generator: 'generate-notices.mjs', committed: 'packages/core-engine/THIRD_PARTY_NOTICES.md' },
+  { generator: 'generate-notices.mjs', committed: 'packages/react/THIRD_PARTY_NOTICES.md' },
+  { generator: 'generate-notices.mjs', committed: 'packages/react-native/THIRD_PARTY_NOTICES.md' },
+  { generator: 'generate-notices.mjs', committed: 'packages/browser/THIRD_PARTY_NOTICES.md' },
+  { generator: 'generate-notices.mjs', committed: 'packages/vscode-extension/THIRD_PARTY_NOTICES.md' },
 ];
 
 const tmpDir = mkdtempSync(join(tmpdir(), 'kbach-verify-generated-'));

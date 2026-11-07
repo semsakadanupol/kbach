@@ -46,6 +46,17 @@ export function resolveNative(parsed: ParsedClass, theme: ThemeConfig): Declarat
   switch (parsed.utility) {
     case 'transform-none':
       return [decl('transform-op-none', '1')];
+    // Both axes at once (`translate-4`, `-skew-3`); mirrors transform.rs.
+    case 'translate': {
+      // `translate-none`: no translation, like transform.rs.
+      if (!parsed.isArbitrary && parsed.value === 'none') return [decl('transform-op-translate-x', '0'), decl('transform-op-translate-y', '0')];
+      const v = resolveNegatableSize(theme, parsed);
+      return v === null ? null : [decl('transform-op-translate-x', v), decl('transform-op-translate-y', v)];
+    }
+    case 'skew': {
+      const deg = angle(parsed);
+      return deg === null ? null : [decl('transform-op-skew-x', deg), decl('transform-op-skew-y', deg)];
+    }
     case 'backface-visible':
       return [decl('backface-visibility', 'visible')];
     case 'backface-hidden':
@@ -67,6 +78,8 @@ export function resolveNative(parsed: ParsedClass, theme: ThemeConfig): Declarat
       return v === null ? null : [decl('transform-op-translate-y', v)];
     }
     case 'scale': {
+      // `scale-none`: the identity value, like transform.rs.
+      if (!parsed.isArbitrary && parsed.value === 'none') return [decl('transform-op-scale-x', '1'), decl('transform-op-scale-y', '1')];
       const n = scaleFactor(parsed);
       return n === null ? null : [decl('transform-op-scale-x', `${n}`), decl('transform-op-scale-y', `${n}`)];
     }
@@ -79,6 +92,8 @@ export function resolveNative(parsed: ParsedClass, theme: ThemeConfig): Declarat
       return n === null ? null : [decl('transform-op-scale-y', `${n}`)];
     }
     case 'rotate': {
+      // `rotate-none`: the identity value, like transform.rs.
+      if (!parsed.isArbitrary && parsed.value === 'none') return [decl('transform-op-rotate', '0deg')];
       const deg = angle(parsed);
       return deg === null ? null : [decl('transform-op-rotate', deg)];
     }

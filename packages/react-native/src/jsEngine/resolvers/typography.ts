@@ -29,17 +29,12 @@ export function textSize(key: string): string | null {
 }
 
 export function lineHeightSize(key: string): string | null {
-  switch (key) {
-    case '3': return '0.75rem';
-    case '4': return '1rem';
-    case '5': return '1.25rem';
-    case '6': return '1.5rem';
-    case '7': return '1.75rem';
-    case '8': return '2rem';
-    case '9': return '2.25rem';
-    case '10': return '2.5rem';
-    default: return null;
-  }
+  // Tailwind v4's formula, N * 0.25rem for any non-negative number — not
+  // v3's fixed 3-10 table (identical output for 3-10). Mirrors typography.rs.
+  if (key === 'px') return '1px';
+  if (key.trim() === '') return null;
+  const n = Number(key);
+  return Number.isFinite(n) && n >= 0 ? `${n * 0.25}rem` : null;
 }
 
 export function textAlign(key: string): string | null {

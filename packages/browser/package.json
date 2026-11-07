@@ -26,7 +26,8 @@
   },
   "files": [
     "dist",
-    "AGENTS.md"
+    "AGENTS.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "main": "./dist/kbach.js",
   "unpkg": "./dist/kbach.js",

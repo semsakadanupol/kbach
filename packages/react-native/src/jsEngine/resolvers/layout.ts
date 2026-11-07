@@ -257,6 +257,7 @@ export function resolveFlex(parsed: ParsedClass, web: boolean): Declaration[] | 
     case 'shrink-0':
       return [decl('flex-shrink', '0')];
     default:
-      return null;
+      // `flex-2`, `flex-3`, … — a plain `flex: N` grow factor, like layout.rs.
+      return /^\d+$/.test(value) ? [decl('flex', value)] : null;
   }
 }

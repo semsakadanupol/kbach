@@ -39,7 +39,8 @@
   },
   "files": [
     "dist",
-    "dist-node"
+    "dist-node",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "build": "wasm-pack build --target web --out-dir dist && wasm-pack build --target nodejs --out-dir dist-node && node -e \"require('fs').rmSync('dist/.gitignore',{force:true});require('fs').rmSync('dist-node/.gitignore',{force:true})\" && node scripts/build-android-if-available.mjs",

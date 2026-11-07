@@ -30,7 +30,8 @@ const VALUE_PREFIXES: &[&str] = &[
     // "border-spacing-*" token too, so it would wrongly claim the match
     // first if "border-spacing-*" were listed any later than this.
     "border-spacing-x-", "border-spacing-y-", "border-spacing-",
-    "border-x-", "border-y-", "border-t-", "border-r-", "border-b-", "border-l-", "border-s-", "border-e-", "border-",
+    "border-x-", "border-y-", "border-t-", "border-r-", "border-b-", "border-l-", "border-s-", "border-e-",
+    "border-bs-", "border-be-", "border-",
     // Interactivity & sizing rest (resolvers::color's caret/accent/fill/
     // stroke arms, resolvers::interactivity, resolvers::scroll).
     // "stroke-width-" before "stroke-" (its shorter counterpart), same
@@ -43,11 +44,19 @@ const VALUE_PREFIXES: &[&str] = &[
     // token are fixed literals with no value to split off, so they need no
     // prefix entry at all — they fall through to the standalone-utility
     // path below and are matched by their full literal name directly.
-    "scroll-mx-", "scroll-my-", "scroll-mt-", "scroll-mr-", "scroll-mb-", "scroll-ml-", "scroll-m-",
-    "scroll-px-", "scroll-py-", "scroll-pt-", "scroll-pr-", "scroll-pb-", "scroll-pl-", "scroll-p-",
+    // "scroll-ms-"/"scroll-mbs-"/… are the logical sides (Tailwind v4.2);
+    // none collides with "scroll-m-"/"scroll-p-" (those need a "-" right
+    // after the m/p).
+    "scroll-mx-", "scroll-my-", "scroll-mt-", "scroll-mr-", "scroll-mb-", "scroll-ml-",
+    "scroll-mbs-", "scroll-mbe-", "scroll-ms-", "scroll-me-", "scroll-m-",
+    "scroll-px-", "scroll-py-", "scroll-pt-", "scroll-pr-", "scroll-pb-", "scroll-pl-",
+    "scroll-pbs-", "scroll-pbe-", "scroll-ps-", "scroll-pe-", "scroll-p-",
     // Spacing — axis/side variants before their base prefix.
-    "px-", "py-", "pt-", "pr-", "pb-", "pl-", "p-",
-    "mx-", "my-", "mt-", "mr-", "mb-", "ml-", "m-",
+    // "ps-"/"pe-"/"ms-"/"me-" are the logical (inline-start/-end) sides —
+    // resolvers::spacing::resolve_logical, web-only.
+    // "pbs-"/"pbe-"/"mbs-"/"mbe-" are the block-axis logical sides (v4.2).
+    "px-", "py-", "pt-", "pr-", "pb-", "pl-", "ps-", "pe-", "pbs-", "pbe-", "p-",
+    "mx-", "my-", "mt-", "mr-", "mb-", "ml-", "ms-", "me-", "mbs-", "mbe-", "m-",
     "gap-x-", "gap-y-", "gap-",
     "min-w-", "max-w-", "w-",
     "min-h-", "max-h-", "h-",
@@ -80,7 +89,9 @@ const VALUE_PREFIXES: &[&str] = &[
     // prefix: the 4th character of "table-" is "l", not "-").
     "leading-", "tracking-", "font-stretch-", "font-features-", "font-", "tab-",
     // Layout: position/inset/z. "inset-x-"/"inset-y-" before bare "inset-".
-    "z-", "inset-x-", "inset-y-", "inset-", "top-", "right-", "bottom-", "left-", "start-", "end-",
+    // "inset-shadow-"/"inset-ring-" (inner box-shadow layers, effects.rs)
+    // before the bare "inset-" position catchall.
+    "z-", "inset-shadow-", "inset-ring-", "inset-x-", "inset-y-", "inset-bs-", "inset-be-", "inset-s-", "inset-e-", "inset-", "top-", "right-", "bottom-", "left-", "start-", "end-",
     // Divide / space-between. "divide-color-" (not a bare "divide-") so
     // "divide-x"/"divide-y" (standalone width utilities, no dash-value) fall
     // through to the standalone-utility path below instead of being wrongly
@@ -115,7 +126,9 @@ const VALUE_PREFIXES: &[&str] = &[
     // standalone literals (not a dash-value split).
     "scale-x-", "scale-y-", "scale-z-", "scale-",
     "rotate-x-", "rotate-y-", "rotate-z-", "rotate-",
-    "translate-x-", "translate-y-", "translate-z-", "skew-x-", "skew-y-",
+    // Bare "translate-"/"skew-" (both axes at once: `translate-4`,
+    // `-skew-3`) after their per-axis forms, same longer-before-shorter rule.
+    "translate-x-", "translate-y-", "translate-z-", "translate-", "skew-x-", "skew-y-", "skew-",
     "perspective-origin-", "perspective-", "origin-",
     // Filters & backdrop-filters (web-only — see resolvers::filters's module
     // doc). No ordering conflicts within this group or against anything
@@ -392,6 +405,20 @@ pub fn parse_class(token: &str) -> ParsedClass {
     let negative = base.starts_with('-');
     if negative {
         base = &base[1..];
+    }
+
+    // `placeholder-<color>` (Tailwind's placeholder-color utility) is exactly
+    // `placeholder:text-<color>`: same `::placeholder` pseudo-element, and
+    // the selector is still built from `original` (the class as written).
+    if let Some(color) = base.strip_prefix("placeholder-") {
+        if !color.is_empty() && !important && !negative {
+            let mut p = parse_class(&format!("text-{color}"));
+            let mut mods: Vec<String> = modifiers;
+            mods.push("placeholder".to_string());
+            p.modifiers = mods;
+            p.original = token.to_string();
+            return p;
+        }
     }
 
     // Arbitrary properties (Phase 25) — a bracket-only token with no

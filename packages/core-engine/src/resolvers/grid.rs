@@ -68,10 +68,27 @@ fn named(value: &str, allowed: &[(&'static str, &'static str)]) -> Option<&'stat
     allowed.iter().find(|(k, _)| *k == value).map(|(_, v)| *v)
 }
 
-const ALIGN_KEYWORDS: &[(&str, &str)] =
-    &[("start", "start"), ("end", "end"), ("center", "center"), ("stretch", "stretch"), ("baseline", "baseline")];
-const ALIGN_KEYWORDS_WITH_AUTO: &[(&str, &str)] =
-    &[("auto", "auto"), ("start", "start"), ("end", "end"), ("center", "center"), ("stretch", "stretch")];
+// `*-safe` (Tailwind v4) keeps content from overflowing out of reach when
+// it's larger than its container; `normal` is justify-items' initial value.
+const ALIGN_KEYWORDS: &[(&str, &str)] = &[
+    ("start", "start"),
+    ("end", "end"),
+    ("center", "center"),
+    ("stretch", "stretch"),
+    ("baseline", "baseline"),
+    ("center-safe", "safe center"),
+    ("end-safe", "safe end"),
+    ("normal", "normal"),
+];
+const ALIGN_KEYWORDS_WITH_AUTO: &[(&str, &str)] = &[
+    ("auto", "auto"),
+    ("start", "start"),
+    ("end", "end"),
+    ("center", "center"),
+    ("stretch", "stretch"),
+    ("center-safe", "safe center"),
+    ("end-safe", "safe end"),
+];
 const CONTENT_KEYWORDS: &[(&str, &str)] = &[
     ("start", "start"),
     ("end", "end"),
@@ -81,6 +98,8 @@ const CONTENT_KEYWORDS: &[(&str, &str)] = &[
     ("around", "space-around"),
     ("evenly", "space-evenly"),
     ("baseline", "baseline"),
+    ("center-safe", "safe center"),
+    ("end-safe", "safe end"),
 ];
 
 pub fn resolve(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
@@ -90,8 +109,8 @@ pub fn resolve(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
             if parsed.is_arbitrary {
                 return Some(vec![decl("grid-template-columns", value)]);
             }
-            if value == "none" {
-                return Some(vec![decl("grid-template-columns", "none")]);
+            if value == "none" || value == "subgrid" {
+                return Some(vec![decl("grid-template-columns", value)]);
             }
             let n: i64 = value.parse().ok()?;
             if !(1..=12).contains(&n) {
@@ -104,8 +123,8 @@ pub fn resolve(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
             if parsed.is_arbitrary {
                 return Some(vec![decl("grid-template-rows", value)]);
             }
-            if value == "none" {
-                return Some(vec![decl("grid-template-rows", "none")]);
+            if value == "none" || value == "subgrid" {
+                return Some(vec![decl("grid-template-rows", value)]);
             }
             let n: i64 = value.parse().ok()?;
             if n < 1 {

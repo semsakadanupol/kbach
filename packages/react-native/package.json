@@ -34,7 +34,8 @@
     "android/src",
     "specs",
     "react-native.config.js",
-    "AGENTS.md"
+    "AGENTS.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "source": "./src/index.ts",
   "main": "./dist/index.js",

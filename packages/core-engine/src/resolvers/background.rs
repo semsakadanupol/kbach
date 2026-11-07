@@ -55,6 +55,11 @@ const POSITION: &[(&str, &str)] = &[
     ("left-bottom", "left bottom"),
     ("right-top", "right top"),
     ("right-bottom", "right bottom"),
+    // Tailwind v4's spelling of the same four corners.
+    ("top-left", "left top"),
+    ("top-right", "right top"),
+    ("bottom-left", "left bottom"),
+    ("bottom-right", "right bottom"),
 ];
 
 const REPEAT: &[(&str, &str)] = &[
@@ -180,6 +185,14 @@ fn resolve_stop(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Stop> {
     if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
         return Some(Stop::Position(format!("{value}%")));
     }
+    // Tailwind's own spelling, with the `%` written out (`from-10%`,
+    // `via-30%`, `to-90%`). The bare-number form above is Kbach's original
+    // and keeps working.
+    if let Some(n) = value.strip_suffix('%') {
+        if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) {
+            return Some(Stop::Position(value.to_string()));
+        }
+    }
     // is_arbitrary is guaranteed false here (that case already returned
     // above) — color_value's own opacity-suffix handling
     // (`from-blue-6/50`) is what this reuses it for.
@@ -198,6 +211,10 @@ fn resolve_from(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declara
 }
 
 fn resolve_via(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declaration>> {
+    // `via-none`: drop the middle stop again (back to from -> to).
+    if !parsed.is_arbitrary && parsed.value.as_deref() == Some("none") {
+        return Some(vec![decl("--kb-gradient-stops", "var(--kb-gradient-from), var(--kb-gradient-to)")]);
+    }
     match resolve_stop(theme, parsed)? {
         Stop::Position(p) => Some(vec![decl("--kb-gradient-via-position", &p)]),
         Stop::Color(c) => Some(vec![

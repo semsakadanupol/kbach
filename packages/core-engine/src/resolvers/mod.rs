@@ -74,8 +74,16 @@ pub(crate) fn decl(property: &str, value: &str) -> Declaration {
 /// that: the table covers the common named entries (and lets a theme
 /// override any one of them individually), the formula fills every gap
 /// between them.
-fn spacing_px(theme: &ThemeConfig, value: &str) -> Option<f64> {
-    theme.spacing.get(value).copied().or_else(|| value.parse::<f64>().ok().map(|n| n * 4.0))
+///
+/// `"px"` is Tailwind's one named non-formula step: exactly 1px (`p-px`,
+/// `-mt-px`, `h-px`, `gap-px`, `inset-px`, `translate-x-px`, …), on every
+/// utility that goes through this helper. A theme can still override it.
+pub(super) fn spacing_px(theme: &ThemeConfig, value: &str) -> Option<f64> {
+    theme
+        .spacing
+        .get(value)
+        .copied()
+        .or_else(|| if value == "px" { Some(1.0) } else { value.parse::<f64>().ok().map(|n| n * 4.0) })
 }
 
 pub(crate) fn resolve_length(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<String> {
@@ -172,6 +180,11 @@ pub(crate) fn fraction_percent(value: &str) -> Option<String> {
 pub(crate) fn resolve_negatable_size(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<String> {
     if !parsed.is_arbitrary {
         if let Some(value) = parsed.value.as_deref() {
+            // `-top-full`, `-inset-full`, `-translate-x-full`: -100%. Only this
+            // inset/translate family has it in Tailwind (there's no `-mt-full`).
+            if parsed.negative && value == "full" {
+                return Some("-100%".to_string());
+            }
             if let Some(pct) = fraction_percent(value) {
                 return Some(if parsed.negative { format!("-{pct}") } else { pct });
             }
@@ -218,18 +231,26 @@ pub fn resolve_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<
         .or_else(|| layout::resolve_flex(parsed, true))
         .or_else(|| layout::resolve(parsed, theme))
         .or_else(|| spacing::resolve(parsed, theme))
+        // Web-only: logical (writing-direction-aware) padding/margin. Kept
+        // out of `spacing::resolve` so the native dispatcher, which shares
+        // that function, never hands RN a `padding-inline-start`.
+        .or_else(|| spacing::resolve_logical(parsed, theme))
         .or_else(|| color::resolve(parsed, theme))
         .or_else(|| border::resolve(parsed, theme))
+        // Web-only: block-axis logical borders (`border-bs`, `border-be-2`).
+        .or_else(|| border::resolve_web_only(parsed, theme))
         .or_else(|| typography::resolve(parsed, theme))
         .or_else(|| effects::resolve(parsed, theme))
         .or_else(|| divide::resolve(parsed, theme))
         .or_else(|| grid::resolve(parsed))
         .or_else(|| transform::resolve(parsed, theme))
         .or_else(|| filters::resolve(parsed))
+        .or_else(|| filters::resolve_drop_shadow_color(parsed, theme))
         .or_else(|| background::resolve(parsed, theme))
         .or_else(|| interactivity::resolve(parsed, theme))
         .or_else(|| scroll::resolve(parsed, theme))
         .or_else(|| mask::resolve(parsed))
+        .or_else(|| mask::resolve_gradient(parsed, theme))
 }
 
 /// Native (React Native) dispatcher — layout, spacing, and border resolve
@@ -354,7 +375,10 @@ pub fn resolve_utility_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Opti
     layout::resolve_flex(parsed, false)
         .or_else(|| layout::resolve(parsed, theme))
         .or_else(|| spacing::resolve(parsed, theme))
-        .or_else(|| border::resolve(parsed, theme))
+        // Rings are web-only: they're a composed CSS `box-shadow` built from
+        // `var()`s, which React Native can't parse (it used to receive that
+        // raw string as `boxShadow`).
+        .or_else(|| if matches!(parsed.utility.as_str(), "ring" | "ring-offset") { None } else { border::resolve(parsed, theme) })
         .or_else(|| resolve_color_native(parsed, theme))
         .or_else(|| resolve_leading_tracking_native(parsed))
         .or_else(|| resolve_typography_native(parsed, theme))
@@ -442,7 +466,7 @@ fn resolve_leading_tracking_native(parsed: &ParsedClass) -> Option<Vec<Declarati
     let value = parsed.value.as_deref()?;
     match parsed.utility.as_str() {
         "leading" if parsed.is_arbitrary => Some(vec![decl("line-height", value)]),
-        "leading" => typography::line_height_size(value).map(|v| vec![decl("line-height", v)]),
+        "leading" => typography::line_height_size(value).map(|v| vec![decl("line-height", &v)]),
         "tracking" if parsed.is_arbitrary => Some(vec![decl("letter-spacing", value)]),
         _ => None,
     }
@@ -455,7 +479,10 @@ fn resolve_leading_tracking_native(parsed: &ParsedClass) -> Option<Vec<Declarati
 /// dispatcher gets, so `bg-orange-5/50` isn't silently unresolvable on
 /// native/Expo Go the way it used to be.
 fn native_hex_color(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<String> {
-    color::color_value(theme, parsed)
+    // `inherit` is a CSS cascade keyword; RN styles don't inherit, so it has
+    // no native value (`color::lookup_hex`'s doc comment). Unresolved here
+    // rather than handed to RN as an invalid color string.
+    color::color_value(theme, parsed).filter(|v| v != "inherit")
 }
 
 /// Mirrors `color::resolve_text`'s "text-" disambiguation (size / align /
@@ -777,13 +804,12 @@ mod native_dispatcher_tests {
         assert_eq!(resolve_utility_native(&parse_class("mix-blend-multiply"), &t), None);
         assert_eq!(resolve_utility_native(&parse_class("bg-blend-multiply"), &t), None);
         assert_eq!(resolve_utility_native(&parse_class("animate-spin"), &t), None);
-        // "ring-offset-4" DOES still resolve on native, inheriting the
-        // pre-existing "ring resolves to a harmless CSS-only property"
-        // precedent — confirms the new ring-offset arm didn't accidentally
-        // narrow border::resolve's native reach.
-        let ring_offset_result = resolve_utility_native(&parse_class("ring-offset-4"), &t);
-        assert!(ring_offset_result.is_some());
-        assert_eq!(ring_offset_result.unwrap()[0], decl("--kb-ring-offset-width", "4px"));
+        // Rings are web-only. They used to "resolve" on native as a CSS
+        // custom property plus a var()-built box-shadow string, which React
+        // Native received as bogus `KbRingWidth`/`boxShadow` keys.
+        assert_eq!(resolve_utility_native(&parse_class("ring"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("ring-2"), &t), None);
+        assert_eq!(resolve_utility_native(&parse_class("ring-offset-4"), &t), None);
     }
 
     #[test]
@@ -848,5 +874,395 @@ mod native_dispatcher_tests {
             resolve_utility_native(&parse_class("@container"), &t),
             Some(vec![decl("container-type", "inline-size")]),
         );
+    }
+}
+
+/// Regression tests for the Tailwind v4 gaps closed in one pass (found by
+/// diffing Tailwind 4.3's own `getClassList()` against this engine). Each
+/// checks the web output against Tailwind's, and native wherever the class
+/// reaches React Native: either the same meaning, or deliberately nothing.
+#[cfg(test)]
+mod tailwind_v4_gap_tests {
+    use super::*;
+    use crate::parser::parse_class;
+    use crate::resolve_style::resolve_style;
+    use serde_json::{json, Value};
+
+    fn web(class: &str) -> Option<Vec<Declaration>> {
+        resolve_utility(&parse_class(class), &ThemeConfig::default())
+    }
+    fn web_has(class: &str, property: &str, value: &str) -> bool {
+        web(class).is_some_and(|d| d.contains(&decl(property, value)))
+    }
+    fn native(class: &str) -> serde_json::Map<String, Value> {
+        resolve_style(class, &ThemeConfig::default(), "light", false, 400.0)
+    }
+
+    #[test]
+    fn numbered_border_and_divide_widths_are_exact_pixels_not_spacing_steps() {
+        // Regression: these were n * 4px (border-2 = 8px) on web and native.
+        assert_eq!(web("border-2"), Some(vec![decl("border-width", "2px")]));
+        assert!(web_has("border-t-4", "border-top-width", "4px"));
+        assert!(web_has("border-x-8", "border-left-width", "8px"));
+        assert!(web_has("border-s-2", "border-inline-start-width", "2px"));
+        assert!(web_has("border-0", "border-width", "0px"));
+        assert!(web_has("divide-x-2", "__divide-x-width", "2px"));
+        assert_eq!(native("border-2").get("borderWidth"), Some(&json!(2.0)));
+        assert_eq!(native("border-x-2").get("borderLeftWidth"), Some(&json!(2.0)));
+        // A theme's spacing customization must not move border widths.
+        let mut t = ThemeConfig::default();
+        t.spacing.insert("2".to_string(), 99.0);
+        assert_eq!(resolve_utility(&parse_class("border-2"), &t), Some(vec![decl("border-width", "2px")]));
+    }
+
+    #[test]
+    fn px_is_one_pixel_on_every_spacing_scale_utility() {
+        assert_eq!(web("p-px"), Some(vec![decl("padding", "1px")]));
+        assert!(web_has("h-px", "height", "1px"));
+        assert!(web_has("w-px", "width", "1px"));
+        assert!(web_has("gap-px", "gap", "1px"));
+        assert!(web_has("-mt-px", "margin-top", "-1px"));
+        assert!(web_has("inset-px", "inset", "1px"));
+        assert!(web_has("translate-x-px", "--kb-translate-x", "1px"));
+        assert_eq!(native("p-px").get("padding"), Some(&json!(1.0)));
+        assert_eq!(native("-mt-px").get("marginTop"), Some(&json!(-1.0)));
+    }
+
+    #[test]
+    fn bare_axis_and_logical_borders_are_one_pixel_solid() {
+        assert!(web_has("border-x", "border-left-width", "1px") && web_has("border-x", "border-right-style", "solid"));
+        assert!(web_has("border-y", "border-top-width", "1px") && web_has("border-y", "border-bottom-width", "1px"));
+        assert!(web_has("border-s", "border-inline-start-width", "1px"));
+        assert!(web_has("border-e", "border-inline-end-width", "1px"));
+    }
+
+    #[test]
+    fn two_axis_translate_and_skew_including_negatives() {
+        assert!(web_has("-translate-4", "--kb-translate-x", "-16px") && web_has("-translate-4", "--kb-translate-y", "-16px"));
+        assert!(web_has("translate-1/2", "--kb-translate-y", "50%"));
+        assert!(web_has("-skew-3", "--kb-skew-x", "skewX(-3deg)") && web_has("-skew-3", "--kb-skew-y", "skewY(-3deg)"));
+        assert_eq!(native("translate-4").get("transform"), Some(&json!([{ "translateX": 16.0 }, { "translateY": 16.0 }])));
+        assert_eq!(native("-skew-3").get("transform"), Some(&json!([{ "skewX": "-3deg" }, { "skewY": "-3deg" }])));
+        // per-axis forms are unaffected by the new bare prefixes
+        assert!(web_has("translate-x-4", "--kb-translate-x", "16px"));
+        assert!(web_has("skew-y-2", "--kb-skew-y", "skewY(2deg)"));
+    }
+
+    #[test]
+    fn transform_rotate_none_and_scale_none() {
+        assert!(web("transform").is_some_and(|d| d.iter().any(|x| x.property == "transform")));
+        assert!(web_has("rotate-none", "--kb-rotate", "rotate(0deg)"));
+        assert!(web_has("scale-none", "--kb-scale-x", "scaleX(1)") && web_has("scale-none", "--kb-scale-y", "scaleY(1)"));
+        assert_eq!(native("rotate-45 rotate-none").get("transform"), Some(&json!([{ "rotate": "0deg" }])));
+        assert_eq!(native("scale-150 scale-none").get("transform"), Some(&json!([{ "scaleX": 1.0 }, { "scaleY": 1.0 }])));
+    }
+
+    #[test]
+    fn negative_space_between_scroll_margin_and_indent() {
+        assert!(web_has("-space-x-2", "__space-x", "-8px"));
+        assert!(web_has("-space-y-4", "__space-y", "-16px"));
+        assert_eq!(web("-scroll-mt-4"), Some(vec![decl("scroll-margin-top", "-16px")]));
+        assert!(web_has("-scroll-mx-2", "scroll-margin-left", "-8px"));
+        assert_eq!(web("-indent-4"), Some(vec![decl("text-indent", "-16px")]));
+        // padding-like utilities still have no negative form
+        assert_eq!(web("-scroll-pt-4"), None);
+        assert_eq!(web("-p-4"), None);
+    }
+
+    #[test]
+    fn numbered_flex_and_formula_leading() {
+        assert_eq!(web("flex-2"), Some(vec![decl("flex", "2")]));
+        assert_eq!(native("flex-3").get("flex"), Some(&json!(3.0)));
+        assert!(web_has("leading-6", "line-height", "1.5rem"));
+        assert!(web_has("leading-12", "line-height", "3rem"));
+        assert!(web_has("leading-0.5", "line-height", "0.125rem"));
+        assert_eq!(native("leading-12").get("lineHeight"), Some(&json!(48.0)));
+    }
+
+    #[test]
+    fn gradient_stop_positions_accept_tailwinds_percent_spelling() {
+        assert_eq!(web("from-10%"), Some(vec![decl("--kb-gradient-from-position", "10%")]));
+        assert_eq!(web("via-30%"), Some(vec![decl("--kb-gradient-via-position", "30%")]));
+        assert_eq!(web("to-90%"), Some(vec![decl("--kb-gradient-to-position", "90%")]));
+        // Kbach's original spelling still works
+        assert_eq!(web("from-10"), Some(vec![decl("--kb-gradient-from-position", "10%")]));
+    }
+
+    #[test]
+    fn table_and_list_item_displays_are_web_only() {
+        for (class, display) in [
+            ("table", "table"),
+            ("table-cell", "table-cell"),
+            ("table-row", "table-row"),
+            ("table-header-group", "table-header-group"),
+            ("inline-table", "inline-table"),
+            ("list-item", "list-item"),
+        ] {
+            assert_eq!(web(class), Some(vec![decl("display", display)]), "{class}");
+            assert!(native(class).get("display").is_none(), "{class} must not reach React Native");
+        }
+        // the existing table utilities are untouched
+        assert_eq!(web("table-fixed"), Some(vec![decl("table-layout", "fixed")]));
+        assert_eq!(web("inline-flex"), Some(vec![decl("display", "inline-flex")]));
+    }
+
+    #[test]
+    fn logical_padding_and_margin_are_web_only() {
+        assert_eq!(web("ps-4"), Some(vec![decl("padding-inline-start", "16px")]));
+        assert_eq!(web("pe-2"), Some(vec![decl("padding-inline-end", "8px")]));
+        assert_eq!(web("-ms-1"), Some(vec![decl("margin-inline-start", "-4px")]));
+        assert_eq!(web("me-px"), Some(vec![decl("margin-inline-end", "1px")]));
+        for class in ["ps-4", "pe-2", "ms-1", "me-1"] {
+            assert!(native(class).keys().all(|k| k == "__kbachWarnings" || !k.to_lowercase().contains("inline")), "{class}");
+        }
+    }
+
+    #[test]
+    fn viewport_units_lh_and_max_w_keywords_are_web_only() {
+        assert_eq!(web("h-dvh"), Some(vec![decl("height", "100dvh")]));
+        assert_eq!(web("min-h-svh"), Some(vec![decl("min-height", "100svh")]));
+        assert_eq!(web("w-lvw"), Some(vec![decl("width", "100lvw")]));
+        assert_eq!(web("size-dvh"), Some(vec![decl("width", "100dvh"), decl("height", "100dvh")]));
+        assert_eq!(web("h-lh"), Some(vec![decl("height", "1lh")]));
+        assert_eq!(web("max-w-none"), Some(vec![decl("max-width", "none")]));
+        assert_eq!(web("max-w-prose"), Some(vec![decl("max-width", "65ch")]));
+        // unchanged
+        assert_eq!(web("w-screen"), Some(vec![decl("width", "100dvw")]));
+        assert_eq!(web("h-screen"), Some(vec![decl("height", "100dvh")]));
+        assert!(native("h-dvh").get("height").is_none());
+        assert!(native("max-w-none").get("maxWidth").is_none());
+    }
+
+    #[test]
+    fn tailwind_v4_extra_small_and_4xl_steps() {
+        assert_eq!(web("w-3xs"), Some(vec![decl("width", "16rem")]));
+        assert_eq!(web("max-w-2xs"), Some(vec![decl("max-width", "18rem")]));
+        assert_eq!(web("max-w-xs"), Some(vec![decl("max-width", "20rem")]));
+        assert_eq!(web("rounded-xs"), Some(vec![decl("border-radius", "0.125rem")]));
+        assert_eq!(web("rounded-4xl"), Some(vec![decl("border-radius", "2rem")]));
+        assert!(web_has("blur-xs", "--kb-blur", "blur(4px)"));
+        assert!(web_has("backdrop-blur-xs", "--kb-backdrop-blur", "blur(4px)"));
+    }
+
+    /// Tailwind v4.3 values for scales v4 renamed or changed from v3.
+    #[test]
+    fn v4_3_values_for_the_scales_v4_changed() {
+        assert_eq!(web("rounded-sm"), Some(vec![decl("border-radius", "0.25rem")]));
+        assert!(web_has("blur-sm", "--kb-blur", "blur(8px)"));
+        assert!(web_has("backdrop-blur-sm", "--kb-backdrop-blur", "blur(8px)"));
+        assert_eq!(
+            web("shadow-sm").unwrap()[0].value,
+            "0 1px 3px 0 var(--kb-shadow-color, rgb(0 0 0 / 0.1)), 0 1px 2px -1px var(--kb-shadow-color, rgb(0 0 0 / 0.1))",
+        );
+        assert!(web_has("drop-shadow-md", "--kb-drop-shadow", "drop-shadow(0 3px 3px var(--kb-drop-shadow-color, rgb(0 0 0 / 0.12)))"));
+        assert!(web_has("drop-shadow-xs", "--kb-drop-shadow", "drop-shadow(0 1px 1px var(--kb-drop-shadow-color, rgb(0 0 0 / 0.05)))"));
+        assert!(web_has("text-shadow-md", "text-shadow", "0px 1px 1px var(--kb-text-shadow-color, rgb(0 0 0 / 0.1)), 0px 1px 2px var(--kb-text-shadow-color, rgb(0 0 0 / 0.1)), 0px 2px 4px var(--kb-text-shadow-color, rgb(0 0 0 / 0.1))"));
+        assert!(web_has("text-shadow-2xs", "text-shadow", "0px 1px 0px var(--kb-text-shadow-color, rgb(0 0 0 / 0.15))"));
+        assert!(web_has("ring", "--kb-ring-width", "1px"));
+        // any whole number, as in v4 (v3 only had 0/1/2/4/8)
+        assert!(web_has("ring-3", "--kb-ring-width", "3px"));
+        assert!(web_has("ring-offset-6", "--kb-ring-offset-width", "6px"));
+        assert!(web_has("outline-3", "outline-width", "3px"));
+        assert_eq!(web("outline-offset-6"), Some(vec![decl("outline-offset", "6px")]));
+        // text sizes carry a default line-height that leading-* overrides
+        assert!(web_has("text-sm", "line-height", "var(--kb-leading, calc(1.25 / 0.875))"));
+        assert!(web_has("leading-8", "--kb-leading", "2rem"));
+        // native: v4 sm shadow; no CSS variables or rings ever reach RN
+        assert_eq!(native("shadow-sm").get("shadowRadius"), Some(&json!(3.0)));
+        assert!(native("outline-2 outline-dashed ring leading-8 text-sm").keys().all(|k| !k.starts_with("Kb") && k != "boxShadow"));
+        assert_eq!(native("outline-none").get("outlineStyle"), Some(&json!("none")));
+        assert!(native("outline-none").get("outline").is_none());
+        // no var() value ever reaches RN; the width alone still applies
+        assert_eq!(native("outline-2"), serde_json::from_value::<serde_json::Map<String, Value>>(json!({ "outlineWidth": 2.0 })).unwrap());
+        assert_eq!(native("outline-2 outline-dashed").get("outlineStyle"), Some(&json!("dashed")));
+        assert!(native("outline-hidden").get("outline").is_none());
+        // plain colors are untouched by the var() filter
+        // (arbitrary hex: ThemeConfig::default() has an empty palette)
+        assert_eq!(native("bg-[#3b82f6]").get("backgroundColor"), Some(&json!("#3b82f6")));
+        assert_eq!(native("border-[#3b82f6]").get("borderColor"), Some(&json!("#3b82f6")));
+        // native text size stays font-size only (RN line heights are absolute)
+        assert_eq!(native("text-sm").get("lineHeight"), None);
+        assert_eq!(native("leading-8 text-sm").get("lineHeight"), Some(&json!(32.0)));
+    }
+
+    #[test]
+    fn inherit_color_keyword_on_web_but_not_native() {
+        assert!(web_has("text-inherit", "color", "inherit"));
+        assert!(web_has("bg-inherit", "background-color", "inherit"));
+        assert!(web_has("border-inherit", "border-color", "inherit"));
+        assert!(native("bg-inherit").get("backgroundColor").is_none());
+        assert!(native("text-inherit").get("color").is_none());
+    }
+}
+
+/// The rest of Tailwind v4.3's class list: v4.2 logical utilities, safe
+/// alignment, flex fractions, colored drop shadows, and the small leftovers.
+/// Web output checked against Tailwind's; web-only ones must give RN nothing.
+#[cfg(test)]
+mod tailwind_v4_remaining_tests {
+    use super::*;
+    use crate::parser::parse_class;
+    use crate::resolve_style::resolve_style;
+    use crate::theme::ColorValue;
+
+    fn theme() -> ThemeConfig {
+        let mut t = ThemeConfig::default();
+        t.colors.insert("blue-6".to_string(), ColorValue::Plain("#2563eb".to_string()));
+        t
+    }
+    fn web(class: &str) -> Option<Vec<Declaration>> {
+        resolve_utility(&parse_class(class), &theme())
+    }
+    fn one(class: &str, property: &str, value: &str) {
+        assert_eq!(web(class), Some(vec![decl(property, value)]), "{class}");
+    }
+    fn native_is_empty(class: &str) {
+        let style = resolve_style(class, &theme(), "light", false, 400.0);
+        assert!(style.keys().all(|k| k == "__kbachWarnings"), "{class} must not reach React Native, got {style:?}");
+    }
+
+    #[test]
+    fn block_axis_logical_spacing_insets_and_scroll() {
+        one("pbs-4", "padding-block-start", "16px");
+        one("pbe-2", "padding-block-end", "8px");
+        one("mbs-4", "margin-block-start", "16px");
+        one("-mbe-2", "margin-block-end", "-8px");
+        one("inset-s-4", "inset-inline-start", "16px");
+        one("-inset-e-2", "inset-inline-end", "-8px");
+        one("inset-bs-1/2", "inset-block-start", "50%");
+        one("inset-be-full", "inset-block-end", "100%");
+        one("scroll-ms-4", "scroll-margin-inline-start", "16px");
+        one("-scroll-mbs-2", "scroll-margin-block-start", "-8px");
+        one("scroll-pbe-4", "scroll-padding-block-end", "16px");
+        one("scroll-ps-1", "scroll-padding-inline-start", "4px");
+        for class in ["pbs-4", "mbs-4", "inset-s-4", "inset-bs-2", "scroll-ms-4"] {
+            native_is_empty(class);
+        }
+    }
+
+    #[test]
+    fn block_axis_logical_borders() {
+        assert_eq!(
+            web("border-bs"),
+            Some(vec![decl("border-block-start-width", "1px"), decl("border-block-start-style", "solid")]),
+        );
+        one("border-be-2", "border-block-end-width", "2px");
+        one("border-bs-blue-6", "border-block-start-color", "#2563eb");
+        native_is_empty("border-bs-2");
+        native_is_empty("border-be");
+    }
+
+    #[test]
+    fn logical_viewport_sizes() {
+        one("block-dvh", "block-size", "100dvh");
+        one("inline-svw", "inline-size", "100svw");
+        one("max-inline-none", "max-inline-size", "none");
+        one("min-block-lh", "min-block-size", "1lh");
+        one("max-h-none", "max-height", "none");
+        // display utilities that share these names are untouched
+        one("block", "display", "block");
+        one("inline-flex", "display", "inline-flex");
+    }
+
+    #[test]
+    fn negative_full_only_for_inset_and_translate() {
+        one("-top-full", "top", "-100%");
+        assert_eq!(web("-inset-x-full"), Some(vec![decl("left", "-100%"), decl("right", "-100%")]));
+        assert!(web("-translate-x-full").unwrap().contains(&decl("--kb-translate-x", "-100%")));
+        // margins have no `full` step in Tailwind, negative or not
+        assert_eq!(web("-mt-full"), None);
+    }
+
+    #[test]
+    fn safe_and_baseline_alignment_are_web_only() {
+        one("items-center-safe", "align-items", "safe center");
+        one("items-baseline-last", "align-items", "last baseline");
+        one("self-end-safe", "align-self", "safe flex-end");
+        one("justify-center-safe", "justify-content", "safe center");
+        one("justify-baseline", "justify-content", "baseline");
+        one("content-baseline", "align-content", "baseline");
+        one("content-end-safe", "align-content", "safe flex-end");
+        one("justify-items-normal", "justify-items", "normal");
+        one("place-items-center-safe", "place-items", "safe center");
+        one("justify-self-end-safe", "justify-self", "safe end");
+        native_is_empty("items-center-safe");
+        // the plain keywords still reach native
+        one("items-center", "align-items", "center");
+    }
+
+    #[test]
+    fn object_position_and_container_type_never_reach_native() {
+        // Not React Native styles; used to leak through as objectPosition/containerType.
+        for class in ["object-top", "object-top-left", "@container", "@container-normal"] {
+            native_is_empty(class);
+            assert!(web(class).is_some(), "{class} still works on web");
+        }
+    }
+
+    #[test]
+    fn flex_fractions_are_web_only() {
+        one("flex-1/2", "flex", "calc(1/2 * 100%)");
+        native_is_empty("flex-1/3");
+    }
+
+    #[test]
+    fn colored_drop_shadows_recolor_the_size() {
+        assert_eq!(
+            web("drop-shadow-blue-6"),
+            Some(vec![
+                decl("--kb-drop-shadow-color", "#2563eb"),
+                decl("--kb-drop-shadow", "var(--kb-drop-shadow-size,)"),
+                decl("filter", "var(--kb-blur,) var(--kb-brightness,) var(--kb-contrast,) var(--kb-grayscale,) var(--kb-hue-rotate,) var(--kb-invert,) var(--kb-saturate,) var(--kb-sepia,) var(--kb-drop-shadow,)"),
+            ]),
+        );
+        assert!(web("drop-shadow-lg").unwrap().contains(&decl("--kb-drop-shadow-size", "drop-shadow(0 4px 4px var(--kb-drop-shadow-color, rgb(0 0 0 / 0.15)))")));
+    }
+
+    #[test]
+    fn divide_and_placeholder_colors() {
+        one("divide-blue-6", "__divide-color", "#2563eb");
+        // the divide-x/y/style utilities that share the name prefix still work
+        one("divide-double", "__divide-style", "double");
+        assert!(web("divide-x").is_some() && web("divide-y-2").is_some());
+        // placeholder-<color> is placeholder:text-<color>, selector kept as written
+        let p = parse_class("placeholder-blue-6");
+        assert_eq!(p.modifiers, vec!["placeholder".to_string()]);
+        assert_eq!(p.utility, "text");
+        assert_eq!(p.original, "placeholder-blue-6");
+        let p = parse_class("focus:placeholder-blue-6");
+        assert_eq!(p.modifiers, vec!["focus".to_string(), "placeholder".to_string()]);
+        // the existing placeholder: modifier is untouched
+        assert_eq!(parse_class("placeholder:text-blue-6").utility, "text");
+    }
+
+    #[test]
+    fn small_leftovers() {
+        assert_eq!(
+            web("contain-size"),
+            Some(vec![
+                decl("--kb-contain-size", "size"),
+                decl("contain", "var(--kb-contain-size,) var(--kb-contain-layout,) var(--kb-contain-paint,) var(--kb-contain-style,)"),
+            ]),
+        );
+        one("contain-strict", "contain", "strict");
+        one("wrap-anywhere", "overflow-wrap", "anywhere");
+        one("wrap-break-word", "overflow-wrap", "break-word");
+        one("scheme-only-dark", "color-scheme", "only dark");
+        one("grid-cols-subgrid", "grid-template-columns", "subgrid");
+        one("grid-rows-subgrid", "grid-template-rows", "subgrid");
+        one("transform-border", "transform-box", "border-box");
+        assert!(web("translate-none").unwrap().contains(&decl("--kb-translate-x", "0")));
+        assert!(web("scale-3d").is_some() && web("translate-3d").is_some());
+        one("stroke-2", "stroke-width", "2");
+        one("accent-auto", "accent-color", "auto");
+        one("ease-initial", "--kb-ease", "initial");
+        one("via-none", "--kb-gradient-stops", "var(--kb-gradient-from), var(--kb-gradient-to)");
+        one("mix-blend-plus-darker", "mix-blend-mode", "plus-darker");
+        one("@container-normal", "container-type", "normal");
+        one("object-top-left", "object-position", "left top");
+        one("bg-bottom-right", "background-position", "right bottom");
+        assert!(web("leading-px").unwrap().contains(&decl("line-height", "1px")));
+        // stroke colors still resolve
+        one("stroke-blue-6", "stroke", "#2563eb");
     }
 }

@@ -119,3 +119,6 @@ the complete `doctor` check list, and failure modes.
 ## License
 
 MIT
+
+Tailwind CSS is a trademark of Tailwind Labs Inc. Kbach is an independent
+project and is not affiliated with, sponsored by, or endorsed by Tailwind Labs.

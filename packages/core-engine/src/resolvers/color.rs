@@ -13,6 +13,14 @@ use crate::theme::{ColorValue, ThemeConfig};
 /// comments for the exact prefixes/shapes they recognize); treated as
 /// unresolvable rather than guessing a mode.
 pub(super) fn lookup_hex<'a>(theme: &'a ThemeConfig, key: &str) -> Option<&'a str> {
+    // CSS's `inherit` keyword (`text-inherit`, `bg-inherit`, `border-inherit`,
+    // …) — like `current`, a value every color utility accepts, but a CSS
+    // keyword rather than a palette entry, so it isn't in theme.colors (and
+    // native skips it, see `native_hex_color`). A theme color literally
+    // named "inherit" still wins.
+    if key == "inherit" && !theme.colors.contains_key(key) {
+        return Some("inherit");
+    }
     match theme.colors.get(key)? {
         ColorValue::Plain(hex) => Some(hex.as_str()),
         ColorValue::ModeAware { .. } => None,
@@ -134,7 +142,12 @@ fn resolve_text(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declara
     if !parsed.is_arbitrary {
         if let Some(value) = parsed.value.as_deref() {
             if let Some(size) = super::typography::text_size(value) {
-                return Some(vec![decl("font-size", size)]);
+                // Tailwind v4: each size carries its own default line-height.
+                let mut decls = vec![decl("font-size", size)];
+                if let Some(lh) = super::typography::text_size_line_height(value) {
+                    decls.push(decl("line-height", &format!("var(--kb-leading, {lh})")));
+                }
+                return Some(decls);
             }
             if let Some(align) = super::typography::text_align(value) {
                 return Some(vec![decl("text-align", align)]);
@@ -143,7 +156,7 @@ fn resolve_text(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declara
                 return Some(vec![decl("text-wrap", wrap)]);
             }
             if value == "shadow" {
-                return Some(vec![decl("text-shadow", super::effects::text_shadow_default())]);
+                return Some(vec![decl("text-shadow", &super::effects::text_shadow_default())]);
             }
             if value == "ellipsis" {
                 return Some(vec![decl("text-overflow", "ellipsis")]);
@@ -196,6 +209,7 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // same as `border_value`'s own color branch — is the right shape,
         // not `color_declarations`'s rgba-decomposition.
         "caret" => color_value(theme, parsed).map(|v| vec![decl("caret-color", &v)]),
+        "accent" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("auto") => Some(vec![decl("accent-color", "auto")]),
         "accent" => color_value(theme, parsed).map(|v| vec![decl("accent-color", &v)]),
         // SVG presentation attributes — grouped here with the rest of this
         // module's color-family utilities rather than a dedicated svg.rs,
@@ -212,6 +226,10 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
             stroke_width_value(value).map(|v| vec![decl("stroke-width", v)])
         }
         "stroke" if parsed.value.as_deref() == Some("none") => Some(vec![decl("stroke", "none")]),
+        // `stroke-2` (Tailwind's spelling): any whole number is a stroke width.
+        "stroke" if !parsed.is_arbitrary && parsed.value.as_deref().is_some_and(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit())) => {
+            Some(vec![decl("stroke-width", parsed.value.as_deref()?)])
+        }
         "stroke" => color_value(theme, parsed).map(|v| vec![decl("stroke", &v)]),
         // scrollbar-thumb-*/scrollbar-track-* (scrollbar-color) — composed
         // via CSS variables, same "each utility sets its own slot, both
@@ -482,7 +500,15 @@ mod tests {
     #[test]
     fn resolves_text_size_before_falling_back_to_color() {
         let theme = theme_with_colors();
-        assert_eq!(resolve(&parse_class("text-lg"), &theme), Some(vec![decl("font-size", "1.125rem")]));
+        // Tailwind v4: each size carries its default line-height, overridable by leading-*.
+        assert_eq!(
+            resolve(&parse_class("text-lg"), &theme),
+            Some(vec![decl("font-size", "1.125rem"), decl("line-height", "var(--kb-leading, calc(1.75 / 1.125))")]),
+        );
+        assert_eq!(
+            resolve(&parse_class("text-6xl"), &theme),
+            Some(vec![decl("font-size", "3.75rem"), decl("line-height", "var(--kb-leading, 1)")]),
+        );
         assert_eq!(resolve(&parse_class("text-center"), &theme), Some(vec![decl("text-align", "center")]));
         assert_eq!(
             resolve(&parse_class("text-blue-6"), &theme),

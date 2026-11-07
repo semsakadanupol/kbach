@@ -18,7 +18,11 @@ interface NativeShadow {
 
 function nativeShadowValue(key: string): NativeShadow | null {
   switch (key) {
-    case 'sm': return { offsetY: 1, radius: 2, opacity: 0.05, elevation: 1 };
+    // Tailwind v4.3's scale, like effects.rs: `sm` is the default shadow,
+    // v3's `sm` is `xs`.
+    case '2xs': return { offsetY: 1, radius: 0, opacity: 0.05, elevation: 1 };
+    case 'xs': return { offsetY: 1, radius: 2, opacity: 0.05, elevation: 1 };
+    case 'sm': return { offsetY: 1, radius: 3, opacity: 0.1, elevation: 2 };
     case 'DEFAULT': return { offsetY: 1, radius: 3, opacity: 0.1, elevation: 2 };
     case 'md': return { offsetY: 4, radius: 6, opacity: 0.1, elevation: 4 };
     case 'lg': return { offsetY: 10, radius: 15, opacity: 0.1, elevation: 8 };

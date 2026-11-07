@@ -83,8 +83,18 @@ fn scheme_value(key: &str) -> Option<&'static str> {
         "dark" => "dark",
         "light" => "light",
         "light-dark" => "light dark",
+        "only-dark" => "only dark",
+        "only-light" => "only light",
         _ => return None,
     })
+}
+
+/// One slot of the composed `contain` value (see the `contain-*` arms).
+fn contain(slot: &str, keyword: &str) -> Vec<Declaration> {
+    vec![
+        decl(slot, keyword),
+        decl("contain", "var(--kb-contain-size,) var(--kb-contain-layout,) var(--kb-contain-paint,) var(--kb-contain-style,)"),
+    ]
 }
 
 pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
@@ -159,6 +169,53 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // instead of silence.
         "table-auto" => Some(vec![decl("table-layout", "auto")]),
         "table-fixed" => Some(vec![decl("table-layout", "fixed")]),
+        // Table and list-item display values. Here rather than with the other
+        // `display` utilities in layout.rs because that module is shared with
+        // the native dispatcher, and React Native has no table layout: these
+        // must never reach it as `display: table`. `inline-table` arrives as
+        // utility="inline" value="table" (layout.rs's "inline" arm passes on
+        // any value it doesn't know).
+        "table" => Some(vec![decl("display", "table")]),
+        "table-caption" => Some(vec![decl("display", "table-caption")]),
+        "table-cell" => Some(vec![decl("display", "table-cell")]),
+        "table-column" => Some(vec![decl("display", "table-column")]),
+        "table-column-group" => Some(vec![decl("display", "table-column-group")]),
+        "table-footer-group" => Some(vec![decl("display", "table-footer-group")]),
+        "table-header-group" => Some(vec![decl("display", "table-header-group")]),
+        "table-row-group" => Some(vec![decl("display", "table-row-group")]),
+        "table-row" => Some(vec![decl("display", "table-row")]),
+        "inline" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("table") => {
+            Some(vec![decl("display", "inline-table")])
+        }
+        "list-item" => Some(vec![decl("display", "list-item")]),
+        // `contain`: the four composable keywords set their own slot of one
+        // composed value (any combination works, in any order); the two
+        // shorthands and `none` set it outright.
+        "contain-size" => Some(contain("--kb-contain-size", "size")),
+        "contain-inline-size" => Some(contain("--kb-contain-size", "inline-size")),
+        "contain-layout" => Some(contain("--kb-contain-layout", "layout")),
+        "contain-paint" => Some(contain("--kb-contain-paint", "paint")),
+        "contain-style" => Some(contain("--kb-contain-style", "style")),
+        "contain-none" => Some(vec![decl("contain", "none")]),
+        "contain-strict" => Some(vec![decl("contain", "strict")]),
+        "contain-content" => Some(vec![decl("contain", "content")]),
+        // Safe and last-baseline alignment (Tailwind v4). Web-only: these
+        // CSS keywords have no React Native equivalent.
+        "items-center-safe" => Some(vec![decl("align-items", "safe center")]),
+        "items-end-safe" => Some(vec![decl("align-items", "safe flex-end")]),
+        "items-baseline-last" => Some(vec![decl("align-items", "last baseline")]),
+        "self-center-safe" => Some(vec![decl("align-self", "safe center")]),
+        "self-end-safe" => Some(vec![decl("align-self", "safe flex-end")]),
+        "self-baseline-last" => Some(vec![decl("align-self", "last baseline")]),
+        "justify-center-safe" => Some(vec![decl("justify-content", "safe center")]),
+        "justify-end-safe" => Some(vec![decl("justify-content", "safe flex-end")]),
+        "justify-baseline" => Some(vec![decl("justify-content", "baseline")]),
+        "content" if !parsed.is_arbitrary => match parsed.value.as_deref()? {
+            "baseline" => Some(vec![decl("align-content", "baseline")]),
+            "center-safe" => Some(vec![decl("align-content", "safe center")]),
+            "end-safe" => Some(vec![decl("align-content", "safe flex-end")]),
+            _ => None,
+        },
         "caption-top" => Some(vec![decl("caption-side", "top")]),
         "caption-bottom" => Some(vec![decl("caption-side", "bottom")]),
         // scrollbar-width — real Tailwind's class names don't repeat "width"

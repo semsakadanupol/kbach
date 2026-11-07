@@ -10,8 +10,22 @@ let ready = false;
  * again from multiple entry points.
  */
 export function initKbach(): Promise<void> {
+  return initKbachFrom(undefined);
+}
+
+/**
+ * `initKbach()` with an explicit location for the `.wasm` binary — internal,
+ * NOT re-exported from index.ts. `@kbach/browser` (packages/browser, the
+ * CDN `<script>` build, which bundles this file from source) needs it: as a
+ * classic `<script>` it has no `import.meta.url` for wasm-bindgen's default
+ * lookup to resolve against, so it passes a URL next to its own script
+ * instead. Renaming or removing it breaks that package's build and tests. `undefined` = wasm-bindgen's default (`import.meta.url`-relative),
+ * which is exactly what `initKbach()` has always done. Shares the same
+ * memoized promise, so whichever caller runs first wins.
+ */
+export function initKbachFrom(wasmSource: string | URL | undefined): Promise<void> {
   if (!readyPromise) {
-    readyPromise = init().then(() => {
+    readyPromise = (wasmSource === undefined ? init() : init({ module_or_path: wasmSource })).then(() => {
       ready = true;
     });
   }

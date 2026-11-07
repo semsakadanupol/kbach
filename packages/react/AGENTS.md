@@ -94,6 +94,12 @@ write `className="..."` normally.
 - **`@kbach/react/jsx-runtime`** — a `jsxImportSource` override that
   intercepts *every* element's `className` at runtime instead of relying on
   the static scan. Also needs `await initKbach()`.
+- **No-build CDN usage is a SEPARATE package, `@kbach/browser`**
+  (packages/browser), which bundles this package's runtime modules (`kb`,
+  `theme`, `config`, `colorVariables`, `darkModeStore`, `wasmLoader`)
+  straight from `src/`. Renaming or changing those modules' exports (or
+  `wasmLoader.ts`'s internal `initKbachFrom`) breaks that package, and its
+  own tests catch it. See [packages/browser/AGENTS.md](../browser/AGENTS.md).
 
 ## 4. Dark mode
 

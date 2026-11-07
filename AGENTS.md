@@ -8,6 +8,7 @@ package's own `AGENTS.md`, not here:
 
 - [`packages/react/AGENTS.md`](packages/react/AGENTS.md) — `@kbach/react` (web)
 - [`packages/react-native/AGENTS.md`](packages/react-native/AGENTS.md) — `@kbach/react-native`
+- [`packages/browser/AGENTS.md`](packages/browser/AGENTS.md) — `@kbach/browser`, the no-build CDN `<script>`
 - [`packages/cli/AGENTS.md`](packages/cli/AGENTS.md) — `@kbach/cli`, the setup-automation CLI
 - [`packages/vscode-extension/AGENTS.md`](packages/vscode-extension/AGENTS.md) — `kbach-vscode`, the editor extension
 
@@ -60,6 +61,7 @@ core** compiled to different targets, and two thin bindings on top:
 | `@kbach/core-engine` | Rust → WASM (web) + JNI `.so` (Android). Consumed by the two below; not used directly. | Parser + resolvers. |
 | `@kbach/react` | Web / DOM | Class strings are scanned at **build time** and compiled to a real CSS file. |
 | `@kbach/react-native` | Android (JNI), Expo Web (WASM), Expo Go (JS fallback) | Class strings are resolved to a **style object at render time**. |
+| `@kbach/browser` | Plain HTML via a CDN `<script>` (no bundler, no React) | Class strings in the page are resolved **in the browser at load time** (WASM) and watched for changes. Bundles `@kbach/react`'s runtime from source — see [`packages/browser/AGENTS.md`](packages/browser/AGENTS.md). |
 | `@kbach/cli` | Node CLI | Not a runtime dependency — automates the setup below via codemods (`init`) and read-only diagnostics (`doctor`). |
 | `kbach-vscode` | VS Code extension | Not a runtime dependency — `className` completion/hover/diagnostics in the editor, validated against the real engine. |
 
@@ -71,8 +73,8 @@ Both bindings read the same optional `kbach.config.js` and expose the same
 ## 2. `@kbach/react` (web)
 
 Install, build-plugin wiring (Vite/PostCSS), the runtime `kb()`/
-jsx-runtime paths, dark mode, plugin options, and the full exports list —
-see [`packages/react/AGENTS.md`](packages/react/AGENTS.md). `npx
+jsx-runtime paths, dark mode, plugin options, and the full exports list
+— see [`packages/react/AGENTS.md`](packages/react/AGENTS.md). `npx
 @kbach/cli init` automates the Vite/PostCSS wiring below — see §4.
 
 ---

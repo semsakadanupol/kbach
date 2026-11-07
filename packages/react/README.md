@@ -78,6 +78,13 @@ runtime: the dynamic [`kb()`](#dynamic-classes) function, and the optional
 static build). If you use either, `await initKbach()` once before your
 first render, same as before.
 
+## Use from a CDN (no build step)
+
+For a plain HTML page with no npm, bundler or React, use
+[`@kbach/browser`](https://www.npmjs.com/package/@kbach/browser) instead:
+one `<script src="https://cdn.jsdelivr.net/npm/@kbach/browser"></script>`
+tag and the same class names just work.
+
 ## React Router
 
 React Router is a client-side routing library with no build-tool coupling

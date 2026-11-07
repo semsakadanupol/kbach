@@ -14,6 +14,11 @@ Kbach actually works:
   (web) only.
 - [packages/react-native/AGENTS.md](packages/react-native/AGENTS.md) —
   `@kbach/react-native` only.
+- [packages/browser/AGENTS.md](packages/browser/AGENTS.md) —
+  `@kbach/browser` (the no-build CDN `<script>`) only.
+- [packages/cli/AGENTS.md](packages/cli/AGENTS.md) and
+  [packages/vscode-extension/AGENTS.md](packages/vscode-extension/AGENTS.md) —
+  `@kbach/cli` and `kbach-vscode`.
 
 The user changes and adds features directly, not only through a session
 with an AI assistant — so `AGENTS.md` can drift out of date from work this
@@ -53,7 +58,7 @@ conversation. Confirm with the user each time, specifically:
 
 - Before creating a git commit (including a version-bump commit).
 - Before running `npm publish` for `@kbach/core-engine`, `@kbach/react`,
-  or `@kbach/react-native`.
+  `@kbach/react-native`, or `@kbach/browser`.
 
 Finish and verify the actual code/doc change first (edit, test, rebuild)
 so there's something concrete to confirm — then stop and ask, rather than
@@ -71,7 +76,7 @@ npm dist-tag add <package>@<version> latest
 ```
 
 Do this for whichever of `@kbach/core-engine` / `@kbach/react` /
-`@kbach/react-native` actually got published — not the other two just
+`@kbach/react-native` / `@kbach/browser` actually got published — not the other two just
 because they happen to already be tagged `latest` from a prior release; a
 package that wasn't republished keeps its existing `latest` exactly as it
 was. `beta` still means "actively worked on" in spirit — it just no

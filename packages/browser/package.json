@@ -1,0 +1,46 @@
+{
+  "name": "@kbach/browser",
+  "version": "1.0.0-beta.0",
+  "description": "Kbach from a CDN: one <script> tag styles a plain HTML page with Kbach's utility classes. No build step, no bundler, no React.",
+  "keywords": [
+    "css",
+    "cdn",
+    "wasm",
+    "tailwind",
+    "utility-first",
+    "styling"
+  ],
+  "license": "MIT",
+  "author": "semsakadanupol",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/semsakadanupol/kbach.git",
+    "directory": "packages/browser"
+  },
+  "homepage": "https://github.com/semsakadanupol/kbach#readme",
+  "bugs": {
+    "url": "https://github.com/semsakadanupol/kbach/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "AGENTS.md"
+  ],
+  "main": "./dist/kbach.js",
+  "unpkg": "./dist/kbach.js",
+  "jsdelivr": "./dist/kbach.js",
+  "scripts": {
+    "build": "tsup && node scripts/copy-wasm.mjs && node scripts/verify-bundle.mjs",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@kbach/react": "*",
+    "jsdom": "^30.0.1",
+    "tsup": "^8.0.0",
+    "typescript": "^6.0.0",
+    "vitest": "^1.0.0"
+  }
+}

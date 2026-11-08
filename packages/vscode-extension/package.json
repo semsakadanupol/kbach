@@ -2,7 +2,7 @@
   "name": "kbach-vscode",
   "displayName": "Kbach IntelliSense",
   "description": "className autocomplete, hover previews, and inline typo diagnostics for Kbach — the Rust-powered utility-class styling engine for React and React Native.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "kbach",
   "icon": "images/icon.png",
   "galleryBanner": {
@@ -59,7 +59,7 @@
     "publish:marketplace": "node -e \"require('fs').copyFileSync('../../LICENSE','LICENSE')\" && npx @vscode/vsce publish --no-dependencies"
   },
   "devDependencies": {
-    "@kbach/core-engine": "1.0.0-beta.17",
+    "@kbach/core-engine": "1.0.0-beta.18",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "tsup": "^8.0.0",

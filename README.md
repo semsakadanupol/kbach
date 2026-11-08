@@ -21,8 +21,7 @@ config-file wiring either package's own README shows by hand.
 
 Each package's own README has a short install-and-go guide.
 [`AGENTS.md`](AGENTS.md) is the full reference — how to use both packages
-and how the engine works underneath; see [`new-kbach plan.md`](new-kbach%20plan.md)
-for the original cross-package design notes.
+and how the engine works underneath.
 
 ## Development
 

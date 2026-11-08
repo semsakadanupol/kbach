@@ -36,7 +36,13 @@ function scaleFactor(parsed: ParsedClass): number | null {
 /** Non-arbitrary: `rotate-45` -> "45deg", negative-aware. Arbitrary: `rotate-[0.5turn]` -> as-is. */
 function angle(parsed: ParsedClass): string | null {
   if (parsed.value === null) return null;
-  if (parsed.isArbitrary) return parsed.value;
+  if (parsed.isArbitrary) {
+    if (!parsed.negative) return parsed.value;
+    // -rotate-[30deg]: flip a plain angle's sign, else multiply by -1 (transform.rs).
+    if (parsed.value.startsWith('-')) return parsed.value.slice(1);
+    if (/^[\d.]/.test(parsed.value)) return `-${parsed.value}`;
+    return `calc(${parsed.value} * -1)`;
+  }
   const n = Number(parsed.value);
   if (!Number.isFinite(n)) return null;
   return `${parsed.negative ? -n : n}deg`;

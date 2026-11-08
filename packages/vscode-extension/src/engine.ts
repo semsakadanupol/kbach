@@ -38,8 +38,9 @@ import { resolveKbachConfig } from './kbachConfigResolve';
  */
 const vendoredPath = join(__dirname, 'kbach_core_engine.js');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { generate_css } = require(existsSync(vendoredPath) ? vendoredPath : '@kbach/core-engine/node') as {
+const { generate_css, suggest_class } = require(existsSync(vendoredPath) ? vendoredPath : '@kbach/core-engine/node') as {
   generate_css(classString: string, themeJson: string): string;
+  suggest_class?(token: string, themeJson: string): string;
 };
 
 export const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
@@ -159,6 +160,17 @@ export function resolveToken(token: string, themeJson: string = DEFAULT_THEME_JS
 
 export function isKnownToken(token: string, themeJson: string = DEFAULT_THEME_JSON): boolean {
   return resolveToken(token, themeJson).rules.length > 0;
+}
+
+/**
+ * The engine's own "did you mean" for an unknown class (core-engine's
+ * suggest.rs): a Tailwind CSS shade mapped to Kbach's (`bg-blue-500` ->
+ * `bg-blue-6`), else a one-edit typo fix checked against the real resolver
+ * and the project's theme. `null` when there's none, or when the vendored
+ * engine predates the export (core-engine < 1.0.0-beta.18).
+ */
+export function suggestFromEngine(token: string, themeJson: string = DEFAULT_THEME_JSON): string | null {
+  return suggest_class?.(token, themeJson) || null;
 }
 
 /** The resolved CSS declaration(s) for a token, joined for display — e.g. `padding: 16px`. */

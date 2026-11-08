@@ -36,7 +36,7 @@ const resultTable: Record<string, { className: string; rules: RuleEntry[] }> = {
   },
 };
 
-const mockGenerateCss = vi.fn((classString: string) =>
+const mockGenerateCss = vi.fn((classString: string, _themeJson?: string) =>
   JSON.stringify(resultTable[classString] ?? { className: classString, rules: [] }),
 );
 
@@ -57,13 +57,51 @@ describe('kb()', () => {
     expect(kb('bg-blue-6')).toBe('bg-blue-6');
   });
 
-  it('returns the MODE-AWARE-EXPANDED className, not the original input, for mode-aware colors', async () => {
+  it("returns the engine's className when the engine expands a class", async () => {
     const { kb } = await import('./kb');
-    // Regression: kb() must return the expanded className the CSS rules
-    // were actually generated against — returning the original "bg-surface"
-    // would leave the element carrying a className that matches none of the
-    // injected selectors.
+    // The engine still expands a mode-aware color whose values aren't hex
+    // into per-mode classes; kb() must return that expanded className, the
+    // text the injected rules were generated against. (The mock engine here
+    // always expands bg-surface; the real one doesn't for hex colors, see
+    // the next test.)
     expect(kb('bg-surface')).toBe('bg-[#f9fafb] dark:bg-[#111827]');
+  });
+
+  it('hands the engine mode-aware hex colors as their CSS variable, and defines the variables', async () => {
+    const { kb } = await import('./kb');
+    // So kb('bg-surface') styles .bg-surface itself, the same rule the
+    // static kbach.css has, instead of per-mode classes it doesn't have.
+    kb('bg-blue-6');
+    const engineTheme = JSON.parse(mockGenerateCss.mock.calls[0]![1] as string);
+    expect(engineTheme.colors.surface).toBe('rgb(var(--kb-color-surface))');
+    expect(engineTheme.colors['blue-6']).toMatch(/^#/); // plain colors untouched
+    expect(document.getElementById('kbach-colors')?.textContent).toContain('--kb-color-surface');
+  });
+
+  it("leaves classes the static kbach.css already defines to it", async () => {
+    // Regression: a class in BOTH sheets let the later runtime sheet win
+    // every tie, so a runtime .grid beat the static lg:hidden on another
+    // element and the header's mobile-only buttons showed on desktop.
+    const staticCss = document.createElement('style');
+    staticCss.textContent = ':root { --kb-dark-mode: class; } .grid { display: grid } @media (min-width: 1024px) { .lg\\:hidden { display: none } }';
+    document.head.appendChild(staticCss);
+    try {
+      const { kb } = await import('./kb');
+      expect(kb('grid flex items-center lg:hidden')).toBe('grid lg:hidden flex items-center');
+      expect(mockGenerateCss).toHaveBeenCalledWith('flex items-center', expect.any(String));
+      const runtime = document.head.querySelector('[data-kbach]') as HTMLStyleElement;
+      const injected = Array.from(runtime.sheet!.cssRules).map((r) => r.cssText).join('\n');
+      expect(injected).toContain('.flex');
+      expect(injected).not.toContain('.grid');
+    } finally {
+      staticCss.remove();
+    }
+    // without a static sheet, everything resolves at runtime again
+    const { kb, _resetForTests } = await import('./kb');
+    _resetForTests();
+    mockGenerateCss.mockClear();
+    kb('grid');
+    expect(mockGenerateCss).toHaveBeenCalledWith('grid', expect.any(String));
   });
 
   it('injects the resolved CSS into a single <style data-kbach> tag', async () => {

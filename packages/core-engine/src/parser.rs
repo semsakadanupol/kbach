@@ -218,6 +218,11 @@ pub struct ParsedClass {
     /// The full original token text, unmodified — needed to reconstruct the
     /// exact CSS class selector (which must match the DOM's className verbatim).
     pub original: String,
+    /// A Tailwind type hint at the start of an arbitrary value, stripped
+    /// from `value`: `text-[length:var(--size)]` has value `var(--size)`
+    /// and hint `length`. Tells an ambiguous utility (`text-`, `bg-`,
+    /// `border-`, `stroke-`, …) which property the value is for.
+    pub type_hint: Option<String>,
 }
 
 /// Rejects arbitrary values that could smuggle extra CSS declarations or
@@ -372,8 +377,10 @@ fn split_respecting_brackets(token: &str) -> Vec<&str> {
     let mut start = 0usize;
     for (i, ch) in token.char_indices() {
         match ch {
-            '[' => depth += 1,
-            ']' => depth -= 1,
+            // Parentheses too: the `:` in Tailwind v4's `text-(length:--size)`
+            // is a type hint, not a modifier separator.
+            '[' | '(' => depth += 1,
+            ']' | ')' => depth -= 1,
             ':' if depth <= 0 => {
                 parts.push(&token[start..i]);
                 start = i + 1;
@@ -390,9 +397,12 @@ pub fn parse_class(token: &str) -> ParsedClass {
     let mut base = parts.pop().unwrap_or(token);
     let modifiers = parts.into_iter().map(String::from).collect();
 
-    let important = base.starts_with('!');
-    if important {
+    // `!p-4`, and Tailwind v4's `p-4!` (important at the end).
+    let important = base.starts_with('!') || (base.len() > 1 && base.ends_with('!'));
+    if base.starts_with('!') {
         base = &base[1..];
+    } else if important {
+        base = &base[..base.len() - 1];
     }
 
     // Real Tailwind's negative-value convention ("-mt-4", "-inset-2") — a
@@ -440,6 +450,7 @@ pub fn parse_class(token: &str) -> ParsedClass {
                     important,
                     negative,
                     original: token.to_string(),
+                    type_hint: None,
                 };
             }
         }
@@ -450,6 +461,13 @@ pub fn parse_class(token: &str) -> ParsedClass {
         if value.is_empty() {
             continue;
         }
+        // Tailwind v4's CSS-variable shorthand: `p-(--gap)` is `p-[var(--gap)]`,
+        // `text-(length:--size)` is `text-[length:var(--size)]`.
+        let shorthand = paren_var_shorthand(value);
+        let value = shorthand.as_deref().unwrap_or(value);
+        // Opacity on an arbitrary color: `bg-[#c7a25d]/40`. Split it off here; the
+        // color is mixed below once the value is known to be a color.
+        let (value, arbitrary_opacity) = split_arbitrary_opacity(value);
 
         if value.len() >= 2 && value.starts_with('[') && value.ends_with(']') {
             let raw = &value[1..value.len() - 1];
@@ -479,6 +497,15 @@ pub fn parse_class(token: &str) -> ParsedClass {
             // full reasoning (unary-vs-binary disambiguation, `var(...)`
             // handled as opaque, etc).
             let raw = normalize_math_whitespace(&raw);
+            let (mut type_hint, mut raw) = split_type_hint(raw);
+            if let Some(pct) = arbitrary_opacity {
+                // Only a color takes an opacity; `w-[10px]/50` resolves to nothing.
+                if !(type_hint.as_deref() == Some("color") || (type_hint.is_none() && looks_like_color(&raw))) {
+                    continue;
+                }
+                raw = color_with_opacity(&raw, pct);
+                type_hint = Some("color".to_string());
+            }
             return ParsedClass {
                 modifiers,
                 utility: prefix[..prefix.len() - 1].to_string(),
@@ -487,17 +514,23 @@ pub fn parse_class(token: &str) -> ParsedClass {
                 important,
                 negative,
                 original: token.to_string(),
+                type_hint,
             };
         }
 
+        let value = match arbitrary_opacity {
+            Some(pct) => format!("{value}/{pct}"),
+            None => value.to_string(),
+        };
         return ParsedClass {
             modifiers,
             utility: prefix[..prefix.len() - 1].to_string(),
-            value: Some(value.to_string()),
+            value: Some(value),
             is_arbitrary: false,
             important,
             negative,
             original: token.to_string(),
+            type_hint: None,
         };
     }
 
@@ -509,7 +542,86 @@ pub fn parse_class(token: &str) -> ParsedClass {
         important,
         negative,
         original: token.to_string(),
+        type_hint: None,
     }
+}
+
+/// The type hints Tailwind CSS accepts at the start of an arbitrary value.
+const TYPE_HINTS: &[&str] = &[
+    "color", "length", "size", "line-width", "percentage", "number", "integer", "image", "url", "position",
+    "bg-size", "family-name", "absolute-size", "relative-size", "angle", "shadow", "any",
+];
+
+/// `length:var(--x)` -> (Some("length"), "var(--x)"). A value with no
+/// known hint is returned whole (`var(--x)`, `#fff`, `url(a:b)`).
+fn split_type_hint(raw: String) -> (Option<String>, String) {
+    if let Some((hint, rest)) = raw.split_once(':') {
+        if !rest.is_empty() && TYPE_HINTS.contains(&hint) {
+            return (Some(hint.to_string()), rest.to_string());
+        }
+    }
+    (None, raw)
+}
+
+/// `(--gap)` -> `[var(--gap)]`, `(length:--size)` -> `[length:var(--size)]`, and the
+/// same with an opacity suffix: `(--brand)/50` -> `[var(--brand)]/50`. `None` for
+/// anything else. The variable name must be a plain identifier.
+fn paren_var_shorthand(value: &str) -> Option<String> {
+    let rest = value.strip_prefix('(')?;
+    let close = rest.find(')')?;
+    let (inner, tail) = (&rest[..close], &rest[close + 1..]);
+    let (hint, var) = match inner.split_once(':') {
+        Some((h, v)) if TYPE_HINTS.contains(&h) => (Some(h), v),
+        Some(_) => return None,
+        None => (None, inner),
+    };
+    let name = var.strip_prefix("--")?;
+    if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+        return None;
+    }
+    if !(tail.is_empty() || tail.starts_with('/')) {
+        return None;
+    }
+    Some(match hint {
+        Some(h) => format!("[{h}:var({var})]{tail}"),
+        None => format!("[var({var})]{tail}"),
+    })
+}
+
+/// `[#c7a25d]/40` -> (`[#c7a25d]`, Some(40)). Only a 0-100 whole number after
+/// the last `]`, so a slash inside the brackets (`w-[calc(100%/3)]`) is never split.
+fn split_arbitrary_opacity(value: &str) -> (&str, Option<u8>) {
+    if value.starts_with('[') {
+        if let Some((bracketed, pct)) = value.rsplit_once("]/") {
+            if let Ok(n) = pct.parse::<u8>() {
+                if n <= 100 {
+                    return (&value[..bracketed.len() + 1], Some(n));
+                }
+            }
+        }
+    }
+    (value, None)
+}
+
+/// Whether an arbitrary value is shaped like a color: hex, a color
+/// function, a `var()` (which can hold one), or a bare word (`red`, `currentColor`).
+fn looks_like_color(value: &str) -> bool {
+    const FUNCTIONS: &[&str] = &["rgb(", "rgba(", "hsl(", "hsla(", "hwb(", "lab(", "lch(", "oklab(", "oklch(", "color(", "color-mix(", "var("];
+    value.starts_with('#') || FUNCTIONS.iter().any(|f| value.starts_with(f)) || (!value.is_empty() && value.bytes().all(|b| b.is_ascii_alphabetic()))
+}
+
+/// The color at `pct`% opacity: rgba() for a #rgb/#rrggbb hex, color-mix()
+/// for anything else (as Tailwind v4 does).
+fn color_with_opacity(color: &str, pct: u8) -> String {
+    let hex = color.strip_prefix('#').filter(|h| h.is_ascii() && (h.len() == 3 || h.len() == 6));
+    if let Some(h) = hex {
+        let full: String = if h.len() == 3 { h.chars().flat_map(|c| [c, c]).collect() } else { h.to_string() };
+        let byte = |i: usize| u8::from_str_radix(&full[i..i + 2], 16).ok();
+        if let (Some(r), Some(g), Some(b)) = (byte(0), byte(2), byte(4)) {
+            return format!("rgba({r},{g},{b},{})", pct as f64 / 100.0);
+        }
+    }
+    format!("color-mix(in srgb, {color} {pct}%, transparent)")
 }
 
 #[cfg(test)]

@@ -68,6 +68,12 @@ export interface ParsedClass {
   value: string | null;
   /** True if `value` came from bracket syntax (`bg-[#6366f1]`) rather than a named theme-scale lookup. */
   isArbitrary: boolean;
+  /**
+   * A Tailwind type hint stripped from the start of an arbitrary value
+   * (`text-[length:var(--x)]` has value `var(--x)`, hint `length`) — mirrors
+   * parser.rs's `type_hint`.
+   */
+  typeHint?: string | null;
   /** True if the token had a leading "!" (after its modifier chain). */
   important: boolean;
   /**
@@ -173,6 +179,58 @@ function normalizeMathWhitespace(raw: string): string {
   return out;
 }
 
+/** The type hints Tailwind CSS accepts at the start of an arbitrary value (parser.rs `TYPE_HINTS`). */
+const TYPE_HINTS = new Set([
+  'color', 'length', 'size', 'line-width', 'percentage', 'number', 'integer', 'image', 'url', 'position',
+  'bg-size', 'family-name', 'absolute-size', 'relative-size', 'angle', 'shadow', 'any',
+]);
+
+/** `length:var(--x)` -> ['length', 'var(--x)']; no known hint -> [null, raw]. */
+function splitTypeHint(raw: string): [string | null, string] {
+  const i = raw.indexOf(':');
+  if (i > 0 && i < raw.length - 1 && TYPE_HINTS.has(raw.slice(0, i))) return [raw.slice(0, i), raw.slice(i + 1)];
+  return [null, raw];
+}
+
+/** `(--gap)` -> `[var(--gap)]`, `(length:--x)` -> `[length:var(--x)]`, `(--b)/50` -> `[var(--b)]/50` (parser.rs `paren_var_shorthand`). */
+function parenVarShorthand(value: string): string | null {
+  const m = /^\((?:([a-z-]+):)?--([A-Za-z0-9_-]+)\)(\/.*)?$/.exec(value);
+  if (!m) return null;
+  const [, hint, name, tail = ''] = m;
+  if (hint !== undefined && !TYPE_HINTS.has(hint)) return null;
+  return hint ? `[${hint}:var(--${name})]${tail}` : `[var(--${name})]${tail}`;
+}
+
+/** `[#c7a25d]/40` -> ['[#c7a25d]', 40] (parser.rs `split_arbitrary_opacity`). */
+function splitArbitraryOpacity(value: string): [string, number | null] {
+  if (value.startsWith('[')) {
+    const i = value.lastIndexOf(']/');
+    if (i !== -1) {
+      const pct = value.slice(i + 2);
+      if (/^\d+$/.test(pct) && Number(pct) <= 100) return [value.slice(0, i + 1), Number(pct)];
+    }
+  }
+  return [value, null];
+}
+
+const COLOR_FUNCTIONS = ['rgb(', 'rgba(', 'hsl(', 'hsla(', 'hwb(', 'lab(', 'lch(', 'oklab(', 'oklch(', 'color(', 'color-mix(', 'var('];
+
+/** Hex, a color function, var(), or a bare word (parser.rs `looks_like_color`). */
+function looksLikeColor(value: string): boolean {
+  return value.startsWith('#') || COLOR_FUNCTIONS.some((f) => value.startsWith(f)) || /^[A-Za-z]+$/.test(value);
+}
+
+/** rgba() for #rgb/#rrggbb, color-mix() otherwise (parser.rs `color_with_opacity`). */
+function colorWithOpacity(color: string, pct: number): string {
+  const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(color);
+  if (m) {
+    const h = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+    return `rgba(${r},${g},${b},${pct / 100})`;
+  }
+  return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+}
+
 /**
  * Splits on ':' the same way `string.split(':')` would, except a ':' nested
  * inside a `[...]` bracket never counts as a separator. Exported (not just
@@ -187,8 +245,9 @@ export function splitRespectingBrackets(token: string): string[] {
   let start = 0;
   for (let i = 0; i < token.length; i++) {
     const ch = token[i];
-    if (ch === '[') depth += 1;
-    else if (ch === ']') depth -= 1;
+    // Parentheses too: the `:` in `text-(length:--size)` is a type hint.
+    if (ch === '[' || ch === '(') depth += 1;
+    else if (ch === ']' || ch === ')') depth -= 1;
     else if (ch === ':' && depth <= 0) {
       parts.push(token.slice(start, i));
       start = i + 1;
@@ -203,9 +262,12 @@ export function parseClass(token: string): ParsedClass {
   let base = parts.pop() ?? token;
   const modifiers = parts;
 
-  const important = base.startsWith('!');
-  if (important) {
+  // `!p-4`, and Tailwind v4's `p-4!` (important at the end).
+  const important = base.startsWith('!') || (base.length > 1 && base.endsWith('!'));
+  if (base.startsWith('!')) {
     base = base.slice(1);
+  } else if (important) {
+    base = base.slice(0, -1);
   }
 
   // Real Tailwind's negative-value convention ("-mt-4", "-inset-2") — a
@@ -244,8 +306,11 @@ export function parseClass(token: string): ParsedClass {
 
   for (const prefix of VALUE_PREFIXES) {
     if (!base.startsWith(prefix)) continue;
-    const value = base.slice(prefix.length);
-    if (value === '') continue;
+    const written = base.slice(prefix.length);
+    if (written === '') continue;
+    // `p-(--gap)` -> `p-[var(--gap)]`, and an opacity on an arbitrary
+    // color (`bg-[#c7a25d]/40`) split off — parser.rs's identical steps.
+    const [value, arbitraryOpacity] = splitArbitraryOpacity(parenVarShorthand(written) ?? written);
 
     if (value.length >= 2 && value.startsWith('[') && value.endsWith(']')) {
       const raw = value.slice(1, -1);
@@ -255,10 +320,18 @@ export function parseClass(token: string): ParsedClass {
         continue;
       }
       const spaced = normalizeMathWhitespace(raw.replace(/_/g, ' '));
+      let [typeHint, hinted] = splitTypeHint(spaced);
+      if (arbitraryOpacity !== null) {
+        // Only a color takes an opacity; `w-[10px]/50` resolves to nothing.
+        if (!(typeHint === 'color' || (typeHint === null && looksLikeColor(hinted)))) continue;
+        hinted = colorWithOpacity(hinted, arbitraryOpacity);
+        typeHint = 'color';
+      }
       return {
         modifiers,
         utility: prefix.slice(0, -1),
-        value: spaced,
+        value: hinted,
+        typeHint,
         isArbitrary: true,
         important,
         negative,
@@ -269,7 +342,8 @@ export function parseClass(token: string): ParsedClass {
     return {
       modifiers,
       utility: prefix.slice(0, -1),
-      value,
+      // a named value keeps its own /opacity (`bg-blue-6/50`)
+      value: arbitraryOpacity === null ? value : `${value}/${arbitraryOpacity}`,
       isArbitrary: false,
       important,
       negative,

@@ -23,6 +23,7 @@
  */
 import postcss from 'postcss';
 import type { Plugin as PostcssPlugin, Root, ChildNode, Comment } from 'postcss';
+import { existsSync } from 'fs';
 import { resolve as resolvePath } from 'path';
 import { createKbachStaticCssEngine } from '../staticCss/engine';
 import { resolveEffectiveTheme, DEFAULT_SCAN_DIRS } from '../vite-plugin/index';
@@ -140,6 +141,12 @@ export default function kbachPostcss(options: KbachPostcssPluginOptions = {}): P
           dir: resolvePath(projectRoot, dir),
           glob: '**/*',
         });
+      }
+      // And on kbach.config.*, so saving it rebuilds the CSS with the new
+      // theme (loadConfigFile reads it fresh each run, past Node's cache).
+      for (const name of ['kbach.config.js', 'kbach.config.mjs', 'kbach.config.cjs']) {
+        const file = resolvePath(projectRoot, name);
+        if (existsSync(file)) result.messages.push({ type: 'dependency', plugin: 'kbach', file });
       }
 
       spliceGeneratedCss(root, engine.generateCSS());

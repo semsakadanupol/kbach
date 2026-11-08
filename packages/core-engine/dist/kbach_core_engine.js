@@ -104,6 +104,33 @@ export function resolve_style_json(class_string, theme_json, color_scheme, press
         wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
     }
 }
+
+/**
+ * "Did you mean …?" for a class that resolves to nothing: a Tailwind CSS
+ * shade mapped to Kbach's (`bg-blue-500` → `bg-blue-6`), else a one-edit
+ * typo fix. Empty string when there's no suggestion, or the class already
+ * resolves. See suggest.rs. Used by the Vite/PostCSS plugin's
+ * unknown-class warning and kbach-vscode's quick fix.
+ * @param {string} token
+ * @param {string} theme_json
+ * @returns {string}
+ */
+export function suggest_class(token, theme_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(token, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(theme_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.suggest_class(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,

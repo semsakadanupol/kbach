@@ -340,7 +340,10 @@ apart statically — use `colors.get(name)` when you need a guaranteed
 ## 10. Unknown-class warnings
 
 On a native dev-client/CLI build, a class matching no Kbach utility on any
-platform emits a one-time `console.warn` (dev only). A real utility native
+platform emits a one-time `console.warn` (dev only), with a "did you
+mean" when there is one: a Tailwind shade mapped to Kbach's
+(`bg-blue-500` → `bg-blue-6`) or a one-character typo fix (core-engine
+suggest.rs). A real utility native
 just doesn't support yet (`grid-cols-3`, `blur`, …) stays silent — that's a
 documented platform gap, not a typo. Not available in Expo Go.
 

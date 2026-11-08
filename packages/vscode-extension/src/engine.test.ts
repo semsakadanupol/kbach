@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isKnownToken, describeToken, resolveThemeJsonForDir, invalidateThemeJsonForRoot } from './engine';
+import { isKnownToken, describeToken, suggestFromEngine, resolveThemeJsonForDir, invalidateThemeJsonForRoot } from './engine';
 
 describe('isKnownToken', () => {
   it('is true for a real static utility', () => {
@@ -25,6 +25,23 @@ describe('isKnownToken', () => {
   it('is true for a modifier-prefixed class', () => {
     expect(isKnownToken('dark:bg-blue-6')).toBe(true);
     expect(isKnownToken('sm:flex')).toBe(true);
+  });
+});
+
+describe('suggestFromEngine', () => {
+  it('maps a Tailwind shade to the Kbach one, keeping modifiers and opacity', () => {
+    expect(suggestFromEngine('bg-blue-500')).toBe('bg-blue-6');
+    expect(suggestFromEngine('hover:text-gray-900/50')).toBe('hover:text-gray-10/50');
+  });
+
+  it('fixes a one-character typo the scraped word list could miss', () => {
+    expect(suggestFromEngine('flexx')).toBe('flex');
+    expect(suggestFromEngine('dark:itms-center')).toBe('dark:items-center');
+  });
+
+  it('gives nothing for a real class or a made-up one', () => {
+    expect(suggestFromEngine('flex')).toBeNull();
+    expect(suggestFromEngine('completely-made-up-thing')).toBeNull();
   });
 });
 

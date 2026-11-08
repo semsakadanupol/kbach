@@ -116,7 +116,7 @@ function resolveTextNative(parsed: ParsedClass, theme: ThemeConfig): Declaration
     if (size !== null) return [decl('font-size', size)];
     const align = typography.textAlign(parsed.value);
     if (align !== null) return [decl('text-align', align)];
-  } else if (parsed.isArbitrary && parsed.value !== null && color.looksLikeLength(parsed.value)) {
+  } else if (parsed.isArbitrary && parsed.value !== null && color.isLength(parsed, parsed.value)) {
     return [decl('font-size', parsed.value)];
   }
   const hex = nativeHexColor(parsed, theme);

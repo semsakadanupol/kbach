@@ -516,7 +516,7 @@ fn resolve_text_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<
             }
         }
     } else if let Some(value) = parsed.value.as_deref() {
-        if color::looks_like_length(value) {
+        if color::is_length(parsed, value) {
             return Some(vec![decl("font-size", value)]);
         }
     }

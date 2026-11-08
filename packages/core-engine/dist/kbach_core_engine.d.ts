@@ -31,6 +31,15 @@ export function generate_css_attr(class_string: string, theme_json: string): str
  */
 export function resolve_style_json(class_string: string, theme_json: string, color_scheme: string, pressed: boolean, width: number): string;
 
+/**
+ * "Did you mean …?" for a class that resolves to nothing: a Tailwind CSS
+ * shade mapped to Kbach's (`bg-blue-500` → `bg-blue-6`), else a one-edit
+ * typo fix. Empty string when there's no suggestion, or the class already
+ * resolves. See suggest.rs. Used by the Vite/PostCSS plugin's
+ * unknown-class warning and kbach-vscode's quick fix.
+ */
+export function suggest_class(token: string, theme_json: string): string;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -39,6 +48,7 @@ export interface InitOutput {
     readonly generate_css: (a: number, b: number, c: number, d: number) => [number, number];
     readonly generate_css_attr: (a: number, b: number, c: number, d: number) => [number, number];
     readonly resolve_style_json: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];
+    readonly suggest_class: (a: number, b: number, c: number, d: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

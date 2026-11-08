@@ -114,13 +114,15 @@ enumeration export (the correct long-term answer, deferred) — no new
 Rust code needed, and the scraped half improves on its own as tests are
 added.
 
-`suggestCorrection.ts` runs the identical Norvig-style edit-distance-1
-algorithm `resolve_style.rs`'s own `suggest_correction` uses, against
-this scraped vocabulary instead of the engine's real dictionary (not
-exposed over WASM). It catches a real typo (`flexx` → `flex`); it does
-NOT catch a wrong-CONVENTION mistake like Tailwind's `bg-blue-500`
-instead of Kbach's `bg-blue-6` — that's a different edit distance
-entirely, same limitation the real engine's own corrector has.
+Unknown-class suggestions come from the engine first:
+`suggestFromEngine` (engine.ts) calls the vendored WASM's
+`suggest_class` (core-engine suggest.rs, 1.0.0-beta.18+), which maps a
+Tailwind shade to Kbach's (`bg-blue-500` → `bg-blue-6`, and the
+diagnostic adds "Kbach color shades run 1–12") and fixes one-character
+typos against the real resolver and the project's theme.
+`suggestCorrection.ts` (the same edit-distance-1 idea over the scraped
+vocabulary) is only the fallback, for a vendored engine that predates
+the export.
 
 Regenerate either generated file after a relevant Rust/palette change:
 `npm run generate:vocabulary` / `npm run generate:colors`.

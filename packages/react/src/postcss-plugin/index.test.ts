@@ -45,6 +45,29 @@ describe('kbachPostcss() plugin', () => {
     expect((dirDeps[0] as unknown as { dir: string }).dir).toBe(join(dir, 'src'));
   });
 
+  it('registers kbach.config.js as a dependency, and reads its latest contents each run', async () => {
+    // So saving the config rebuilds the CSS in Next.js (webpack/Turbopack
+    // honor a postcss "dependency" message) with the NEW theme: the config
+    // used to be served from Node's require cache after the first load.
+    dir = mkdtempSync(join(tmpdir(), 'kbach-postcss-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="bg-brand" />', 'utf-8');
+    const config = join(dir, 'kbach.config.js');
+    writeFileSync(config, "module.exports = { extend: { colors: { brand: '#ff6b35' } } };", 'utf-8');
+    const run = () =>
+      postcss([kbachPostcss({ root: dir, include: ['src'] })]).process('/* kbach:start */\n/* kbach:end */', { from: join(dir, 'globals.css') });
+
+    const first = await run();
+    const deps = first.messages.filter((m) => m.type === 'dependency') as unknown as { file: string }[];
+    expect(deps.map((d) => d.file)).toEqual([config]);
+    expect(first.css).toContain('255,107,53');
+
+    writeFileSync(config, "module.exports = { extend: { colors: { brand: '#2563eb' } } };", 'utf-8');
+    const second = await run();
+    expect(second.css).toContain('37,99,235');
+    expect(second.css).not.toContain('255,107,53');
+  });
+
   it('warns and leaves the file untouched when no marker pair is present', async () => {
     dir = mkdtempSync(join(tmpdir(), 'kbach-postcss-test-'));
     mkdirSync(join(dir, 'src'));

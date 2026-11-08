@@ -385,8 +385,13 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // `duration-*`/`ease-*` also set `--kb-duration`/`--kb-ease`, which
         // every `transition-*` reads (see `transition()`): the result is the
         // same whichever of the two classes lands later in the stylesheet.
+        // A number of milliseconds (`duration-150`) or an arbitrary value;
+        // anything else used to become e.g. `bananams`.
         "duration" => {
             let value = parsed.value.as_deref()?;
+            if !parsed.is_arbitrary && !crate::resolvers::layout::is_whole_number(value) {
+                return None;
+            }
             let ms = if parsed.is_arbitrary { value.to_string() } else { format!("{value}ms") };
             Some(vec![decl("--kb-duration", &ms), decl("transition-duration", &ms)])
         }
@@ -394,6 +399,9 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
             let value = parsed.value.as_deref()?;
             if parsed.is_arbitrary {
                 return Some(vec![decl("transition-delay", value)]);
+            }
+            if !crate::resolvers::layout::is_whole_number(value) {
+                return None;
             }
             Some(vec![decl("transition-delay", &format!("{value}ms"))])
         }

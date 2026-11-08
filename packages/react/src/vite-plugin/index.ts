@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { pathToFileURL } from 'url';
 import { createRequire } from 'module';
 import type { Plugin } from 'vite';
@@ -9,6 +9,7 @@ import type { ThemeConfig } from '../theme';
 import { resolveKbachConfig } from '../config';
 import type { KbachConfig } from '../config';
 import { createKbachStaticCssEngine, readSourceFile, type KbachStaticCssEngine } from '../staticCss/engine';
+import { kbachTag } from '../terminalWarn';
 
 export interface KbachPluginOptions {
   /** Defaults to the same defaultTheme the runtime uses — pass your own to keep both in sync. */
@@ -127,14 +128,40 @@ function isEsmRequireFailure(err: unknown): boolean {
   return (err as NodeJS.ErrnoException).code === 'ERR_REQUIRE_ESM' || /is not defined in ES module scope/.test(err.message);
 }
 
+// Both loaders read the file fresh every time: the dev server is one
+// long-lived process, and Node caches require() and import() by path, so
+// a reload after an edit (see the plugin's config watcher) would
+// otherwise get the old contents back.
 async function importConfigModule(path: string): Promise<KbachConfig | undefined> {
-  const mod = (await import(pathToFileURL(path).href)) as { default?: KbachConfig };
+  const url = pathToFileURL(path).href;
+  let mod: { default?: KbachConfig };
+  try {
+    mod = (await nativeImport(url + '?t=' + Date.now())) as typeof mod;
+  } catch (err) {
+    // A vm sandbox with no native import() (vitest's module runner): a plain
+    // import() works there, just without the cache-buster.
+    if ((err as NodeJS.ErrnoException).code !== 'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING') throw err;
+    mod = (await import(url)) as typeof mod;
+  }
   return (mod.default ?? mod) as KbachConfig;
 }
 
+// Node's own import(), built at runtime so no bundler or module runner
+// rewrites it (Vite loads its own config files the same way); the `?t=`
+// query only busts Node's ESM cache through a real import().
+const nativeImport = new Function('url', 'return import(url)') as (url: string) => Promise<unknown>;
+
 function requireConfigModule(root: string, path: string): KbachConfig | undefined {
-  const mod = createRequire(root)(path) as { default?: KbachConfig };
+  const req = createRequire(root);
+  delete req.cache[req.resolve(path)];
+  const mod = req(path) as { default?: KbachConfig };
   return (mod.default ?? mod) as KbachConfig;
+}
+
+/** `kbach.config.js` / `.mjs` / `.cjs` directly in `root`. */
+export function isConfigFile(root: string, file: string): boolean {
+  const norm = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+  return /^kbach\.config\.(c|m)?js$/.test(basename(file)) && norm(dirname(file)) === norm(root);
 }
 
 /**
@@ -180,11 +207,25 @@ export async function loadConfigFile(root: string): Promise<KbachConfig | undefi
 
   const jsPath = join(root, 'kbach.config.js');
   if (!existsSync(jsPath)) return undefined;
+  // In a "type": "module" project, import() straight away. Node 22+ can
+  // also require() an ES module, but it then lives in the ESM cache, which
+  // clearing require.cache doesn't touch, so an edited config would reload
+  // stale (see the plugin's config watcher).
+  if (isEsmProject(root)) return importConfigModule(jsPath);
   try {
     return requireConfigModule(root, jsPath);
   } catch (err) {
     if (!isEsmRequireFailure(err)) throw err;
     return importConfigModule(jsPath);
+  }
+}
+
+/** Whether `root`'s package.json says `.js` files are ES modules. */
+function isEsmProject(root: string): boolean {
+  try {
+    return (JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8')) as { type?: string }).type === 'module';
+  } catch {
+    return false;
   }
 }
 
@@ -261,6 +302,28 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
     }, CSS_SYNC_DEBOUNCE_MS);
   }
 
+  /**
+   * Re-reads kbach.config.* and rebuilds everything that depends on it:
+   * the theme, a fresh engine (its per-token CSS cache was built for the
+   * old theme), the scan, and kbach.css. A config that fails to load
+   * (a syntax error mid-edit) is reported and the current theme kept,
+   * rather than taking the dev server down.
+   */
+  async function reloadConfig(server?: Parameters<typeof syncMainCSSFile>[0]): Promise<void> {
+    if (options.theme || options.config) return; // an explicit theme/config option wins over the file
+    try {
+      theme = await resolveEffectiveTheme(root, options);
+    } catch (err) {
+      console.warn(`${kbachTag()} Couldn't reload kbach.config: ${(err as Error).message}`);
+      return;
+    }
+    engine = createKbachStaticCssEngine({ root, theme, includeDirs, safelist });
+    engine.scanProjectCssSelectorsOnce();
+    engine.initialScan();
+    engine.processSafelist();
+    syncMainCSSFile(server);
+  }
+
   return {
     name: 'kbach',
     enforce: 'pre',
@@ -288,6 +351,10 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
     configureServer(server) {
       const onAddOrUnlink = (file: string, isUnlink: boolean) => {
         if (file.includes('node_modules')) return;
+        if (isConfigFile(root, file)) {
+          void reloadConfig(server);
+          return;
+        }
         if (!/\.(tsx?|jsx?)$/.test(file)) return;
         if (isUnlink) {
           engine.removeFile(file);
@@ -304,8 +371,16 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
       server.watcher.on('unlink', (file) => onAddOrUnlink(file, true));
     },
 
-    handleHotUpdate({ file, server }) {
+    async handleHotUpdate({ file, server }) {
       if (file.includes('node_modules')) return;
+      // kbach.config.js changed: rebuild the theme and the whole kbach.css
+      // now, instead of after a dev-server restart. Vite's own update for
+      // the file (an app that imports it for applyKbachConfig) continues
+      // as normal.
+      if (isConfigFile(root, file)) {
+        await reloadConfig(server);
+        return;
+      }
       if (!/\.(tsx?|jsx?)$/.test(file)) return;
       try {
         engine.processFile(file, readSourceFile(file));

@@ -49,8 +49,8 @@ fn split_opacity(value: &str) -> (&str, Option<u8>) {
 
 /// Looks up a named color, baking in an inline `/N` opacity suffix (if
 /// present) as an `rgba(...)` string — arbitrary values are used as-is
-/// (real Tailwind's own arbitrary-plus-opacity form, `bg-[#fff]/50`, isn't
-/// modeled here; write the rgba() directly instead). `color_declarations`
+/// (an arbitrary color's opacity, `bg-[#fff]/50`, is already mixed into the
+/// value by parser.rs `color_with_opacity`). `color_declarations`
 /// (bg-*/text-*, below) reuses this rather than re-splitting on its own: an
 /// already-baked `rgba(...)` string simply skips that function's own
 /// hex-decomposition path (it doesn't start with "#"), so the two
@@ -135,7 +135,57 @@ const LENGTH_UNITS: &[&str] = &["px", "rem", "em", "%", "vh", "vw"];
 /// CSS-value-type inference.
 pub(super) fn looks_like_length(value: &str) -> bool {
     let without_unit = LENGTH_UNITS.iter().find_map(|u| value.strip_suffix(u)).unwrap_or(value);
-    without_unit.parse::<f64>().is_ok()
+    if without_unit.parse::<f64>().is_ok() {
+        return true;
+    }
+    // calc()/clamp()/min()/max() over lengths: `clamp(1rem, 2vw, 3rem)`.
+    // A color function never takes these, and a number with a length unit
+    // inside one never appears in a color.
+    let is_math = ["calc(", "clamp(", "min(", "max("].iter().any(|f| value.starts_with(f));
+    is_math && MATH_LENGTH_UNITS.iter().any(|u| contains_number_with_unit(value, u))
+}
+
+/// Units that mark a calc()/clamp()/min()/max() as a length.
+const MATH_LENGTH_UNITS: &[&str] = &[
+    "px", "rem", "em", "%", "vh", "vw", "vmin", "vmax", "dvh", "dvw", "svh", "svw", "lvh", "lvw", "ch", "ex", "lh", "cqw", "cqh", "cqi", "cqb",
+];
+
+/// Whether `value` has a digit directly followed by `unit`, and not by
+/// more letters: "2vw" in "clamp(1rem,2vw,3rem)".
+fn contains_number_with_unit(value: &str, unit: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut from = 0;
+    while let Some(i) = value[from..].find(unit).map(|i| i + from) {
+        let before_is_digit = i > 0 && bytes[i - 1].is_ascii_digit();
+        let after_ends = bytes.get(i + unit.len()).is_none_or(|b| !b.is_ascii_alphabetic());
+        if before_is_digit && after_ends {
+            return true;
+        }
+        from = i + 1;
+    }
+    false
+}
+
+/// Whether an arbitrary value is a size rather than a color, for the
+/// utilities that take either (`text-`, `border-`, `outline-`, `ring-`, `stroke-`, ...).
+/// A type hint decides (`text-[length:var(--x)]`, `border-[color:var(--x)]`);
+/// without one, the value's shape does.
+pub(super) fn is_length(parsed: &ParsedClass, value: &str) -> bool {
+    match parsed.type_hint.as_deref() {
+        Some("length" | "size" | "line-width" | "percentage" | "number" | "integer" | "absolute-size" | "relative-size") => true,
+        Some(_) => false,
+        None => looks_like_length(value),
+    }
+}
+
+/// Whether an arbitrary `bg-[...]` value is an image: an `image:`/`url:` hint,
+/// or a url()/image-set()/*-gradient() value.
+fn is_image(parsed: &ParsedClass, value: &str) -> bool {
+    match parsed.type_hint.as_deref() {
+        Some("image" | "url") => true,
+        Some(_) => false,
+        None => value.starts_with("url(") || value.starts_with("image-set(") || value.contains("gradient("),
+    }
 }
 
 fn resolve_text(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
@@ -180,7 +230,7 @@ fn resolve_text(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declara
         // instead. A real color value never parses as a bare number or a
         // number+known-length-unit, so this check is safe to run ONLY for
         // the arbitrary branch, ahead of the color fallback below.
-        if looks_like_length(value) {
+        if is_length(parsed, value) {
             return Some(vec![decl("font-size", value)]);
         }
     }
@@ -205,8 +255,17 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // starts with it), so it's checked first, ahead of the normal
         // color path; anything else keeps the exact same color resolution
         // as before.
-        "bg" if parsed.is_arbitrary && parsed.value.as_deref().is_some_and(|v| v.starts_with("url(")) => {
+        // Gradients and image-set() too, and the type hints: `bg-[image:...]`,
+        // `bg-[length:...]`/`bg-[size:...]` (background-size), `bg-[position:...]`.
+        // A gradient used to become background-color.
+        "bg" if parsed.is_arbitrary && parsed.value.as_deref().is_some_and(|v| is_image(parsed, v)) => {
             Some(vec![decl("background-image", parsed.value.as_deref()?)])
+        }
+        "bg" if parsed.is_arbitrary && matches!(parsed.type_hint.as_deref(), Some("length" | "size" | "bg-size" | "percentage")) => {
+            Some(vec![decl("background-size", parsed.value.as_deref()?)])
+        }
+        "bg" if parsed.is_arbitrary && parsed.type_hint.as_deref() == Some("position") => {
+            Some(vec![decl("background-position", parsed.value.as_deref()?)])
         }
         "bg" => color_declarations(theme, parsed, "background-color", "--bg-opacity"),
         "text" => resolve_text(parsed, theme),
@@ -234,6 +293,11 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
             stroke_width_value(value).map(|v| vec![decl("stroke-width", v)])
         }
         "stroke" if parsed.value.as_deref() == Some("none") => Some(vec![decl("stroke", "none")]),
+        // `stroke-[2.5]`, `stroke-[3px]`, `stroke-[length:var(--w)]`: a width,
+        // not a color (they used to write `stroke: 2.5`).
+        "stroke" if parsed.is_arbitrary && parsed.value.as_deref().is_some_and(|v| is_length(parsed, v)) => {
+            Some(vec![decl("stroke-width", parsed.value.as_deref()?)])
+        }
         // `stroke-2` (Tailwind's spelling): any whole number is a stroke width.
         "stroke" if !parsed.is_arbitrary && parsed.value.as_deref().is_some_and(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit())) => {
             Some(vec![decl("stroke-width", parsed.value.as_deref()?)])

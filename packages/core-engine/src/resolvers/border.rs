@@ -1,4 +1,4 @@
-use super::color::{color_value, looks_like_length};
+use super::color::{color_value, is_length};
 use super::{decl, resolve_length, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
@@ -64,7 +64,7 @@ fn border_side_value(theme: &ThemeConfig, parsed: &ParsedClass, side_property: &
     let value = parsed.value.as_deref()?;
     if parsed.is_arbitrary {
         // Same regression guard as `border_value` — see its own doc comment.
-        if looks_like_length(value) {
+        if is_length(parsed, value) {
             return Some(vec![decl(&format!("{side_property}-width"), value)]);
         }
         return color_value(theme, parsed).map(|v| vec![decl(&format!("{side_property}-color"), &v)]);
@@ -86,7 +86,7 @@ fn border_axis_value(theme: &ThemeConfig, parsed: &ParsedClass, side_a: &str, si
     let value = parsed.value.as_deref()?;
     if parsed.is_arbitrary {
         // Same regression guard as `border_value` — see its own doc comment.
-        if looks_like_length(value) {
+        if is_length(parsed, value) {
             return Some(vec![decl(&format!("{side_a}-width"), value), decl(&format!("{side_b}-width"), value)]);
         }
         let color = color_value(theme, parsed)?;
@@ -157,7 +157,7 @@ fn border_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declara
         if matches!(value, "solid" | "dashed" | "dotted" | "double" | "hidden" | "none") {
             return Some(vec![decl("border-style", value)]);
         }
-    } else if looks_like_length(value) {
+    } else if is_length(parsed, value) {
         // Regression guard: an arbitrary "border-[3px]" used to be the ONLY
         // shape this branch handled at all, unconditionally — meaning an
         // arbitrary COLOR ("border-[#050505]", or the same thing via a
@@ -273,7 +273,7 @@ fn outline_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declar
         // color ("outline-[#050505]", or a mode-aware theme color
         // substituted in the same way) must not fall into `outline-width`
         // just because it's arbitrary.
-        if looks_like_length(value) {
+        if is_length(parsed, value) {
             return Some(vec![decl("outline-width", value)]);
         }
         return color_value(theme, parsed).map(|v| vec![decl("outline-color", &v)]);
@@ -339,6 +339,9 @@ fn ring_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declarati
         if let Some(w) = ring_width(value) {
             return Some(ring_with_width(&w));
         }
+    } else if is_length(parsed, value) {
+        // `ring-[3px]`: a width, not a color (it used to set the ring color to 3px).
+        return Some(ring_with_width(value));
     }
     let color = color_value(theme, parsed)?;
     Some(vec![decl("--kb-ring-color", &color)])

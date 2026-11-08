@@ -91,9 +91,12 @@ class as written (`.bg-surface`), and kbach.css defines each variable on
 `:root` plus under the dark-mode selector. `staticCss/engine.ts` gets this
 by handing the engine `withColorVariables(theme)` (colorVariables.ts);
 `format.ts` writes the variables with `colorVariablesCss(theme)`, the same
-text `ensureColorVariablesInjected` injects at runtime. `kb()` and the
-jsx-runtime instead get the engine's expanded per-mode classes back as the
-className (`bg-[#…] dark:bg-[#…]`).
+text `ensureColorVariablesInjected` injects at runtime. `kb()` uses the
+same variable form (kb.ts `refreshEngineTheme`, 1.0.0-beta.29+) and
+injects the variables, so `kb('bg-surface')` returns `bg-surface`
+unchanged; only a mode-aware color whose values aren't hex still comes
+back expanded (`bg-[…] dark:bg-[…]`), which is why callers must use the
+string `kb()` returns.
 
 ## 3. Runtime pieces (opt-in, these DO call the engine)
 
@@ -101,6 +104,12 @@ className (`bg-[#…] dark:bg-[#…]`).
   runtime data (`kb(\`bg-${color}-6\`)`). Requires `await initKbach()` once
   before first use. Prefer a `safelist: [...]` plugin entry when the
   possible values are known ahead of time (stays fully static).
+  It leaves classes the static kbach.css already defines to that file
+  (kb.ts `staticClasses`, found by the `--kb-dark-mode` declaration the
+  plugin writes on `:root`). Before 1.0.0-beta.29 it injected them again,
+  into a `<style data-kbach>` that comes later in the document, so a
+  runtime `.grid` beat a static `@media (min-width: 1024px) .lg:hidden`
+  on another element: responsive classes broke once `kb()` ran.
 - **`@kbach/react/jsx-runtime`** — a `jsxImportSource` override that
   intercepts *every* element's `className` at runtime instead of relying on
   the static scan. Also needs `await initKbach()`.
@@ -156,7 +165,33 @@ it if `postcss.config.js` isn't at the project root.
 `ContainerConfig`, `DarkModeStrategy`, `KbachConfig`, `ThemeState`,
 `ThemeProviderProps`, `ThemeMode`, `ColorsAPI`, `ColorScale`, `ClassValue`.
 
-## 7. Common failure modes
+## 7. Editing kbach.config.js
+
+The Vite plugin watches `kbach.config.{js,mjs,cjs}` at the root: on a
+change it re-reads the file, rebuilds the theme and a fresh engine,
+rescans and rewrites kbach.css, with no restart (`reloadConfig` in
+vite-plugin/index.ts, 1.0.0-beta.29+). A config that fails to load
+mid-edit is reported and the last good theme kept. Both loaders bypass
+Node's module cache (`delete require.cache[…]`; `import()` with a `?t=`
+query through a runtime-built `new Function` import, which a bundler or
+vitest can't rewrite). An ESM-type project's `.js` config goes straight
+to `import()`: Node 22+ can `require()` an ES module, but into the ESM
+cache, where clearing `require.cache` never reached it. The PostCSS
+plugin re-reads the config on every run the same way, and registers it
+as a postcss `dependency` message so Next.js rebuilds on save. An explicit
+`config`/`theme` plugin option disables the watcher.
+
+## 8. Unknown-class warnings
+
+In development, a scanned class that resolves to nothing (and isn't
+defined in the project's own CSS) prints a terminal warning with its
+`file:line:column`. It names the fix when there is one, from the
+engine's `suggest_class` (vite-plugin/wasmNode.ts
+`suggestClassForToken`): `bg-blue-500` → "did you mean bg-blue-6? Kbach
+color shades run 1–12, not 50–950.", `flexx` → "did you mean flex?".
+The suggestion is computed only for a class that is really unknown.
+
+## 9. Common failure modes
 
 - **Build fails after adding/editing `kbach.config.js`** — an unquoted
   hyphenated object key (`surface-dim:` instead of `'surface-dim':`) is a

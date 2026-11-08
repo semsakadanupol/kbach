@@ -6,6 +6,7 @@ mod parser;
 mod registry;
 mod resolve_style;
 mod resolvers;
+mod suggest;
 mod theme;
 
 use serde::Serialize;
@@ -158,6 +159,16 @@ pub fn generate_css_attr(class_string: &str, theme_json: &str) -> String {
 #[wasm_bindgen]
 pub fn resolve_style_json(class_string: &str, theme_json: &str, color_scheme: &str, pressed: bool, width: f64) -> String {
     resolve_style::resolve_style_json(class_string, theme_json, color_scheme, pressed, width)
+}
+
+/// "Did you mean …?" for a class that resolves to nothing: a Tailwind CSS
+/// shade mapped to Kbach's (`bg-blue-500` → `bg-blue-6`), else a one-edit
+/// typo fix. Empty string when there's no suggestion, or the class already
+/// resolves. See suggest.rs. Used by the Vite/PostCSS plugin's
+/// unknown-class warning and kbach-vscode's quick fix.
+#[wasm_bindgen]
+pub fn suggest_class(token: &str, theme_json: &str) -> String {
+    theme::parse_theme_cached(theme_json).and_then(|t| suggest::suggest_class(token, &t)).unwrap_or_default()
 }
 
 /// Serializes `theme::DEFAULT_COLORS` (Phase 16) to a flat JSON object —
@@ -452,6 +463,88 @@ mod modifier_resolution_tests {
         assert!(only_rule("@md:p-4").starts_with("@container (min-width: 768px)"));
         let named = only_rule("@container/main");
         assert!(named.contains("container-type: inline-size") && named.contains("container-name: main"), "{named}");
+    }
+
+    /// Regression: these passed any value straight through, so `z-banana`
+    /// wrote `z-index: banana` (and never counted as an unknown class), and
+    /// the real Tailwind keywords `order-first`/`-last`/`-none` wrote
+    /// `order: first`, which isn't CSS.
+    #[test]
+    fn number_utilities_accept_only_numbers_and_their_keywords() {
+        for class in ["z-banana", "order-banana", "grow-banana", "shrink-banana", "duration-banana", "delay-fast", "z-1.5"] {
+            assert!(rules(class).is_empty(), "{class} must produce nothing, got {:?}", rules(class));
+        }
+        assert!(only_rule("z-50").contains("z-index: 50"));
+        assert!(only_rule("z-auto").contains("z-index: auto"));
+        assert!(only_rule("-z-10").contains("z-index: -10"));
+        assert!(only_rule("z-[60]").contains("z-index: 60"));
+        assert!(only_rule("order-first").contains("order: -9999"));
+        assert!(only_rule("order-last").contains("order: 9999"));
+        assert!(only_rule("order-none").contains("order: 0"));
+        assert!(only_rule("-order-2").contains("order: -2"));
+        assert!(only_rule("grow").contains("flex-grow: 1"));
+        assert!(only_rule("grow-2").contains("flex-grow: 2"));
+        assert!(only_rule("shrink-0").contains("flex-shrink: 0"));
+        assert!(only_rule("duration-150").contains("transition-duration: 150ms"));
+        assert!(only_rule("duration-[2s]").contains("transition-duration: 2s"));
+        assert!(only_rule("delay-75").contains("transition-delay: 75ms"));
+    }
+
+    /// Regression: an arbitrary value went to whichever property the
+    /// utility tried first, and type hints stayed inside the value, so
+    /// `bg-[linear-gradient(…)]` became background-color, `text-[clamp(…)]`
+    /// a color, `stroke-[2.5]` the stroke color, and `text-[color:var(--x)]`
+    /// wrote `color: color:var(--x)`.
+    #[test]
+    fn arbitrary_values_go_to_the_right_property() {
+        let has = |class: &str, decl: &str| {
+            let r = only_rule(class);
+            assert!(r.contains(decl), "{class}: expected `{decl}` in {r}");
+        };
+        has("bg-[linear-gradient(red,blue)]", "background-image: linear-gradient(red,blue)");
+        has("bg-[radial-gradient(circle,red,blue)]", "background-image: radial-gradient(circle,red,blue)");
+        has("bg-[image:var(--x)]", "background-image: var(--x)");
+        has("bg-[color:var(--x)]", "background-color: var(--x)");
+        has("bg-[length:200px_100px]", "background-size: 200px 100px");
+        has("bg-[position:center_top]", "background-position: center top");
+        has("text-[clamp(1rem,2vw,3rem)]", "font-size: clamp(1rem, 2vw, 3rem)");
+        has("text-[length:var(--x)]", "font-size: var(--x)");
+        has("text-[color:var(--x)]", "color: var(--x)");
+        has("stroke-[2.5]", "stroke-width: 2.5");
+        has("stroke-[color:var(--x)]", "stroke: var(--x)");
+        has("border-[length:var(--x)]", "border-width: var(--x)");
+        has("border-[color:var(--x)]", "border-color: var(--x)");
+        has("ring-[3px]", "--kb-ring-width: 3px");
+        has("-rotate-[30deg]", "rotate(-30deg)");
+        has("-rotate-[-30deg]", "rotate(30deg)");
+        has("-rotate-[var(--a)]", "rotate(calc(var(--a) * -1))");
+        has("-skew-x-[5deg]", "skewX(-5deg)");
+        // unchanged
+        has("text-[22px]", "font-size: 22px");
+        has("bg-[url(/a.png)]", "background-image: url(/a.png)");
+        has("content-['a:b']", "--kb-content: 'a:b'");
+        has("w-[calc(100%/3)]", "width: calc(100%/3)");
+    }
+
+    /// Tailwind CSS v4 forms that used to produce nothing.
+    #[test]
+    fn tailwind_v4_syntax() {
+        let has = |class: &str, decl: &str| {
+            let r = only_rule(class);
+            assert!(r.contains(decl), "{class}: expected `{decl}` in {r}");
+        };
+        has("p-4!", "padding: 16px !important");
+        has("hover:bg-blue-6!", "!important");
+        has("p-(--gap)", "padding: var(--gap)");
+        has("text-(length:--size)", "font-size: var(--size)");
+        has("text-(color:--ink)", "color: var(--ink)");
+        has("bg-(--brand)/50", "color-mix(in srgb, var(--brand) 50%, transparent)");
+        has("bg-[#c7a25d]/40", "rgba(199,162,93,0.4)");
+        has("bg-[#fff]/50", "rgba(255,255,255,0.5)");
+        has("text-[rgb(0_0_0)]/25", "color-mix(in srgb, rgb(0 0 0) 25%, transparent)");
+        for class in ["w-[10px]/50", "bg-[url(/a.png)]/50", "p-(gap)", "bg-(--a b)"] {
+            assert!(rules(class).is_empty(), "{class} must produce nothing, got {:?}", rules(class));
+        }
     }
 
     #[test]

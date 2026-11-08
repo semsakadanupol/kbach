@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { MODIFIERS, BASE_UTILITIES } from './generatedVocabulary';
-import { isKnownToken, describeToken, resolveThemeJsonForDir, invalidateThemeJsonForRoot, DEFAULT_THEME_JSON } from './engine';
+import { isKnownToken, describeToken, suggestFromEngine, resolveThemeJsonForDir, invalidateThemeJsonForRoot, DEFAULT_THEME_JSON } from './engine';
 import { rootsDependingOn } from './kbachConfigLoader';
 import { scanClassTokens } from './scanTokens';
 import { isInsideClassNameContext } from './completionContext';
@@ -296,9 +296,13 @@ async function runDiagnostics(document: vscode.TextDocument, collection: vscode.
     const range = new vscode.Range(document.positionAt(match.start), document.positionAt(match.end));
 
     if (!isKnownToken(match.token, themeJson)) {
-      const suggestion = suggestCorrection(match.token);
+      // The engine's suggestion first (it knows Tailwind shades and the
+      // project's own theme); the scraped word list is the fallback.
+      const suggestion = suggestFromEngine(match.token, themeJson) ?? suggestCorrection(match.token);
+      const tailwindShade = /-(?:50|[1-9]00|950)(?:\/|$)/.test(match.token);
       const message = suggestion
-        ? `Unknown Kbach class "${match.token}" — did you mean "${suggestion}"?`
+        ? `Unknown Kbach class "${match.token}" — did you mean "${suggestion}"?` +
+          (tailwindShade ? ' Kbach color shades run 1–12, not 50–950.' : '')
         : `Unknown Kbach class "${match.token}"`;
       const diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Warning);
       diagnostic.source = 'kbach';

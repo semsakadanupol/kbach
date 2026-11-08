@@ -62,6 +62,13 @@ const CASES = [
   'leading-px',
   // opacity on a non-hex color: web uses color-mix, native keeps the plain color
   'bg-current/50', 'border-current/30',
+  // Tailwind v4 syntax: trailing important, type hints, opacity on an arbitrary color
+  'p-4!', '-mt-2!', 'text-[length:20px]', 'border-[length:3px]', 'border-[color:#123456]',
+  'bg-[#c7a25d]/40', 'bg-[#fff]/50', 'border-[#000]/10', 'text-[clamp(16px,2px,20px)]',
+  // negative arbitrary angles
+  '-rotate-[30deg]', '-rotate-[-30deg]', '-skew-x-[5deg]', '-rotate-y-[30deg]',
+  // number utilities take only numbers and their keywords
+  'z-50', '-z-10', 'z-auto', 'order-first', 'order-last', 'order-none', 'order-3', '-order-2', 'grow', 'grow-2', 'shrink-0',
   // a realistic combined string
   'flex-2 border-2 border-x p-px -translate-1/2 rounded-4xl leading-12',
   'rounded-sm shadow-sm outline-2 ring-2 text-sm leading-6',
@@ -134,6 +141,12 @@ describe('jsEngine <-> Rust native engine parity', () => {
       expect(at('p-1 tablet:p-2 3xl:p-3', 2000).r).toEqual({ padding: 12 });
       expect(at('constructor:p-4', 2000).j).toEqual({});
     });
+  });
+
+  it.each(['z-banana', 'order-banana', 'grow-banana', 'shrink-banana', 'z-1.5'])('%s is not a class on either engine', (cls) => {
+    // Regression: these used to pass any value through (z-index: banana).
+    expect(rust(cls)).toEqual({});
+    expect(js(cls)).toEqual({});
   });
 
   it('border-2 is 2 on both engines (regression: both gave 8)', () => {

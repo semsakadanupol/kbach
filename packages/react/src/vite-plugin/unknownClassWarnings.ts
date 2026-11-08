@@ -84,6 +84,9 @@ function isMarkerClass(base: string): boolean {
  * printed when the token's position can't be found (e.g. a dynamically
  * assembled string extraction already normalized away).
  */
+/** A Tailwind CSS shade at the end of a color class: bg-blue-500, text-gray-50/40. */
+const TAILWIND_SHADE = /-(?:50|[1-9]00|950)(?:\/|$)/;
+
 export function warnIfUnknownClass(
   token: string,
   filePath: string,
@@ -91,6 +94,7 @@ export function warnIfUnknownClass(
   isResolvable: boolean,
   projectCssClasses: Set<string>,
   warnedTokens: Set<string>,
+  suggest?: (token: string) => string | null,
 ): void {
   if (isResolvable || warnedTokens.has(token)) return;
 
@@ -103,7 +107,11 @@ export function warnIfUnknownClass(
   // single flat color, and the pairing most editors/terminals already use
   // for clickable file locations (e.g. TypeScript's own diagnostics).
   const location = pos ? `${blue(filePath)}${green(`:${pos.line}:${pos.column}`)}` : blue(filePath);
-  console.warn(
-    `${kbachTag()} ${gray('Unknown class')} ${highlight(token)} ${gray('— no Kbach utility or project CSS rule matches it. Typo?')}\n  ${bold('at')} ${location}`,
-  );
+  // Only computed for a class that really is unknown (the engine tries
+  // every one-character edit, so it isn't free).
+  const suggestion = suggest?.(token) ?? null;
+  const hint = suggestion
+    ? `${gray('— did you mean')} ${highlight(suggestion)}${gray('?')}${TAILWIND_SHADE.test(token) ? gray(' Kbach color shades run 1–12, not 50–950.') : ''}`
+    : gray('— no Kbach utility or project CSS rule matches it. Typo?');
+  console.warn(`${kbachTag()} ${gray('Unknown class')} ${highlight(token)} ${hint}\n  ${bold('at')} ${location}`);
 }

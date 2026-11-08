@@ -1,5 +1,6 @@
 import { generateCss } from './wasmLoader';
-import { getThemeJson } from './theme';
+import { getTheme, getThemeJson } from './theme';
+import { ensureColorVariablesInjected, withColorVariables } from './colorVariables';
 import { BASE_RESET, RESET_STYLE_ID } from './reset';
 
 interface RuleEntry {
@@ -19,12 +20,12 @@ interface GenerateCssResult {
   rules: RuleEntry[];
 }
 
-// When a static kbach.css (see vite-plugin/index.ts) already provides these
-// rules, runtime injection is redundant — call disableRuntimeCSS() once at
-// startup to skip it. Does NOT skip calling into the WASM engine, though:
-// kb() still needs generate_css's returned className for mode-aware-color
-// expansion, since the static file's selectors are generated against that
-// expanded text too. Only the sheet.insertRule side effect is skipped.
+// When a static kbach.css (see vite-plugin/index.ts) already provides every
+// rule (the jsx-runtime path over a fully scanned app), runtime injection
+// is redundant — call disableRuntimeCSS() once at startup to skip it. kb()
+// still calls the engine for the returned className; only the
+// sheet.insertRule side effect is skipped. Without it, kb() already skips
+// the classes the static sheet defines (see `staticClasses`).
 let runtimeCSSDisabled = false;
 
 export function disableRuntimeCSS(): void {
@@ -123,11 +124,88 @@ const kbCache = new Map<string, GenerateCssResult>();
 // until setTheme() reassigns it (see theme.ts), so comparing references is
 // enough to detect "the theme changed since the cache was built" for free.
 let cachedForThemeJson: string | null = null;
+// The theme the engine actually gets: mode-aware colors as their
+// `rgb(var(--kb-color-<name>))` variable (withColorVariables), the same form
+// the static kbach.css uses. So `kb('bg-surface')` styles `.bg-surface`
+// itself and returns it unchanged, rather than expanding it into per-mode
+// classes the static CSS doesn't have. `hasModeAware` says whether the
+// variables need injecting.
+let engineThemeJson = '';
+let hasModeAware = false;
+
+function refreshEngineTheme(): void {
+  const theme = getTheme();
+  const withVars = withColorVariables(theme);
+  hasModeAware = withVars !== theme;
+  engineThemeJson = hasModeAware ? JSON.stringify(withVars) : getThemeJson();
+}
+
+// The class names the page's static kbach.css (from the Vite/PostCSS
+// plugin) already defines. kb() leaves those to it: if a class's rules were
+// in BOTH sheets, the runtime sheet (always later in the document) would win
+// every tie, so a runtime `.grid` from one element beat the static
+// `@media (min-width: 1024px) { .lg\:hidden }` on another, and responsive
+// classes broke as soon as kb() ran. Recognized by the `--kb-dark-mode`
+// declaration the plugin always writes on :root. Rebuilt when that sheet is
+// replaced (dev-server hot update) or its rule count changes.
+let staticOwner: Node | null = null;
+let staticSheet: CSSStyleSheet | null = null;
+let staticRuleCount = -1;
+let staticTokens = new Set<string>();
+
+function unescapeCssIdent(s: string): string {
+  return s.replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16))).replace(/\\(.)/g, '$1');
+}
+
+function isStaticKbachSheet(sheet: CSSStyleSheet): boolean {
+  try {
+    return Array.from(sheet.cssRules).some((r) => r instanceof CSSStyleRule && r.selectorText === ':root' && r.cssText.includes('--kb-dark-mode'));
+  } catch {
+    return false; // a cross-origin stylesheet can't be read
+  }
+}
+
+function collectClasses(rules: CSSRuleList, into: Set<string>): void {
+  for (const r of Array.from(rules)) {
+    if (r instanceof CSSStyleRule) {
+      for (const m of r.selectorText.matchAll(/\.((?:\\[0-9a-fA-F]{1,6}\s?|\\.|[\w-])+)/g)) into.add(unescapeCssIdent(m[1]!));
+    } else if ('cssRules' in r) {
+      collectClasses((r as CSSGroupingRule).cssRules, into);
+    }
+  }
+}
+
+function staticClasses(): Set<string> {
+  if (typeof document === 'undefined') return staticTokens;
+  let sheet = staticOwner && (staticOwner as HTMLStyleElement).sheet;
+  if (!sheet || !isStaticKbachSheet(sheet)) {
+    sheet = Array.from(document.styleSheets).find((s) => s !== styleEl?.sheet && isStaticKbachSheet(s)) ?? null;
+    staticOwner = sheet?.ownerNode ?? null;
+  }
+  if (!sheet) {
+    staticSheet = null;
+    staticTokens = new Set();
+    return staticTokens;
+  }
+  if (sheet !== staticSheet || sheet.cssRules.length !== staticRuleCount) {
+    staticSheet = sheet;
+    staticRuleCount = sheet.cssRules.length;
+    staticTokens = new Set();
+    collectClasses(sheet.cssRules, staticTokens);
+  }
+  return staticTokens;
+}
 
 /**
  * Resolves a Kbach class string via the Rust/WASM engine, cascade-order-safe
  * injects the resulting CSS rules into a single `<style data-kbach>` tag,
- * and returns the class string unchanged for use as `className`.
+ * and returns the class string to use as `className` (the input, except
+ * for a mode-aware color whose values aren't hex, which the engine still
+ * expands into per-mode classes).
+ *
+ * Classes the page's static kbach.css already defines are left to it (see
+ * `staticClasses`), and mode-aware colors use the same CSS variables as the
+ * static build (see `refreshEngineTheme`), so kb() and kbach.css agree.
  *
  * Must be called after `await initKbach()` resolves — see wasmLoader.ts.
  */
@@ -136,24 +214,35 @@ export function kb(classString: string): string {
   if (themeJson !== cachedForThemeJson) {
     kbCache.clear();
     cachedForThemeJson = themeJson;
+    refreshEngineTheme();
   }
 
-  let result = kbCache.get(classString);
+  const statics = runtimeCSSDisabled ? null : staticClasses();
+  let toResolve = classString;
+  let alreadyStatic = '';
+  if (statics && statics.size > 0) {
+    const tokens = classString.split(/\s+/).filter(Boolean);
+    toResolve = tokens.filter((t) => !statics.has(t)).join(' ');
+    alreadyStatic = tokens.filter((t) => statics.has(t)).join(' ');
+  }
+
+  let result = kbCache.get(toResolve);
   if (result === undefined) {
-    const json = generateCss(classString, themeJson);
+    const json = generateCss(toResolve, engineThemeJson);
     result = JSON.parse(json) as GenerateCssResult;
     if (kbCache.size >= KB_CACHE_MAX) kbCache.clear();
-    kbCache.set(classString, result);
+    kbCache.set(toResolve, result);
   }
 
   const { className, rules } = result;
   if (!runtimeCSSDisabled) {
     ensureResetInjected();
+    if (hasModeAware) ensureColorVariablesInjected(getTheme());
     for (const { rule, order } of rules) {
       injectRule(rule, order);
     }
   }
-  return className;
+  return alreadyStatic ? (alreadyStatic + ' ' + className).trim() : className;
 }
 
 /** Exported for tests only — resets injected-rule tracking, the <style> tag, the reset tag, the disableRuntimeCSS() flag, and the resolved-className cache. */
@@ -167,4 +256,8 @@ export function _resetForTests(): void {
   document.getElementById(RESET_STYLE_ID)?.remove();
   kbCache.clear();
   cachedForThemeJson = null;
+  staticOwner = null;
+  staticSheet = null;
+  staticRuleCount = -1;
+  staticTokens = new Set();
 }

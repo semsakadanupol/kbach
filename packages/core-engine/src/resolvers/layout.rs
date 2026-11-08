@@ -10,6 +10,16 @@ fn negate_raw(value: &str, negative: bool) -> String {
     if negative { format!("-{value}") } else { value.to_string() }
 }
 
+/// `10`, `0` — digits only.
+pub(crate) fn is_whole_number(v: &str) -> bool {
+    !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// `2`, `0.5` — digits with at most one decimal point.
+pub(crate) fn is_plain_number(v: &str) -> bool {
+    !v.is_empty() && v.bytes().filter(|b| *b == b'.').count() <= 1 && v.bytes().all(|b| b.is_ascii_digit() || b == b'.') && v != "."
+}
+
 const OBJECT_FIT: &[(&str, &str)] =
     &[("contain", "contain"), ("cover", "cover"), ("fill", "fill"), ("none", "none"), ("scale-down", "scale-down")];
 
@@ -201,12 +211,35 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // spacing length, so negation (real Tailwind supports both
         // "-z-10" and "-order-1") is just a literal "-" prefix rather than
         // going through resolve_negatable_length's spacing-scale lookup.
-        "z" => parsed.value.as_deref().map(|v| vec![decl("z-index", &negate_raw(v, parsed.negative))]),
-        "order" => parsed.value.as_deref().map(|v| vec![decl("order", &negate_raw(v, parsed.negative))]),
+        // Only real values: a whole number (`z-10`), `z-auto`, or an
+        // arbitrary `[...]`. Anything else used to pass straight through,
+        // so `z-banana` wrote `z-index: banana` and never counted as an
+        // unknown class.
+        "z" => {
+            let v = parsed.value.as_deref()?;
+            (parsed.is_arbitrary || v == "auto" || is_whole_number(v)).then(|| vec![decl("z-index", &negate_raw(v, parsed.negative))])
+        }
+        // `order-first`/`-last`/`-none` are keywords (they used to write
+        // `order: first`, invalid CSS). ±9999 rather than Tailwind v4's
+        // `calc(±infinity)`, so React Native gets a plain number too.
+        "order" => {
+            let v = parsed.value.as_deref()?;
+            let value = match v {
+                "first" => "-9999".to_string(),
+                "last" => "9999".to_string(),
+                "none" => "0".to_string(),
+                _ if parsed.is_arbitrary || is_whole_number(v) => negate_raw(v, parsed.negative),
+                _ => return None,
+            };
+            Some(vec![decl("order", &value)])
+        }
         // flex-grow/flex-shrink accept any plain number, not just 0/1 — bare
         // (no value) defaults to 1, matching Tailwind's `grow`/`shrink`.
-        "grow" => Some(vec![decl("flex-grow", parsed.value.as_deref().unwrap_or("1"))]),
-        "shrink" => Some(vec![decl("flex-shrink", parsed.value.as_deref().unwrap_or("1"))]),
+        "grow" | "shrink" => {
+            let v = parsed.value.as_deref().unwrap_or("1");
+            let property = if parsed.utility == "grow" { "flex-grow" } else { "flex-shrink" };
+            (parsed.is_arbitrary || is_plain_number(v)).then(|| vec![decl(property, v)])
+        }
         // top/right/bottom/left/inset support real Tailwind's negative-value
         // convention ("-top-4") AND its percentage-fraction scale ("top-1/2",
         // "-inset-1/3") — see resolve_negatable_size's own doc comment.

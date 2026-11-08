@@ -24,6 +24,11 @@
       "outputs": ["coverage/**"],
       "cache": false
     },
+    "@kbach/react#test": {
+      "dependsOn": ["^build", "build"],
+      "outputs": ["coverage/**"],
+      "cache": false
+    },
     "@kbach/react-native#test": {
       "dependsOn": ["^build", "build"],
       "outputs": ["coverage/**"],

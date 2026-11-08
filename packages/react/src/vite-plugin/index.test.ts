@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
@@ -149,22 +149,27 @@ describe('kbach() plugin — kbach.config auto-discovery across module formats',
     expect(css).toContain('--color-brand-rgb: 255,107,53');
   });
 
-  it('falls back to a real import() for kbach.config.js in an ESM-type project ("type": "module")', async () => {
+  // An ESM-type project's kbach.config.js is loaded with import(). That
+  // needs a real Node process (vitest's vm sandbox can't import a file
+  // outside the project), so this runs the BUILT plugin in a subprocess.
+  // (It used to run in-process and only passed because Node 22+ require()s
+  // an ES module, so the import() path was never actually exercised.)
+  it('loads kbach.config.js with import() in an ESM-type project ("type": "module")', () => {
+    const builtPlugin = join(__dirname, '..', '..', 'dist', 'vite-plugin.mjs');
+    if (!existsSync(builtPlugin)) throw new Error(builtPlugin + ' not found. Build first: npm run build -w @kbach/react');
     dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
     mkdirSync(join(dir, 'src'));
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ type: 'module' }), 'utf-8');
     writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="bg-brand" />', 'utf-8');
-    // Real ESM syntax — require() would throw on this in an ESM-type
-    // project; the plugin must transparently retry via import() instead.
-    writeFileSync(
-      join(dir, 'kbach.config.js'),
-      "export default { extend: { colors: { brand: '#ff6b35' } } };",
-      'utf-8',
-    );
+    writeFileSync(join(dir, 'kbach.config.js'), "export default { extend: { colors: { brand: '#ff6b35' } } };", 'utf-8');
 
-    const plugin = kbach();
-    await (plugin.configResolved as (r: { root: string }) => Promise<void>)({ root: dir });
-    (plugin.buildStart as () => void)();
+    const run = [
+      'const { kbach } = await import(' + JSON.stringify(pathToFileURL(builtPlugin).href) + ');',
+      'const plugin = kbach();',
+      'await plugin.configResolved({ root: ' + JSON.stringify(dir) + ' });',
+      'plugin.buildStart();',
+    ].join('\n');
+    execFileSync(process.execPath, ['--input-type=module', '-e', run], { encoding: 'utf-8' });
 
     const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
     expect(css).toContain('--color-brand-rgb: 255,107,53');
@@ -342,6 +347,125 @@ describe('kbach() plugin — mode-aware colors', () => {
     expect(css).toMatch(/\.dark \{[^}]*--kb-color-page: 26,33,37;/);
     // and none of the expanded per-mode classes
     expect(css).not.toContain('#faf7f0');
+  });
+});
+
+// Editing kbach.config.js used to need a dev-server restart: the theme was
+// read once, in configResolved, and Node's module cache would have served
+// the old file anyway.
+describe('kbach() plugin — kbach.config.js reload', () => {
+  let dir: string;
+  const fakeServer = { watcher: { emit: () => undefined } };
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  async function startProject(packageJson: object | null, config: string) {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    if (packageJson) writeFileSync(join(dir, 'package.json'), JSON.stringify(packageJson), 'utf-8');
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="bg-brand 3xl:flex" />', 'utf-8');
+    writeFileSync(join(dir, 'kbach.config.js'), config, 'utf-8');
+    const plugin = kbach();
+    await (plugin.configResolved as (r: { root: string }) => Promise<void>)({ root: dir });
+    (plugin.buildStart as () => void)();
+    const hotUpdate = (file: string) =>
+      (plugin.handleHotUpdate as unknown as (ctx: { file: string; server: typeof fakeServer }) => Promise<void>)({ file, server: fakeServer });
+    const css = () => readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    return { hotUpdate, css };
+  }
+
+  it('rebuilds kbach.css when kbach.config.js changes, with no restart', async () => {
+    const { hotUpdate, css } = await startProject(null, "module.exports = { extend: { colors: { brand: '#ff6b35' } } };");
+    expect(css()).toContain('--color-brand-rgb: 255,107,53');
+    expect(css()).not.toContain('min-width: 1920px');
+
+    writeFileSync(join(dir, 'kbach.config.js'), "module.exports = { extend: { colors: { brand: '#2563eb' }, screens: { '3xl': 1920 } } };", 'utf-8');
+    // a forward-slash path, the way Vite reports it on every OS
+    await hotUpdate(join(dir, 'kbach.config.js').replace(/\\/g, '/'));
+
+    expect(css()).toContain('--color-brand-rgb: 37,99,235');
+    expect(css()).not.toContain('255,107,53');
+    expect(css()).toContain('@media (min-width: 1920px)'); // a breakpoint added in the edit
+  });
+
+  // An ES-module config reloads through a cache-busted import(), which only
+  // a real Node process has (vitest runs this file in a vm sandbox without
+  // one), so this runs the BUILT plugin in a node subprocess. Regression:
+  // Node 22+ require()s an ES module into the ESM cache, where clearing
+  // require.cache didn't reach it, so the reload read the old file.
+  it('reloads an ES-module kbach.config.js too (real Node, built plugin)', () => {
+    const builtPlugin = join(__dirname, '..', '..', 'dist', 'vite-plugin.mjs');
+    if (!existsSync(builtPlugin)) throw new Error(builtPlugin + ' not found. Build first: npm run build -w @kbach/react');
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    const script = join(dir, 'reload.mjs');
+    writeFileSync(
+      script,
+      [
+        "import { mkdirSync, writeFileSync, readFileSync } from 'fs';",
+        "import { join } from 'path';",
+        'const [pluginUrl, root] = process.argv.slice(2);',
+        'const { kbach } = await import(pluginUrl);',
+        "mkdirSync(join(root, 'src'));",
+        "writeFileSync(join(root, 'package.json'), JSON.stringify({ type: 'module' }));",
+        "writeFileSync(join(root, 'src', 'App.tsx'), '<div className=\"bg-brand\" />');",
+        "writeFileSync(join(root, 'kbach.config.js'), \"export default { extend: { colors: { brand: '#ff6b35' } } };\");",
+        'const plugin = kbach();',
+        'await plugin.configResolved({ root });',
+        'plugin.buildStart();',
+        "writeFileSync(join(root, 'kbach.config.js'), \"export default { extend: { colors: { brand: '#2563eb' } } };\");",
+        "await plugin.handleHotUpdate({ file: join(root, 'kbach.config.js'), server: { watcher: { emit() {} } } });",
+        "console.log(readFileSync(join(root, 'src', 'kbach.css'), 'utf-8'));",
+      ].join('\n'),
+      'utf-8',
+    );
+    const project = join(dir, 'project');
+    mkdirSync(project);
+    const css = execFileSync(process.execPath, [script, pathToFileURL(builtPlugin).href, project], { encoding: 'utf-8' });
+    expect(css).toContain('--color-brand-rgb: 37,99,235');
+    expect(css).not.toContain('255,107,53');
+  });
+
+  it('keeps the last good CSS when the edited config has a syntax error', async () => {
+    const { hotUpdate, css } = await startProject(null, "module.exports = { extend: { colors: { brand: '#ff6b35' } } };");
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    writeFileSync(join(dir, 'kbach.config.js'), 'module.exports = { extend: { colors: { brand: ', 'utf-8');
+    await hotUpdate(join(dir, 'kbach.config.js'));
+    expect(css()).toContain('--color-brand-rgb: 255,107,53');
+    expect(String(warn.mock.calls[0]?.[0])).toContain("Couldn't reload kbach.config");
+  });
+});
+
+// The unknown-class warning names the fix: Tailwind CSS shades map to
+// Kbach's (bg-blue-500 -> bg-blue-6, the most common wrong class), and a
+// one-character typo gets its one-edit correction, both from the engine.
+describe('kbach() plugin — unknown-class suggestions', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('suggests the Kbach shade for a Tailwind shade, and a fix for a typo', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="hover:bg-blue-500 flexx zzqq-made-up" />', 'utf-8');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const plugin = kbach();
+    await (plugin.configResolved as (r: { root: string }) => Promise<void>)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    // eslint-disable-next-line no-control-regex
+    const messages = warn.mock.calls.map((c) => String(c[0]).replace(/\x1b\[[0-9;]*m/g, ''));
+    const about = (token: string) => messages.find((m) => m.includes('Unknown class ' + token + ' '));
+    expect(about('hover:bg-blue-500')).toContain('did you mean hover:bg-blue-6? Kbach color shades run 1–12, not 50–950.');
+    expect(about('flexx')).toContain('did you mean flex?');
+    expect(about('flexx')).not.toContain('50–950');
+    expect(about('zzqq-made-up')).toContain('Typo?');
   });
 });
 

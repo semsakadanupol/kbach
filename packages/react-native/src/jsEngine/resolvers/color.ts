@@ -191,5 +191,30 @@ const LENGTH_UNITS = ['px', 'rem', 'em', '%', 'vh', 'vw'];
 export function looksLikeLength(value: string): boolean {
   const unit = LENGTH_UNITS.find((u) => value.endsWith(u));
   const withoutUnit = unit ? value.slice(0, value.length - unit.length) : value;
-  return withoutUnit !== '' && Number.isFinite(Number(withoutUnit));
+  if (withoutUnit !== '' && Number.isFinite(Number(withoutUnit))) return true;
+  // calc()/clamp()/min()/max() over lengths, like color.rs.
+  if (!['calc(', 'clamp(', 'min(', 'max('].some((f) => value.startsWith(f))) return false;
+  return MATH_LENGTH_UNIT.test(value);
+}
+
+/** A digit directly followed by a length unit, not by more letters (color.rs `contains_number_with_unit`). */
+const MATH_LENGTH_UNIT = /\d(?:px|rem|em|%|vh|vw|vmin|vmax|dvh|dvw|svh|svw|lvh|lvw|ch|ex|lh|cqw|cqh|cqi|cqb)(?![A-Za-z])/;
+
+/** Size rather than color, for an arbitrary value: the type hint decides, else the shape (color.rs `is_length`). */
+export function isLength(parsed: ParsedClass, value: string): boolean {
+  switch (parsed.typeHint ?? null) {
+    case null:
+      return looksLikeLength(value);
+    case 'length':
+    case 'size':
+    case 'line-width':
+    case 'percentage':
+    case 'number':
+    case 'integer':
+    case 'absolute-size':
+    case 'relative-size':
+      return true;
+    default:
+      return false;
+  }
 }

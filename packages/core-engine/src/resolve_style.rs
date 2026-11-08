@@ -116,7 +116,7 @@ const EDIT_ALPHABET: &[char] = &[
 /// reach. Bounded to distance 1 deliberately — a real typo is almost always
 /// one keystroke, and suggesting a distance-2 "correction" starts guessing
 /// rather than helping.
-fn edit_distance_1_candidates(base: &str) -> Vec<String> {
+pub(crate) fn edit_distance_1_candidates(base: &str) -> Vec<String> {
     let chars: Vec<char> = base.chars().collect();
     let n = chars.len();
     let mut out = Vec::with_capacity(n * EDIT_ALPHABET.len() * 2);
@@ -149,37 +149,6 @@ fn edit_distance_1_candidates(base: &str) -> Vec<String> {
         }
     }
     out
-}
-
-/// Finds a single-edit-away correction for `token`'s base utility (modifiers
-/// stripped) that actually resolves — using `resolve_utility` itself as the
-/// dictionary, rather than a separately maintained word list that could
-/// silently drift out of sync with the real vocabulary (miss a utility
-/// added later, or suggest one that was removed). Only ever called on the
-/// already-confirmed-unresolvable path (see call sites below), so the
-/// O(length × alphabet) cost here is never paid for a class that resolves
-/// normally.
-///
-/// Skips arbitrary-value tokens (`bg-[...]`) entirely — the bracket content
-/// is user data, not vocabulary, and editing bracket syntax at random
-/// produces no useful suggestion. Also skips a base under 3 characters (too
-/// many equally-plausible single-edit neighbors to pick one with any real
-/// confidence) or over 40 (not a realistic typo length; bounds the
-/// candidate count for a pathologically long unresolvable string).
-fn suggest_correction(token: &str, parsed: &ParsedClass, theme: &ThemeConfig) -> Option<String> {
-    if parsed.is_arbitrary {
-        return None;
-    }
-    let split_at = token.len() - token.rsplit(':').next().unwrap_or(token).len();
-    let (modifier_prefix, base) = token.split_at(split_at);
-    if base.len() < 3 || base.len() > 40 {
-        return None;
-    }
-    edit_distance_1_candidates(base).into_iter().find_map(|candidate| {
-        let candidate_token = format!("{modifier_prefix}{candidate}");
-        let candidate_parsed = parse_class(&candidate_token);
-        resolve_utility(&candidate_parsed, theme).is_some().then_some(candidate_token)
-    })
 }
 
 /// Makes arbitrary, potentially-adversarial text safe to interpolate into a
@@ -218,7 +187,7 @@ fn sanitize_for_warning(value: &str) -> String {
 /// equivalent warning at all yet (see resolveStyle.ts's own doc comment for
 /// why: it would need the full web dispatcher as its "is this a typo"
 /// ground truth, which this jsEngine directory doesn't have a port of).
-fn typo_warning(token: &str, parsed: &ParsedClass, theme: &ThemeConfig) -> String {
+fn typo_warning(token: &str, _parsed: &ParsedClass, theme: &ThemeConfig) -> String {
     // Strip any `_kbon:` markers `jsxRuntimeCore.ts` substituted in for a
     // satisfied `hover:`/`focus:`/... so the message names the class the
     // developer actually wrote (`hover:flexx`, not `_kbon:flexx`).
@@ -229,7 +198,9 @@ fn typo_warning(token: &str, parsed: &ParsedClass, theme: &ThemeConfig) -> Strin
             .collect::<Vec<_>>()
             .join(":"),
     );
-    match suggest_correction(token, parsed, theme) {
+    let written: String = token.split(':').filter(|seg| *seg != STATE_HOLD_MARKER).collect::<Vec<_>>().join(":");
+    // the shared suggester: Tailwind shades (bg-blue-500 -> bg-blue-6), then typos
+    match crate::suggest::suggest_class(&written, theme) {
         Some(suggestion) => {
             let suggestion = sanitize_for_warning(&suggestion);
             format!("[Kbach] \"{display}\" doesn't match any known Kbach utility — did you mean \"{suggestion}\"? (skipped)")

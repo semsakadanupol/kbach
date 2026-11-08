@@ -4,7 +4,7 @@
  * CSS-only properties RN doesn't have, which is harmless — RN just logs an
  * unknown-style-property warning, same precedent the Rust engine documents).
  */
-import { colorValue, looksLikeLength } from './color';
+import { colorValue, isLength } from './color';
 import { decl, resolveLength, type Declaration } from '../shared';
 import type { ParsedClass } from '../parser';
 import type { ThemeConfig } from '../../theme';
@@ -77,7 +77,7 @@ function borderValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | n
     // substituteModeAwareColorToken, e.g. "border-background") silently
     // produced border-width: #050505, which RN then rejected as an invalid
     // native value. Mirrors resolvers/color.rs's identical fix.
-    if (looksLikeLength(value)) return [decl('border-width', value)];
+    if (isLength(parsed, value)) return [decl('border-width', value)];
     const color = colorValue(theme, parsed);
     return color === null ? null : [decl('border-color', color)];
   }
@@ -99,7 +99,7 @@ function borderSideValue(theme: ThemeConfig, parsed: ParsedClass, sideProperty: 
   if (value === null) return null;
   if (parsed.isArbitrary) {
     // Same regression guard as `borderValue` above.
-    if (looksLikeLength(value)) return [decl(`${sideProperty}-width`, value)];
+    if (isLength(parsed, value)) return [decl(`${sideProperty}-width`, value)];
     const color = colorValue(theme, parsed);
     return color === null ? null : [decl(`${sideProperty}-color`, color)];
   }
@@ -120,7 +120,7 @@ function borderAxisValue(theme: ThemeConfig, parsed: ParsedClass, sideA: string,
   if (value === null) return null;
   if (parsed.isArbitrary) {
     // Same regression guard as `borderValue` above.
-    if (looksLikeLength(value)) return [decl(`${sideA}-width`, value), decl(`${sideB}-width`, value)];
+    if (isLength(parsed, value)) return [decl(`${sideA}-width`, value), decl(`${sideB}-width`, value)];
     const color = colorValue(theme, parsed);
     return color === null ? null : [decl(`${sideA}-color`, color), decl(`${sideB}-color`, color)];
   }
@@ -178,7 +178,7 @@ function outlineValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | 
   if (value === null) return null;
   if (parsed.isArbitrary) {
     // Same regression guard as `borderValue` above.
-    if (looksLikeLength(value)) return [decl('outline-width', value)];
+    if (isLength(parsed, value)) return [decl('outline-width', value)];
     const color = colorValue(theme, parsed);
     return color === null ? null : [decl('outline-color', color)];
   }

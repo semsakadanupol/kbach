@@ -8,6 +8,11 @@ function negateRaw(value: string, negative: boolean): string {
   return negative ? `-${value}` : value;
 }
 
+/** `10` — layout.rs's `is_whole_number`. */
+const WHOLE = /^\d+$/;
+/** `2`, `0.5` — layout.rs's `is_plain_number`. */
+const PLAIN_NUMBER = /^(?:\d+\.?\d*|\.\d+)$/;
+
 /** Port of `resolvers/layout.rs`'s `overflow_axis_value`. */
 function overflowAxisValue(property: string, value: string): Declaration[] | null {
   switch (value) {
@@ -142,14 +147,29 @@ export function resolve(parsed: ParsedClass, theme: ThemeConfig): Declaration[] 
       return [decl('position', 'fixed')];
     case 'sticky':
       return [decl('position', 'sticky')];
-    case 'z':
-      return parsed.value === null ? null : [decl('z-index', negateRaw(parsed.value, parsed.negative))];
-    case 'order':
-      return parsed.value === null ? null : [decl('order', negateRaw(parsed.value, parsed.negative))];
+    // Only real values, mirroring layout.rs: a whole number, z-auto, the
+    // order-first/-last/-none keywords, or an arbitrary [...]. Anything
+    // else used to pass straight through (z-banana -> z-index: banana).
+    case 'z': {
+      const v = parsed.value;
+      if (v === null || !(parsed.isArbitrary || v === 'auto' || WHOLE.test(v))) return null;
+      return [decl('z-index', negateRaw(v, parsed.negative))];
+    }
+    case 'order': {
+      const v = parsed.value;
+      if (v === null) return null;
+      if (v === 'first') return [decl('order', '-9999')];
+      if (v === 'last') return [decl('order', '9999')];
+      if (v === 'none') return [decl('order', '0')];
+      if (!(parsed.isArbitrary || WHOLE.test(v))) return null;
+      return [decl('order', negateRaw(v, parsed.negative))];
+    }
     case 'grow':
-      return [decl('flex-grow', parsed.value ?? '1')];
-    case 'shrink':
-      return [decl('flex-shrink', parsed.value ?? '1')];
+    case 'shrink': {
+      const v = parsed.value ?? '1';
+      if (!(parsed.isArbitrary || PLAIN_NUMBER.test(v))) return null;
+      return [decl(parsed.utility === 'grow' ? 'flex-grow' : 'flex-shrink', v)];
+    }
     // top/right/bottom/left/inset support real Tailwind's negative-value
     // convention ("-top-4") AND its percentage-fraction scale ("top-1/2",
     // "-inset-1/3") — see resolveNegatableSize's own doc comment.

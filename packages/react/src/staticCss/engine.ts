@@ -9,7 +9,7 @@
 // as its own module until Next.js support needed a second caller.
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { generateCssForToken, type RuleEntry } from '../vite-plugin/wasmNode';
+import { generateCssForToken, suggestClassForToken, type RuleEntry } from '../vite-plugin/wasmNode';
 import { extractClassStrings, scanUsedTags, scanDir } from '../vite-plugin/scan';
 import { formatKbachCSS } from '../vite-plugin/format';
 import { scanProjectCssSelectors, warnIfUnknownClass } from '../vite-plugin/unknownClassWarnings';
@@ -94,7 +94,7 @@ export function createKbachStaticCssEngine(options: KbachStaticCssEngineOptions)
       tokens.add(tok);
       const rules = resolveToken(tok);
       if (process.env.NODE_ENV !== 'production') {
-        warnIfUnknownClass(tok, filePath, code, rules.length > 0, projectCssClasses, warnedTokens);
+        warnIfUnknownClass(tok, filePath, code, rules.length > 0, projectCssClasses, warnedTokens, (t) => suggestClassForToken(t, themeJson));
       }
     }
     fileTokens.set(normPath(filePath), tokens);

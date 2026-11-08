@@ -359,6 +359,35 @@ values). Checked value by value against Tailwind's own output:
 - Bare `transition` uses v4's explicit property list (visual properties,
   not layout). `transition-all` is `all`.
 
+**Arbitrary values pick their property by type** (core-engine
+1.0.0-beta.18). parser.rs strips a Tailwind type hint into
+`ParsedClass::type_hint` (`text-[length:var(--x)]` -> value `var(--x)`,
+hint `length`), and color.rs `is_length`/`is_image` decide: a hint wins,
+else the value's shape (a number+unit or a calc()/clamp()/min()/max()
+over lengths is a length; url()/image-set()/*-gradient() an image). So
+`bg-[linear-gradient(…)]` is background-image, `text-[clamp(…)]`
+font-size, `stroke-[2.5]` stroke-width, `ring-[3px]` the ring width.
+Before, each went to the color property, and hints stayed in the value.
+Negative arbitrary angles (`-rotate-[30deg]`) now flip.
+
+**Tailwind v4 syntax** (same release): `p-4!` (important at the end),
+`p-(--gap)` / `text-(length:--size)` (the CSS-variable shorthand; the
+modifier splitter now also respects parentheses), and opacity on an
+arbitrary color, `bg-[#c7a25d]/40` (parser.rs `color_with_opacity`:
+rgba() for hex, color-mix() otherwise; a non-color value with an
+opacity, `w-[10px]/50`, resolves to nothing). Number utilities accept
+only numbers: `z-banana`/`order-banana`/`grow-x`/`duration-x` used to
+pass through as invalid CSS, and `order-first`/`-last`/`-none` wrote
+`order: first`; they are now ±9999/0.
+
+**"Did you mean" suggestions** come from one place, suggest.rs
+`suggest_class`, exported over WASM: a Tailwind shade maps to Kbach's
+(50->1, 100->2, …, 900->10, 950->11, exact because the palettes line
+up), else a one-edit typo fix checked against the real resolver. Used
+by @kbach/react's unknown-class warning, kbach-vscode's quick fix and
+React Native's dev warning. The JS port (iOS/Expo Go) mirrors the
+parser and resolver changes above; parity.test.ts covers them.
+
 **Remaining differences** (not value changes, just naming/shape):
 - **Border colors between children** are `divide-color-*`, not
   `divide-*` (`divide-x`/`divide-y` are the width utilities), and

@@ -101,7 +101,17 @@ fn scale_factor(parsed: &ParsedClass) -> Option<f64> {
 fn angle(parsed: &ParsedClass) -> Option<String> {
     let value = parsed.value.as_deref()?;
     if parsed.is_arbitrary {
-        return Some(value.to_string());
+        if !parsed.negative {
+            return Some(value.to_string());
+        }
+        // `-rotate-[30deg]` used to ignore its minus. A plain angle flips its
+        // sign (so native, which can't read calc(), gets a number too);
+        // anything else (var(), calc()) is multiplied by -1.
+        return Some(match value.strip_prefix('-') {
+            Some(positive) => positive.to_string(),
+            None if value.starts_with(|c: char| c.is_ascii_digit() || c == '.') => format!("-{value}"),
+            None => format!("calc({value} * -1)"),
+        });
     }
     let n: f64 = value.parse().ok()?;
     let n = if parsed.negative { -n } else { n };

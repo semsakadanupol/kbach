@@ -12,10 +12,13 @@ project's own `kbach.config.js` customizations (§6). This file covers
 [AGENTS.md](https://github.com/semsakadanupol/kbach/blob/main/AGENTS.md).
 
 Published on the VS Code Marketplace as `kbach.kbach-vscode` under the
-`kbach` publisher id, not a personal account: version `0.1.0`, flagged
-Preview, first published 2026-11-08 by uploading the `.vsix` on the
+`kbach` publisher id, not a personal account, flagged Preview. First
+published 2026-11-08 as `0.1.0` by uploading the `.vsix` on the
 Marketplace's web page (§8). Install with `code --install-extension
-kbach.kbach-vscode`.
+kbach.kbach-vscode`. The user-facing docs (readme.md, the docs site)
+show only the Marketplace install; building from source is in §8 here.
+`0.1.0`'s listing shipped a README with its "Known limits" heading cut
+off by a bad edit; `0.1.1` restores it.
 
 ---
 

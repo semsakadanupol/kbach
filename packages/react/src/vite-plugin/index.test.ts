@@ -345,6 +345,34 @@ describe('kbach() plugin — mode-aware colors', () => {
   });
 });
 
+// Regression coverage: a breakpoint added in kbach.config.js
+// (extend.screens) and max-<breakpoint> used to compile with NO @media
+// wrapper, so `3xl:flex-row` / `max-md:hidden` applied at every width.
+describe('kbach() plugin — breakpoints from kbach.config.js', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('wraps a custom breakpoint and max-<breakpoint> in the right @media query', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="3xl:flex-row max-md:hidden max-3xl:p-4 hovr:block" />', 'utf-8');
+
+    const plugin = kbach({ config: { extend: { screens: { '3xl': 1920 } } } });
+    await (plugin.configResolved as (r: { root: string }) => Promise<void>)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).toMatch(/@media \(min-width: 1920px\) \{\s*\.\\33 xl\\:flex-row \{\s*flex-direction: row;/);
+    expect(css).toMatch(/@media \(width < 768px\) \{\s*\.max-md\\:hidden \{\s*display: none;/);
+    expect(css).toMatch(/@media \(width < 1920px\) \{\s*\.max-3xl\\:p-4 \{/);
+    // a misspelled modifier styles nothing, rather than applying always
+    expect(css).not.toContain('hovr');
+  });
+});
+
 // Regression coverage for a real bug: mainCSSFile() was hardcoded to
 // "src/kbach.css" regardless of the project's actual source root, so any
 // framework using a different convention (React Router v7's framework

@@ -71,6 +71,18 @@ function nativeModifierState(modifier: string, theme: ThemeConfig, colorScheme: 
     const px = reduceConstantMath(`calc(${modifier.slice(5, -1).trim()})`);
     return px === null ? null : width <= px;
   }
+  // Breakpoints the static list above doesn't have, read from the theme —
+  // mirrors resolve_style.rs: a config's own breakpoint name
+  // (extend.screens: { '3xl': 1920 } -> 3xl:) holds from that width up, and
+  // max-<breakpoint>: below it. Own properties only, so an inherited Object
+  // property name ("constructor") is never mistaken for a breakpoint.
+  const screen = (name: string) => (Object.prototype.hasOwnProperty.call(theme.screens, name) ? theme.screens[name] : undefined);
+  const custom = screen(modifier);
+  if (typeof custom === 'number') return width >= custom;
+  if (modifier.startsWith('max-')) {
+    const max = screen(modifier.slice(4));
+    if (typeof max === 'number') return width < max;
+  }
   return null;
 }
 
@@ -294,7 +306,8 @@ export function resolveStyleJsWithWarnings(
         d.value.includes('var(') ||
         d.property === 'outline' ||
         d.property === 'object-position' ||
-        d.property === 'container-type'
+        d.property === 'container-type' ||
+        d.property === 'container-name'
       ) {
         // Same filter as resolve_style.rs: CSS variables and var()-built
         // values are web-cascade machinery RN can't parse, and RN has no

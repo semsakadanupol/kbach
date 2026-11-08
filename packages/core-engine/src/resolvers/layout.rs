@@ -127,15 +127,15 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // Container queries (Phase 25) — marks this element as a query
         // container for its descendants' `@sm:`/`@min-[...]:`-style
         // container-relative variants (registry.rs's dynamic modifier
-        // resolution). Named containers (`@container/sidebar`, letting a
-        // descendant target that specific ancestor by name via
-        // `@sm/sidebar:`) are deliberately NOT supported — that needs the
-        // arbitrary-value-shaped utility name `@container/{name}` to also
-        // emit `container-name`, and the corresponding variant needs a
-        // third dynamic-modifier shape (`@sm/{name}:`) to reference it,
-        // meaningful added complexity for a rarely-needed feature; the bare
-        // (unnamed, `container-type` only) form covers the common case.
+        // resolution). `@container/sidebar` also names it, so a descendant
+        // can target that ancestor with `@md/sidebar:` (css.rs's
+        // `theme_modifier`). Web only: native drops both properties.
         "@container" => Some(vec![decl("container-type", "inline-size")]),
+        u if u.starts_with("@container/") => {
+            let name = &u["@container/".len()..];
+            let valid = !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+            valid.then(|| vec![decl("container-type", "inline-size"), decl("container-name", name)])
+        }
         "@container-normal" => Some(vec![decl("container-type", "normal")]),
         "items-center" => Some(vec![decl("align-items", "center")]),
         "items-start" => Some(vec![decl("align-items", "flex-start")]),

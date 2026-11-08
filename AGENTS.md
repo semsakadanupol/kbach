@@ -195,19 +195,33 @@ at render time.
 ```js
 extend: {
   spacing: { 128: 512 },                            // p-128
-  screens: { md: 800 },                              // md: now starts at 800px
+  screens: { '3xl': 1920, md: 800 },                 // 3xl:flex-row; md: now from 800px
   fontFamily: { display: '"Cal Sans", sans-serif' }, // font-display
   container: { center: true, padding: '2rem' },
 }
 ```
 
-`screens` can only change the widths of the five built-in names (`sm`,
-`md`, `lg`, `xl`, `2xl`). A NEW name is merged into the theme but the
-variant isn't recognized: `screens: { '3xl': 1920 }` makes `3xl:flex-row`
-emit a plain `.\33 xl\:flex-row { flex-direction: row }` with no `@media`
-wrapper, so it applies at every width (core-engine 1.0.0-beta.17;
-`registry.rs` only registers the five names as responsive modifiers).
-Use `min-[1920px]:` for a one-off width until that's fixed.
+**Breakpoint variants come from the theme, not only the registry.**
+`registry.rs` registers the five built-in names (`sm`…`2xl`); any other
+name in `theme.screens` (`3xl`, `tablet`) and `max-<name>` for every
+breakpoint are resolved against the theme instead: css.rs
+`theme_modifier` on web, `native_modifier_state` in resolve_style.rs on
+native, and `nativeModifierState` in the JS port (jsEngine/resolveStyle.ts),
+which must stay in step (parity.test.ts checks them at five widths).
+`3xl:` is `@media (min-width: 1920px)`, sorted with the built-in tiers by
+width; `max-md:` is `@media (width < 768px)`, strictly below, so `md:` and
+`max-md:` never overlap. On native they compare the window width the same
+way. Before core-engine 1.0.0-beta.18 neither worked: the modifier was
+skipped and the rule applied at every width.
+
+**An unknown modifier produces no rule** (since 1.0.0-beta.18). Before,
+css.rs skipped a modifier the registry didn't know, so a typo like
+`hovr:bg-blue-6` painted the background always. The same pass added
+`nth-3:`/`nth-last-2:`/`nth-of-type-4:` (plain-number forms) and named
+containers: `@container/main` sets `container-name` (web only; native
+drops it like `container-type`), and `@md/main:` / `@min-[400px]/main:`
+query that ancestor. Named sizes (`@md:`) still use the screen widths,
+not Tailwind's container sizes.
 
 `fontFamily` values are web-shaped fallback stacks even in the native
 package — native strips them to the first name at resolve time, so the

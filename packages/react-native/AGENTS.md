@@ -130,7 +130,9 @@ Native has no selector/cascade engine. Two groups:
 
 **Resolved in the engine from live parameters:**
 - `dark:` — current OS/app color scheme.
-- `sm:` `md:` `lg:` `xl:` `2xl:` — window width vs `theme.screens`.
+- `sm:` `md:` `lg:` `xl:` `2xl:` — window width vs `theme.screens`, plus
+  any breakpoint a config adds (`3xl:`, `tablet:`), and `max-<name>:`
+  (strictly below that width).
 - `min-[500px]:` / `max-[30rem]:` — arbitrary width breakpoints (constant
   px/rem only).
 - `active:` — `Pressable` press state (via its style-callback).

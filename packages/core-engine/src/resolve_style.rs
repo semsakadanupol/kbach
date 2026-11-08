@@ -254,7 +254,19 @@ fn native_modifier_state(modifier: &str, theme: &ThemeConfig, color_scheme: &str
     if modifier == STATE_HOLD_MARKER {
         return Some(true);
     }
-    let def = registry::resolve(modifier)?;
+    let Some(def) = registry::resolve(modifier) else {
+        // Breakpoints the static registry doesn't list, read from the theme
+        // the same way css.rs's `theme_modifier` does on web: a config's own
+        // breakpoint name (`extend.screens: { '3xl': 1920 }` -> `3xl:`)
+        // holds from that width up, and `max-<breakpoint>:` below it.
+        if let Some(&min) = theme.screens.get(modifier) {
+            return Some(width >= min);
+        }
+        if let Some(&max) = modifier.strip_prefix("max-").and_then(|bp| theme.screens.get(bp)) {
+            return Some(width < max);
+        }
+        return None;
+    };
     if let Some(DarkScheme::Dark) = def.dark_scheme {
         return Some(color_scheme == "dark");
     }
@@ -621,7 +633,7 @@ pub fn resolve_style_with_warnings(
             }
             if d.property.starts_with("--")
                 || d.value.contains("var(")
-                || matches!(d.property.as_str(), "outline" | "object-position" | "container-type")
+                || matches!(d.property.as_str(), "outline" | "object-position" | "container-type" | "container-name")
             {
                 // CSS custom properties (`--kb-outline-style`, `--kb-leading`,
                 // …) and any value built from `var()` only exist to make web

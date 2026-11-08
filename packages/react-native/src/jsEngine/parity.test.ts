@@ -99,6 +99,43 @@ describe('jsEngine <-> Rust native engine parity', () => {
     }
   });
 
+  describe('breakpoints from the theme: custom names and max-<name>', () => {
+    // kbach.config.js: extend.screens: { tablet: 900, '3xl': 1920 }
+    const theme = { ...defaultTheme, screens: { ...defaultTheme.screens, tablet: 900, '3xl': 1920 } };
+    const themeJsonWide = JSON.stringify(theme);
+    const at = (cls: string, width: number) => {
+      const { __kbachWarnings: _r, ...r } = JSON.parse(resolve_style_json(cls, themeJsonWide, 'light', false, width));
+      const { __kbachWarnings: _j, ...j } = resolveStyleJs(cls, theme, 'light', false, width) as Record<string, unknown>;
+      return { r, j };
+    };
+    const CLASSES = [
+      '3xl:p-4', 'tablet:flex-row', 'max-md:p-4', 'max-3xl:p-4', 'max-tablet:p-4',
+      'md:max-xl:p-2', 'bg-white max-md:bg-black', 'p-1 tablet:p-2 3xl:p-3',
+      // never a breakpoint: unknown names, and inherited Object properties
+      'hovr:p-4', 'max-nope:p-4', 'constructor:p-4', 'max-constructor:p-4', 'toString:p-4',
+      // named containers are web-only
+      '@container/main',
+    ];
+    it.each(CLASSES)('%s matches at every width', (cls) => {
+      for (const width of [300, 800, 1000, 1500, 2000]) {
+        const { r, j } = at(cls, width);
+        expect(j, cls + ' at ' + width).toEqual(r);
+      }
+    });
+    it('custom and max- breakpoints apply at the right widths', () => {
+      expect(at('3xl:p-4', 2000).r).toEqual({ padding: 16 });
+      expect(at('3xl:p-4', 1919).r).toEqual({});
+      expect(at('tablet:flex-row', 900).r).toEqual({ flexDirection: 'row' });
+      expect(at('max-md:p-4', 767).r).toEqual({ padding: 16 });
+      expect(at('max-md:p-4', 768).r).toEqual({}); // max-<bp> is below the breakpoint, not at it
+      expect(at('md:max-xl:p-2', 1000).r).toEqual({ padding: 8 });
+      expect(at('md:max-xl:p-2', 1300).r).toEqual({});
+      expect(at('p-1 tablet:p-2 3xl:p-3', 1000).r).toEqual({ padding: 8 });
+      expect(at('p-1 tablet:p-2 3xl:p-3', 2000).r).toEqual({ padding: 12 });
+      expect(at('constructor:p-4', 2000).j).toEqual({});
+    });
+  });
+
   it('border-2 is 2 on both engines (regression: both gave 8)', () => {
     expect(rust('border-2')).toEqual({ borderWidth: 2 });
     expect(js('border-2')).toEqual({ borderWidth: 2 });

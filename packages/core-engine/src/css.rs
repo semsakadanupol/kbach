@@ -246,7 +246,29 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
     let mut needs_starting_style = false;
 
     for modifier in &parsed.modifiers {
-        let Some(def) = registry::resolve(modifier) else { continue };
+        // A modifier the registry doesn't know is either theme-driven (a
+        // custom breakpoint from the config, `max-<breakpoint>`, a named
+        // container query) or unknown. An unknown one produces NO rule.
+        // Before, it was skipped and the rule applied unconditionally, so a
+        // typo like `hovr:bg-blue-6` painted the background always, and
+        // `nth-3:`/`max-md:`/`3xl:`/`@md/main:` applied at every size/position.
+        let Some(def) = registry::resolve(modifier) else {
+            match theme_modifier(modifier, theme)? {
+                ThemeModifier::MinWidth(width, tier) => {
+                    min_width = Some(min_width.map_or(width, |w: f64| w.max(width)));
+                    order = order.max(tier);
+                }
+                ThemeModifier::MaxWidth(width) => {
+                    media_wrappers.push(format!("(width < {width}px)"));
+                    order = order.max(45.0);
+                }
+                ThemeModifier::Container(condition) => {
+                    container_wrappers.push(condition);
+                    order = order.max(45.2);
+                }
+            }
+            continue;
+        };
         if let Some(p) = def.pseudo {
             pseudo_suffix.push_str(&p);
         }
@@ -391,6 +413,53 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
     }
 
     Some(BuiltRule { rule, order })
+}
+
+/// A modifier resolved against the theme rather than the static registry.
+enum ThemeModifier {
+    /// A breakpoint from `theme.screens` the registry has no entry for (a
+    /// config's `extend.screens`, e.g. `3xl`), with its cascade tier.
+    MinWidth(f64, f64),
+    /// `max-<breakpoint>`: below that breakpoint (Tailwind v4's `max-md`).
+    MaxWidth(f64),
+    /// A named container query condition, `<name> (min-width: …)`.
+    Container(String),
+}
+
+/// `None` = genuinely unknown, so the caller drops the whole rule.
+fn theme_modifier(modifier: &str, theme: &ThemeConfig) -> Option<ThemeModifier> {
+    if let Some(&width) = theme.screens.get(modifier) {
+        // Tier between the static sm..2xl ones (40..44) by width, so a custom
+        // breakpoint sorts with the built-in ones it sits between.
+        let below = ["sm", "md", "lg", "xl", "2xl"]
+            .iter()
+            .filter(|bp| theme.screens.get(**bp).is_some_and(|w| *w <= width))
+            .count();
+        return Some(ThemeModifier::MinWidth(width, 39.5 + below as f64));
+    }
+    if let Some(bp) = modifier.strip_prefix("max-") {
+        if let Some(&width) = theme.screens.get(bp) {
+            return Some(ThemeModifier::MaxWidth(width));
+        }
+    }
+    // Named container queries: `@md/main:`, `@min-[400px]/main:`.
+    if let Some(rest) = modifier.strip_prefix('@') {
+        let (query, name) = rest.rsplit_once('/')?;
+        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+            return None;
+        }
+        let condition = if let Some(&width) = theme.screens.get(query) {
+            format!("(min-width: {width}px)")
+        } else if let Some(v) = query.strip_prefix("min-[").and_then(|v| v.strip_suffix(']')) {
+            format!("(min-width: {})", v.replace('_', " "))
+        } else if let Some(v) = query.strip_prefix("max-[").and_then(|v| v.strip_suffix(']')) {
+            format!("(max-width: {})", v.replace('_', " "))
+        } else {
+            return None;
+        };
+        return Some(ThemeModifier::Container(format!("{name} {condition}")));
+    }
+    None
 }
 
 /// The `sm`/`md`/`lg`/`xl`/`2xl` breakpoint names real Tailwind's own

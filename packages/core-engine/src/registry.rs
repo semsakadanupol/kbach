@@ -506,6 +506,20 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
     // "nth-" counterparts, same longer-before-shorter rule as everywhere
     // else in this chain — "nth-of-type-[3n+1]" must not be wrongly claimed
     // by the "nth-" arm as if it were "nth-[of-type-3n+1]".
+    // Plain-number forms (`nth-3:`, `nth-last-2:`, `nth-of-type-4:`), the
+    // Tailwind v4 shorthand for the bracket forms below. Longest prefix first.
+    for (prefix, pseudo, order) in [
+        ("nth-last-of-type-", "nth-last-of-type", 5.51),
+        ("nth-of-type-", "nth-of-type", 5.51),
+        ("nth-last-", "nth-last-child", 5.5),
+        ("nth-", "nth-child", 5.5),
+    ] {
+        if let Some(n) = name.strip_prefix(prefix) {
+            if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) {
+                return Some(pseudo_only(format!(":{pseudo}({n})"), order));
+            }
+        }
+    }
     if let Some(inner) = bracket_content(name, "nth-last-of-type-") {
         return Some(pseudo_only(format!(":nth-last-of-type({})", unescape(inner)), 5.51));
     }

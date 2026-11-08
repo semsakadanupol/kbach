@@ -391,3 +391,78 @@ mod tests {
         assert_eq!(keys.len(), before, "DEFAULT_COLORS has a duplicate key");
     }
 }
+
+/// Modifiers the static registry doesn't list. Regression: they used to be
+/// skipped, so the rule applied unconditionally (a typo like
+/// `hovr:bg-blue-6` painted always; `nth-3:`/`max-md:`/`3xl:`/`@md/main:`
+/// ignored their condition).
+#[cfg(test)]
+mod modifier_resolution_tests {
+    use super::*;
+
+    const THEME: &str = r##"{"colors":{"blue-6":"#2563eb"},"spacing":{},"screens":{"sm":640,"md":768,"lg":1024,"xl":1280,"2xl":1536,"3xl":1920},"fontFamily":{},"darkMode":"class","container":{}}"##;
+
+    fn rules(class: &str) -> Vec<String> {
+        let v: serde_json::Value = serde_json::from_str(&generate_css(class, THEME)).unwrap();
+        v["rules"].as_array().unwrap().iter().map(|r| r["rule"].as_str().unwrap().to_string()).collect()
+    }
+    fn only_rule(class: &str) -> String {
+        let r = rules(class);
+        assert_eq!(r.len(), 1, "{class}: {r:?}");
+        r[0].clone()
+    }
+
+    #[test]
+    fn an_unknown_modifier_produces_no_rule_instead_of_applying_always() {
+        for class in ["hovr:bg-blue-6", "madeup:p-4", "foo:bar:flex", "max-nope:p-4", "@md/:p-4"] {
+            assert!(rules(class).is_empty(), "{class} must produce nothing, got {:?}", rules(class));
+        }
+        // real modifiers are unaffected
+        assert!(only_rule("hover:bg-blue-6").contains(":hover"));
+    }
+
+    #[test]
+    fn numeric_nth_modifiers() {
+        assert!(only_rule("nth-3:p-4").contains(":nth-child(3)"));
+        assert!(only_rule("nth-last-2:p-4").contains(":nth-last-child(2)"));
+        assert!(only_rule("nth-of-type-4:p-4").contains(":nth-of-type(4)"));
+        assert!(only_rule("nth-last-of-type-1:p-4").contains(":nth-last-of-type(1)"));
+        assert!(only_rule("nth-[2n+1]:p-4").contains(":nth-child(2n+1)"));
+    }
+
+    #[test]
+    fn max_breakpoints_and_ranges() {
+        assert!(only_rule("max-md:p-4").starts_with("@media (width < 768px)"));
+        let range = only_rule("md:max-xl:p-4");
+        assert!(range.contains("@media (min-width: 768px)") && range.contains("@media (width < 1280px)"), "{range}");
+        assert!(only_rule("max-[600px]:p-4").starts_with("@media (max-width: 600px)"));
+    }
+
+    #[test]
+    fn custom_config_breakpoints() {
+        // `extend.screens: { '3xl': 1920 }` — the documented config shape
+        assert!(only_rule("3xl:p-4").starts_with("@media (min-width: 1920px)"));
+        assert!(only_rule("max-3xl:p-4").starts_with("@media (width < 1920px)"));
+    }
+
+    #[test]
+    fn named_container_queries() {
+        assert!(only_rule("@md/main:p-4").starts_with("@container main (min-width: 768px)"));
+        assert!(only_rule("@min-[400px]/card:p-4").starts_with("@container card (min-width: 400px)"));
+        assert!(only_rule("@md:p-4").starts_with("@container (min-width: 768px)"));
+        let named = only_rule("@container/main");
+        assert!(named.contains("container-type: inline-size") && named.contains("container-name: main"), "{named}");
+    }
+
+    #[test]
+    fn native_evaluates_custom_and_max_breakpoints() {
+        let t: crate::theme::ThemeConfig = serde_json::from_str(THEME).unwrap();
+        let at = |class: &str, width: f64| crate::resolve_style::resolve_style(class, &t, "light", false, width);
+        assert!(at("max-md:p-4", 500.0).contains_key("padding"));
+        assert!(!at("max-md:p-4", 800.0).contains_key("padding"));
+        assert!(at("3xl:p-4", 2000.0).contains_key("padding"));
+        assert!(!at("3xl:p-4", 1500.0).contains_key("padding"));
+        assert!(!at("hovr:p-4", 800.0).contains_key("padding"));
+        assert!(!at("@container/main", 800.0).contains_key("containerName"));
+    }
+}

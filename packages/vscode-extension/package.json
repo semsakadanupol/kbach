@@ -2,9 +2,19 @@
   "name": "kbach-vscode",
   "displayName": "Kbach IntelliSense",
   "description": "className autocomplete, hover previews, and inline typo diagnostics for Kbach — the Rust-powered utility-class styling engine for React and React Native.",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0",
   "publisher": "kbach",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#2e393f",
+    "theme": "dark"
+  },
+  "preview": true,
   "license": "MIT",
+  "homepage": "https://github.com/semsakadanupol/kbach/tree/main/packages/vscode-extension#readme",
+  "bugs": {
+    "url": "https://github.com/semsakadanupol/kbach/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/semsakadanupol/kbach.git",
@@ -13,7 +23,23 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Programming Languages", "Linters", "Snippets"],
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Snippets"
+  ],
+  "keywords": [
+    "kbach",
+    "react",
+    "react native",
+    "expo",
+    "css",
+    "utility classes",
+    "utility-first",
+    "className",
+    "autocomplete",
+    "intellisense"
+  ],
   "activationEvents": [
     "onLanguage:javascript",
     "onLanguage:javascriptreact",
@@ -29,7 +55,8 @@
     "generate:colors": "node ../core-engine/scripts/generate-palette.mjs src/generatedPalette.ts",
     "test": "vitest run --passWithNoTests",
     "lint": "tsc --noEmit",
-    "package": "npx @vscode/vsce package --no-dependencies"
+    "package": "node -e \"require('fs').copyFileSync('../../LICENSE','LICENSE')\" && npx @vscode/vsce package --no-dependencies",
+    "publish:marketplace": "node -e \"require('fs').copyFileSync('../../LICENSE','LICENSE')\" && npx @vscode/vsce publish --no-dependencies"
   },
   "devDependencies": {
     "@kbach/core-engine": "1.0.0-beta.17",

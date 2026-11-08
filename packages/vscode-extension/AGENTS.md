@@ -11,9 +11,11 @@ project's own `kbach.config.js` customizations (§6). This file covers
 `kbach-vscode` only; for the cross-package overview, see the repo root's
 [AGENTS.md](https://github.com/semsakadanupol/kbach/blob/main/AGENTS.md).
 
-Published under the `kbach` publisher id (`kbach.kbach-vscode`), not a
-personal account — not yet on the Marketplace; installed today via a
-locally built `.vsix` (§8).
+Published on the VS Code Marketplace as `kbach.kbach-vscode` under the
+`kbach` publisher id, not a personal account: version `0.1.0`, flagged
+Preview, first published 2026-11-08 by uploading the `.vsix` on the
+Marketplace's web page (§8). Install with `code --install-extension
+kbach.kbach-vscode`.
 
 ---
 
@@ -280,9 +282,43 @@ regardless of what's in the workspace elsewhere.
 
 ```sh
 npm run build      # tsup -> dist/extension.js, then vendors the WASM engine (§1)
-npm run package     # vsce package --no-dependencies -> a .vsix
+npm run package     # copies ../../LICENSE in, then vsce package --no-dependencies -> a .vsix
 code --install-extension kbach-vscode-<version>.vsix --force
+npm run publish:marketplace   # same, but vsce publish (needs `npx @vscode/vsce login kbach` first)
 ```
+
+**Releasing a new version.** Bump `version` in package.json (the
+Marketplace refuses a version it already has), then either:
+- **Web upload, no token** (how 0.1.0 shipped): `npm run package`, then
+  at https://marketplace.visualstudio.com/manage/publishers/kbach open the
+  extension's **…** menu → **Update** and upload the new `.vsix`.
+- **CLI:** `npm run publish:marketplace`. That needs an Azure DevOps
+  Personal Access Token with the **Marketplace → Manage** scope and
+  **All accessible organizations** (one organization gives a 401),
+  stored once with `npx @vscode/vsce login kbach`.
+
+A new listing's page at `marketplace.visualstudio.com/items?itemName=…`
+can 404 for a while after the first upload, during the Marketplace's
+scan, even though the gallery API already returns it. Check the API
+(`POST /_apis/public/gallery/extensionquery`, filterType 7 with the
+extension id) before assuming the upload failed.
+
+Marketplace rules this package follows:
+- **`version` must be plain `major.minor.patch`.** The Marketplace rejects
+  a prerelease suffix (`0.1.0-beta.1` was this package's version until
+  2026-11-08). The beta status is the `"preview": true` flag (a "Preview"
+  badge on the listing) instead. For a real pre-release channel, publish
+  with `vsce publish --pre-release` on a separate minor line.
+- **`icon`** is `images/icon.png`, 256×256 PNG of the Kbach logo (SVG is
+  not allowed); `galleryBanner.color` `#2e393f` is the logo's slate.
+- **LICENSE**: vsce wants a license file in the extension folder and stops
+  to ask without one. The `package`/`publish:marketplace` scripts copy the
+  root `LICENSE` in first; the copy is gitignored.
+- **`.vscodeignore`** keeps `src/`, tests and this `AGENTS.md` out of the
+  `.vsix`. Check the file list `vsce package` prints before publishing.
+- The script is `publish:marketplace`, not `publish`: npm runs a script
+  named `publish` as a lifecycle hook of `npm publish`.
+- `readme.md` is the listing page, so keep its install section true.
 
 A window reload (`Developer: Reload Window`) is required after
 installing over an existing version — an already-running extension host

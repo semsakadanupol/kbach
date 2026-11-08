@@ -4,3 +4,4 @@ scripts/**
 tsconfig.json
 tsup.config.ts
 .gitignore
+AGENTS.md

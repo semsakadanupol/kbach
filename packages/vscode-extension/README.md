@@ -4,8 +4,7 @@
 [Kbach](https://github.com/semsakadanupol/kbach) — validated against the
 real Rust-powered engine, not a hand-maintained copy of its rules.
 
-> Beta. Not yet on the VS Code Marketplace — build and install from a
-> local `.vsix` for now (below).
+> Preview. Works with `@kbach/react` and `@kbach/react-native` projects.
 
 ## What it does
 
@@ -37,22 +36,33 @@ real Rust-powered engine, not a hand-maintained copy of its rules.
 <div className="flex items-center bg-blue-500">  {/* ← flagged: Kbach's shades are 1-12, not Tailwind's 50-950 */}
 ```
 
-## Install (from source, until this is published)
+## Install (from source, until## Install
+
+From the VS Code Marketplace: search for **Kbach IntelliSense** in the
+Extensions view, or run
+
+```sh
+code --install-extension kbach.kbach-vscode
+```
+
+It starts on its own in JavaScript and TypeScript files (`.js`, `.jsx`,
+`.ts`, `.tsx`). There's nothing to configure: it finds your project's
+`kbach.config.js` by itself.
+
+### From source
 
 ```sh
 npm install
-npm run build
-npm run package
-code --install-extension kbach-vscode-<version>.vsix --force
+npm run build -w kbach-vscode
+npm run package -w kbach-vscode
+code --install-extension packages/vscode-extension/kbach-vscode-<version>.vsix --force
 ```
 
 Then reload the window (`Ctrl+Shift+P` → "Developer: Reload Window") —
 an already-running extension host doesn't pick up a reinstalled version
 on its own.
 
-## Known limits
-
-- Hover and diagnostics call the real engine directly, so they're never
+iagnostics call the real engine directly, so they're never
   wrong. Autocomplete's general utility list is scraped from the Rust
   engine's own test fixtures rather than a complete enumeration — it can
   miss a real utility, though that never affects whether hover/

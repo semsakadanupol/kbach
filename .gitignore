@@ -70,3 +70,6 @@ old-kbach/
 .vscode/
 .github/
 apps/
+
+# Copied from the root LICENSE by the VS Code extension package script (vsce needs it in the extension folder)
+packages/vscode-extension/LICENSE

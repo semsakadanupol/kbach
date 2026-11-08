@@ -227,7 +227,7 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
   // until then.
   let root = process.cwd();
   let theme = defaultTheme;
-  let engine: KbachStaticCssEngine = createKbachStaticCssEngine({ root, theme, themeJson: JSON.stringify(theme), includeDirs, safelist });
+  let engine: KbachStaticCssEngine = createKbachStaticCssEngine({ root, theme, includeDirs, safelist });
   // Resolved once in configResolved (see findMainCSSFile) and reused for
   // the rest of this plugin instance's lifetime — a mid-session filesystem
   // scan on every single write would be wasteful, and re-detecting after
@@ -268,7 +268,7 @@ export function kbach(options: KbachPluginOptions = {}): Plugin {
     async configResolved(resolved) {
       root = resolved.root;
       theme = await resolveEffectiveTheme(root, options);
-      engine = createKbachStaticCssEngine({ root, theme, themeJson: JSON.stringify(theme), includeDirs, safelist });
+      engine = createKbachStaticCssEngine({ root, theme, includeDirs, safelist });
       mainCSSFilePath = findMainCSSFile(root, includeDirs, options.cssFile);
     },
 

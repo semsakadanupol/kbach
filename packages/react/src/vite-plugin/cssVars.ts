@@ -1,11 +1,9 @@
 // Ported from old-kbach/src/vite-plugin.ts's buildColorVarMap/buildSpacingVarMap
 // — extracts repeated hex/px values in the assembled CSS text into :root
-// custom properties. Mode-aware colors are NOT extracted here: by the time
-// css.rs generates a rule, a mode-aware name like "surface" has already
-// been expanded into literal light/dark arbitrary hex (see Phase 2's
-// expand_mode_aware_color_classes) — that hex is indistinguishable from any
-// other arbitrary value at this point, so only plain (string) theme colors
-// are recognized. Documented gap, not a silent one — see the Phase 6 plan.
+// custom properties. Only plain (string) theme colors are handled here.
+// Mode-aware colors never reach this as hex: the static engine hands the
+// engine rgb(var(--kb-color-<name>)) for them (colorVariables.ts's
+// withColorVariables), and format.ts writes those variables itself.
 import type { ThemeConfig } from '../theme';
 
 export interface VarMap {

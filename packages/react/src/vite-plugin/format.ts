@@ -4,6 +4,7 @@ import { buildColorVarMap, buildSpacingVarMap, applyVarMap } from './cssVars';
 import { mergeResponsiveMediaBlocks } from './mediaMerge';
 import { prettifyCSS } from './prettify';
 import { buildResetCSS } from '../reset';
+import { colorVariablesCss } from '../colorVariables';
 
 // Exported so vite-plugin/index.ts's auto-detection (findMainCSSFile) can
 // recognize an existing marked file without duplicating these literals.
@@ -58,6 +59,10 @@ export function formatKbachCSS(tokenRules: Map<string, RuleEntry[]>, theme: Them
   lines.push('', ':root {', `  --kb-dark-mode: ${theme.darkMode};`);
   for (const [varName, val] of declarations) lines.push(`  ${varName}: ${val};`);
   lines.push('}');
+  // Mode-aware colors resolve to rgb(var(--kb-color-<name>)) (see
+  // staticCss/engine.ts), so their light and dark values are defined here.
+  const colorVars = colorVariablesCss(theme);
+  if (colorVars) lines.push('', prettifyCSS(colorVars));
   lines.push('', prettifyCSS(text));
 
   return lines.join('\n');

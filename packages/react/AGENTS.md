@@ -85,6 +85,16 @@ write `className="..."` normally.
 4. At runtime `className` is a plain string prop — **nothing calls the
    engine**, the CSS already exists. No async init.
 
+Mode-aware colors (`surface: { light, dark }`, built in or from
+`kbach.config.js`) compile to `rgb(var(--kb-color-<name>))` against the
+class as written (`.bg-surface`), and kbach.css defines each variable on
+`:root` plus under the dark-mode selector. `staticCss/engine.ts` gets this
+by handing the engine `withColorVariables(theme)` (colorVariables.ts);
+`format.ts` writes the variables with `colorVariablesCss(theme)`, the same
+text `ensureColorVariablesInjected` injects at runtime. `kb()` and the
+jsx-runtime instead get the engine's expanded per-mode classes back as the
+className (`bg-[#…] dark:bg-[#…]`).
+
 ## 3. Runtime pieces (opt-in, these DO call the engine)
 
 - **`kb(dynamicClassString)`** — resolve a class list assembled from
@@ -157,6 +167,13 @@ it if `postcss.config.js` isn't at the project root.
   hasn't resolved yet. It's async; await it once before the first `kb()`
   call, or prefer a static `safelist` entry when the value set is known
   ahead of time.
+- **A mode-aware color class (`bg-surface`, or a `{ light, dark }` color
+  from `kbach.config.js`) has no style at all with plain `className`** —
+  `@kbach/react` 1.0.0-beta.28 and earlier wrote rules only for the
+  engine's expanded `bg-[#…] dark:bg-[#…]` classes, which only `kb()` and
+  the jsx-runtime path ever put on an element. Fixed in the release after
+  beta.28 (see §2). On an affected version, use the jsx-runtime path or
+  write the two classes yourself.
 - **A class works in one file but not another** — it's outside every
   `include` dir the plugin scans (default: `src`, `app`, `pages`,
   `components`). Add the directory via the plugin's `include` option.

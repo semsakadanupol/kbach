@@ -179,21 +179,35 @@ colors: {
 
 Both make `bg-surface` (no `dark:` prefix) resolve to the right shade for
 the current mode. `dark` is a reserved key, not a color name. A name under
-`dark` with no matching top-level entry is skipped. On `@kbach/react` a
-mode-aware color compiles to a live `rgb(var(--kb-color-<name>))` CSS
-variable; on native it resolves to the concrete side for the current
-scheme at render time.
+`dark` with no matching top-level entry is skipped. Each side of a pair
+may itself be a reference (`'gray-2'`, `'brand/30'`); `@kbach/react`
+(web) and `kbach-vscode` resolve it, while `@kbach/react-native`'s own
+merge still skips the per-color pair form. In `@kbach/react`'s static CSS
+(Vite/PostCSS) and in `@kbach/browser`, a mode-aware hex color compiles to
+`rgb(var(--kb-color-<name>))` on the class as written, and the variable is
+defined for both modes; releases up to `@kbach/react` 1.0.0-beta.28
+expanded it into per-mode classes instead, so a plain `className` got no
+style. On native it resolves to the concrete side for the current scheme
+at render time.
 
 ### 6.2 Other `extend` sections
 
 ```js
 extend: {
   spacing: { 128: 512 },                            // p-128
-  screens: { '3xl': 1920 },                          // 3xl:flex-row
+  screens: { md: 800 },                              // md: now starts at 800px
   fontFamily: { display: '"Cal Sans", sans-serif' }, // font-display
   container: { center: true, padding: '2rem' },
 }
 ```
+
+`screens` can only change the widths of the five built-in names (`sm`,
+`md`, `lg`, `xl`, `2xl`). A NEW name is merged into the theme but the
+variant isn't recognized: `screens: { '3xl': 1920 }` makes `3xl:flex-row`
+emit a plain `.\33 xl\:flex-row { flex-direction: row }` with no `@media`
+wrapper, so it applies at every width (core-engine 1.0.0-beta.17;
+`registry.rs` only registers the five names as responsive modifiers).
+Use `min-[1920px]:` for a one-off width until that's fixed.
 
 `fontFamily` values are web-shaped fallback stacks even in the native
 package — native strips them to the first name at resolve time, so the

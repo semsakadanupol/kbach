@@ -142,6 +142,17 @@ describe('resolveKbachConfig', () => {
     expect(theme.colors.surface).toEqual({ light: '#fff', dark: '#000' });
   });
 
+  // Regression: a reference inside a per-color pair was passed through as
+  // the bare name, so bg-surface compiled to "background-color: gray-2".
+  it('resolves palette and custom-color references inside a per-color { light, dark } pair', () => {
+    const theme = resolveKbachConfig({
+      extend: { colors: { brand: { light: '#ff6b35', dark: '#ff8c5a' }, tile: { light: 'gray-2', dark: 'gray-11/50' }, accent: { light: 'brand', dark: 'brand/30' } } },
+    });
+    expect(theme.colors.tile).toEqual({ light: defaultTheme.colors['gray-2'], dark: 'rgba(3,7,18,0.5)' });
+    // a side referencing another pair takes that pair's own side
+    expect(theme.colors.accent).toEqual({ light: '#ff6b35', dark: 'rgba(255,140,90,0.3)' });
+  });
+
   it('the grouped "dark" block resolves its own opacity/alias references against itself and the palette, not the light side', () => {
     const theme = resolveKbachConfig({
       extend: {

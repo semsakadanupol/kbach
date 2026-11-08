@@ -30,6 +30,70 @@ function wrapDarkDecls(strategy: DarkModeStrategy, decls: string): string {
   }
 }
 
+/** Each mode-aware hex color's channels for light and dark, as `--kb-color-<name>` declarations. */
+function modeAwareDecls(theme: ThemeConfig): { light: string[]; dark: string[] } {
+  const light: string[] = [];
+  const dark: string[] = [];
+  for (const [name, value] of Object.entries(theme.colors)) {
+    if (typeof value === 'string') continue;
+    const l = parseHexRgb(value.light);
+    const d = parseHexRgb(value.dark);
+    if (!l || !d) continue;
+    light.push(`--kb-color-${name}: ${l.join(',')};`);
+    dark.push(`--kb-color-${name}: ${d.join(',')};`);
+  }
+  return { light, dark };
+}
+
+/**
+ * The CSS that defines every mode-aware color's `--kb-color-<name>`
+ * variable: the light values on `:root`, the dark ones under the theme's
+ * dark-mode selector. Empty when the theme has no mode-aware hex colors.
+ * Written into kbach.css by the static plugins, and injected at runtime by
+ * `ensureColorVariablesInjected`, so both define the variables the same way.
+ */
+export function colorVariablesCss(theme: ThemeConfig): string {
+  const { light, dark } = modeAwareDecls(theme);
+  if (light.length === 0) return '';
+  return `:root { ${light.join(' ')} }\n${wrapDarkDecls(theme.darkMode, dark.join(' '))}`;
+}
+
+/**
+ * The theme to hand the engine when the class names on the page can't be
+ * rewritten: every mode-aware color (`surface: { light, dark }`) with hex
+ * on both sides becomes a plain `rgb(var(--kb-color-<name>))` reference.
+ *
+ * Why: for a `{ light, dark }` pair the engine EXPANDS the class
+ * (`bg-surface` -> `bg-[#f9fafb] dark:bg-[#111827]`) and generates rules
+ * only for the expanded text. `kb()` copes by returning the expanded string
+ * as the new `className`, but a class written in source (static kbach.css)
+ * or in a page's own HTML (@kbach/browser) stays `bg-surface`, so it would
+ * get no rule at all. With a variable as the value, the engine emits
+ * `.bg-surface { background-color: rgb(var(--kb-color-surface)) }` for the
+ * class as written, and `colorVariablesCss` supplies the light and dark
+ * values of that variable.
+ *
+ * Only for pairs where both sides parse as hex, the same rule
+ * `colorVariablesCss` uses, so a reference is never emitted for a variable
+ * that isn't defined. Anything else is left as it is and falls back to the
+ * engine's normal expansion. Opacity suffixes (`bg-surface/50`) work: the
+ * engine applies them to non-hex colors through `color-mix()`
+ * (core-engine 1.0.0-beta.17+).
+ */
+export function withColorVariables(theme: ThemeConfig): ThemeConfig {
+  let changed = false;
+  const colors: ThemeConfig['colors'] = {};
+  for (const [name, value] of Object.entries(theme.colors)) {
+    if (typeof value !== 'string' && parseHexRgb(value.light) && parseHexRgb(value.dark)) {
+      colors[name] = `rgb(var(--kb-color-${name}))`;
+      changed = true;
+    } else {
+      colors[name] = value;
+    }
+  }
+  return changed ? { ...theme, colors } : theme;
+}
+
 const STYLE_ID = 'kbach-colors';
 
 // Tracks the exact theme object last injected for — a plain reference
@@ -64,19 +128,9 @@ export function ensureColorVariablesInjected(theme: ThemeConfig): void {
   if (injectedForTheme === theme) return;
   injectedForTheme = theme;
 
-  const lightDecls: string[] = [];
-  const darkDecls: string[] = [];
-  for (const [name, value] of Object.entries(theme.colors)) {
-    if (typeof value === 'string') continue;
-    const light = parseHexRgb(value.light);
-    const dark = parseHexRgb(value.dark);
-    if (!light || !dark) continue;
-    lightDecls.push(`--kb-color-${name}: ${light.join(',')};`);
-    darkDecls.push(`--kb-color-${name}: ${dark.join(',')};`);
-  }
-
+  const css = colorVariablesCss(theme);
   let el = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
-  if (lightDecls.length === 0) {
+  if (!css) {
     el?.remove();
     return;
   }
@@ -85,7 +139,7 @@ export function ensureColorVariablesInjected(theme: ThemeConfig): void {
     el.id = STYLE_ID;
     document.head.insertBefore(el, document.head.firstChild);
   }
-  el.textContent = `:root { ${lightDecls.join(' ')} }\n${wrapDarkDecls(theme.darkMode, darkDecls.join(' '))}`;
+  el.textContent = css;
 }
 
 /** Exported for tests only. */

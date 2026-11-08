@@ -14,11 +14,11 @@ import { extractClassStrings, scanUsedTags, scanDir } from '../vite-plugin/scan'
 import { formatKbachCSS } from '../vite-plugin/format';
 import { scanProjectCssSelectors, warnIfUnknownClass } from '../vite-plugin/unknownClassWarnings';
 import type { ThemeConfig } from '../theme';
+import { withColorVariables } from '../colorVariables';
 
 export interface KbachStaticCssEngineOptions {
   root: string;
   theme: ThemeConfig;
-  themeJson: string;
   /** Directories to scan for class strings, relative to `root`. */
   includeDirs: string[];
   /** Always-included class names — see KbachPluginOptions.safelist's own doc comment (vite-plugin/index.ts). */
@@ -62,7 +62,12 @@ function normPath(p: string): string {
 const SAFELIST_KEY = '\0kbach-safelist';
 
 export function createKbachStaticCssEngine(options: KbachStaticCssEngineOptions): KbachStaticCssEngine {
-  const { root, theme, themeJson, includeDirs, safelist } = options;
+  const { root, theme, includeDirs, safelist } = options;
+  // Class names in source stay as written, so mode-aware colors must
+  // resolve to their --kb-color-<name> variable rather than being expanded
+  // into per-mode classes nothing on the page uses (see withColorVariables).
+  // formatKbachCSS writes the variables themselves.
+  const themeJson = JSON.stringify(withColorVariables(theme));
 
   // fileTokens: file path (or SAFELIST_KEY) -> tokens that entry contributes.
   // tokenRules: token -> resolved rules (cached, never regenerated unless new).

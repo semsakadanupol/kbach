@@ -46,7 +46,9 @@ only. For the cross-package overview, see the repo root's
    `@kbach/react`'s dark-mode store).
 
 **Mode-aware colors are mapped to CSS variables, not expanded**
-(`src/cdnTheme.ts`, `toCdnTheme`). For a `{ light, dark }` pair, the
+(`src/cdnTheme.ts`, `toCdnTheme`, a thin wrapper over `@kbach/react`'s
+`withColorVariables` in `react/src/colorVariables.ts`, which the static
+Vite/PostCSS plugins use for the same reason). For a `{ light, dark }` pair, the
 engine rewrites `bg-surface` to `bg-[#…] dark:bg-[#…]` and generates rules
 only for that text, which `kb()` callers handle by using the returned
 className. A CDN script can't rewrite the page's own `class` attributes, so

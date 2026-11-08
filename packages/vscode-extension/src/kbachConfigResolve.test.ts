@@ -41,6 +41,11 @@ describe('resolveKbachConfig', () => {
     expect(theme.colors.surface).toEqual({ light: '#f9fafb', dark: '#111827' });
   });
 
+  it('resolves references inside a per-color light/dark pair', () => {
+    const theme = resolveKbachConfig({ extend: { colors: { tile: { light: 'gray-2', dark: 'gray-11' } } } }, base);
+    expect(theme.colors.tile).toEqual({ light: base.colors['gray-2'], dark: base.colors['gray-11'] });
+  });
+
   it('builds a mode-aware color from the grouped dark block', () => {
     const theme = resolveKbachConfig(
       { extend: { colors: { surface: 'gray-2', card: 'white', dark: { surface: 'gray-11', card: 'gray-9' } } } },

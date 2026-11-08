@@ -88,7 +88,16 @@ function resolveColorEntry(
   value: ColorEntry | string,
   lookup: (name: string) => ColorEntry | undefined,
 ): ColorEntry {
-  if (typeof value !== 'string') return value;
+  if (typeof value !== 'string') {
+    // Each side of a { light, dark } pair is itself a color or a reference
+    // (`{ light: 'gray-2', dark: 'gray-11' }`), resolved like a plain entry.
+    // A side that resolves to a pair takes that pair's own side.
+    const side = (v: string, mode: 'light' | 'dark'): string => {
+      const r = resolveColorEntry(v, lookup);
+      return typeof r === 'string' ? r : r[mode];
+    };
+    return { light: side(value.light, 'light'), dark: side(value.dark, 'dark') };
+  }
 
   const slash = value.indexOf('/');
   const name = slash === -1 ? value : value.slice(0, slash);

@@ -306,6 +306,45 @@ describe('kbach() plugin — safelist option', () => {
   });
 });
 
+// Regression coverage for a real bug: a mode-aware color
+// (`page: { light, dark }`) written as a plain `className="bg-page"` got NO
+// rule in kbach.css. The engine expanded it into `bg-[#…] dark:bg-[#…]` and
+// wrote rules only for those expanded classes, which nothing on the page
+// used (only kb() and the jsx-runtime hand the expanded string back as the
+// className). The built-in `surface`/`card`/... colors hit it too.
+describe('kbach() plugin — mode-aware colors', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('styles a mode-aware color class as written, through a CSS variable defined for both modes', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'kbach-test-'));
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'App.tsx'), '<div className="bg-page text-ink/50 border-surface" />', 'utf-8');
+
+    const plugin = kbach({
+      config: { darkMode: 'class', extend: { colors: { page: { light: '#faf7f0', dark: '#1a2125' }, ink: { light: '#1f272b', dark: '#ece6d8' } } } },
+    });
+    await (plugin.configResolved as (r: { root: string }) => Promise<void>)({ root: dir });
+    (plugin.buildStart as () => void)();
+
+    const css = readFileSync(join(dir, 'src', 'kbach.css'), 'utf-8');
+    expect(css).toContain('.bg-page {\n  background-color: rgb(var(--kb-color-page));\n}');
+    // (the formatter swaps "transparent" for its --color-transparent variable)
+    expect(css).toMatch(/\.text-ink\\\/50 \{\n {2}color: color-mix\(in srgb, rgb\(var\(--kb-color-ink\)\) 50%, (transparent|var\(--color-transparent\))\);/);
+    // a built-in mode-aware color works the same way
+    expect(css).toContain('.border-surface {');
+    expect(css).toContain('rgb(var(--kb-color-surface))');
+    // the variables, light on :root and dark under the 'class' strategy's selector
+    expect(css).toContain('--kb-color-page: 250,247,240;');
+    expect(css).toMatch(/\.dark \{[^}]*--kb-color-page: 26,33,37;/);
+    // and none of the expanded per-mode classes
+    expect(css).not.toContain('#faf7f0');
+  });
+});
+
 // Regression coverage for a real bug: mainCSSFile() was hardcoded to
 // "src/kbach.css" regardless of the project's actual source root, so any
 // framework using a different convention (React Router v7's framework

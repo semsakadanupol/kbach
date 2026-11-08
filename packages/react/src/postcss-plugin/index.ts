@@ -119,7 +119,6 @@ export default function kbachPostcss(options: KbachPostcssPluginOptions = {}): P
       const engine = createKbachStaticCssEngine({
         root: projectRoot,
         theme,
-        themeJson: JSON.stringify(theme),
         includeDirs,
         safelist,
       });

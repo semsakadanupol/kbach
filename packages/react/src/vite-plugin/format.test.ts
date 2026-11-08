@@ -23,6 +23,22 @@ describe('formatKbachCSS', () => {
     expect(css).toContain('.p-4 {\n  padding: var(--spacing-4);\n}');
   });
 
+  it('defines each mode-aware color variable for light and dark, under the theme\'s dark-mode selector', () => {
+    const map = new Map([['bg-surface', [{ rule: '.bg-surface { background-color: rgb(var(--kb-color-surface)) }', order: 0 }]]]);
+    const modeAware = { ...theme(), colors: { surface: { light: '#ffffff', dark: '#000000' }, brand: '#ff6b35' } };
+    const css = formatKbachCSS(map, modeAware);
+    expect(css).toContain(':root {\n  --kb-color-surface: 255,255,255;\n}');
+    expect(css).toContain('[data-theme="dark"] {\n  --kb-color-surface: 0,0,0;\n}');
+    expect(formatKbachCSS(map, { ...modeAware, darkMode: 'class' })).toContain('.dark {\n  --kb-color-surface: 0,0,0;\n}');
+    // a plain color gets no mode variable
+    expect(css).not.toContain('--kb-color-brand');
+  });
+
+  it('writes no mode-aware variables when the theme has none', () => {
+    const css = formatKbachCSS(new Map([['flex', [{ rule: '.flex { display: flex }', order: 0 }]]]), theme());
+    expect(css).not.toContain('--kb-color-');
+  });
+
   it('extracts a used theme color into a :root custom property', () => {
     const map = new Map([['bg-blue-6', [{ rule: '.bg-blue-6 { background-color: #2563eb }', order: 0 }]]]);
     const css = formatKbachCSS(map, theme());

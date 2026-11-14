@@ -25,12 +25,17 @@ import { decl, resolveNegatableSize, type Declaration } from '../shared';
 import type { ParsedClass } from '../parser';
 import type { ThemeConfig } from '../../theme';
 
-/** Non-arbitrary: `scale-150` -> value="150" -> 150/100 = 1.5. Arbitrary: `scale-[1.75]` -> 1.75 directly. */
+/**
+ * Non-arbitrary: `scale-150` -> value="150" -> 150/100 = 1.5. Arbitrary:
+ * `scale-[1.75]` -> 1.75 directly. A leading `-` mirrors (`-scale-x-100`
+ * is -1), like transform.rs.
+ */
 function scaleFactor(parsed: ParsedClass): number | null {
-  if (parsed.value === null) return null;
+  if (parsed.value === null || parsed.value.trim() === '') return null;
   const n = Number(parsed.value);
   if (!Number.isFinite(n)) return null;
-  return parsed.isArbitrary ? n : n / 100;
+  const factor = parsed.isArbitrary ? n : n / 100;
+  return parsed.negative ? -factor : factor;
 }
 
 /** Non-arbitrary: `rotate-45` -> "45deg", negative-aware. Arbitrary: `rotate-[0.5turn]` -> as-is. */

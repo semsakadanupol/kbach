@@ -1,6 +1,6 @@
-use super::color::color_value;
+use super::color::{color_value, is_color, split_opacity};
 use super::{decl, resolve_percent, Declaration};
-use crate::parser::ParsedClass;
+use crate::parser::{arbitrary_modifier, Alpha, ParsedClass};
 use crate::theme::ThemeConfig;
 
 // A byte-exact copy of Tailwind's own published box-shadow scale (same
@@ -62,22 +62,31 @@ fn shadow_layer(variable: &str, value: &str) -> Vec<Declaration> {
     vec![decl(variable, value), decl("box-shadow", BOX_SHADOW_COMPOSE)]
 }
 
+/// A shadow layer's default color, black at the scale's own alpha, or at the
+/// alpha of an opacity modifier: `shadow-xl/20` is the xl shadow at 20%
+/// (Tailwind v4). A color class still replaces it, through `variable`.
+pub(super) fn shadow_color(variable: &str, default_alpha: &str, alpha: Option<&Alpha>) -> String {
+    let a = alpha.map_or_else(|| default_alpha.to_string(), Alpha::number);
+    format!("var({variable}, rgb(0 0 0 / {a}))")
+}
+
 /// Tailwind v4's `--inset-shadow-*` scale, recolorable through
 /// `--kb-inset-shadow-color` (`inset-shadow-blue-6`).
-fn inset_shadow_value(key: &str) -> Option<&'static str> {
+fn inset_shadow_value(key: &str, alpha: Option<&Alpha>) -> Option<String> {
+    let c = shadow_color("--kb-inset-shadow-color", "0.05", alpha);
     Some(match key {
-        "2xs" => "inset 0 1px var(--kb-inset-shadow-color, rgb(0 0 0 / 0.05))",
-        "xs" => "inset 0 1px 1px var(--kb-inset-shadow-color, rgb(0 0 0 / 0.05))",
-        "sm" => "inset 0 2px 4px var(--kb-inset-shadow-color, rgb(0 0 0 / 0.05))",
-        "none" => "0 0 #0000",
+        "2xs" => format!("inset 0 1px {c}"),
+        "xs" => format!("inset 0 1px 1px {c}"),
+        "sm" => format!("inset 0 2px 4px {c}"),
+        "none" => "0 0 #0000".to_string(),
         _ => return None,
     })
 }
 
-fn shadow_value(key: &str) -> Option<String> {
-    let var = "var(--kb-shadow-color, rgb(0 0 0 / 0.1))";
-    let var_light = "var(--kb-shadow-color, rgb(0 0 0 / 0.05))";
-    let var_heavy = "var(--kb-shadow-color, rgb(0 0 0 / 0.25))";
+fn shadow_value(key: &str, alpha: Option<&Alpha>) -> Option<String> {
+    let var = &shadow_color("--kb-shadow-color", "0.1", alpha);
+    let var_light = &shadow_color("--kb-shadow-color", "0.05", alpha);
+    let var_heavy = &shadow_color("--kb-shadow-color", "0.25", alpha);
     Some(match key {
         // Tailwind v4.3's shadow scale. v4 renamed v3's `shadow-sm` to
         // `xs`, and its `sm` is the two-layer shadow bare `shadow` also is.
@@ -100,13 +109,10 @@ fn shadow_value(key: &str) -> Option<String> {
 /// Disambiguated from a `shadow-{size}` value the same way every other
 /// "prefix means several things" utility in this crate is: `shadow_value`
 /// checked first (a real tier name), falling back to this color lookup.
-/// Named theme colors only — `resolve`'s "shadow" arm already intercepts
-/// EVERY arbitrary `shadow-[...]` value earlier, as a raw `box-shadow`
-/// string passthrough (`shadow-[0_4px_6px_red]`, pre-existing behavior);
-/// this function is never reached with `parsed.is_arbitrary` set, so an
-/// arbitrary shadow color specifically (`shadow-[#112233]`) isn't
-/// distinguishable from that and isn't supported — a real color name
-/// (`shadow-red-500`) is unambiguous and works.
+/// Named theme colors only — `resolve`'s "shadow" arm handles every
+/// arbitrary `shadow-[...]` value earlier: a color (`shadow-[#112233]`,
+/// `color::is_color`) sets the same variable, anything else is a whole
+/// `box-shadow` (`shadow-[0_4px_6px_red]`).
 fn shadow_color_declarations(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declaration>> {
     // color_value's own opacity-suffix handling (`shadow-blue-6/50`) is
     // what this reuses it for — safe to call unconditionally despite its
@@ -191,18 +197,19 @@ pub(super) fn native_shadow_declarations(parsed: &ParsedClass) -> Option<Vec<Dec
 /// The sized steps are Tailwind v4.3's `--text-shadow-*` scale (2xs-lg,
 /// multi-layer from sm up). Bare `text-shadow` (no size) isn't a Tailwind
 /// class at all; it's kept as a Kbach extra so existing pages don't lose it.
-fn text_shadow_value(key: &str) -> Option<String> {
+fn text_shadow_value(key: &str, alpha: Option<&Alpha>) -> Option<String> {
     // Every layer reads --kb-text-shadow-color (Tailwind v4), so
-    // `text-shadow-lg text-shadow-blue-6` is a blue lg shadow.
-    let c = |default: &str| format!("var(--kb-text-shadow-color, {default})");
-    let (a, b) = (c("rgb(0 0 0 / 0.075)"), c("rgb(0 0 0 / 0.1)"));
+    // `text-shadow-lg text-shadow-blue-6` is a blue lg shadow. An opacity
+    // modifier (`text-shadow-lg/30`) sets the default color's alpha.
+    let c = |default: &str| shadow_color("--kb-text-shadow-color", default, alpha);
+    let (a, b) = (c("0.075"), c("0.1"));
     Some(match key {
-        "2xs" => format!("0px 1px 0px {}", c("rgb(0 0 0 / 0.15)")),
-        "xs" => format!("0px 1px 1px {}", c("rgb(0 0 0 / 0.2)")),
+        "2xs" => format!("0px 1px 0px {}", c("0.15")),
+        "xs" => format!("0px 1px 1px {}", c("0.2")),
         "sm" => format!("0px 1px 0px {a}, 0px 1px 1px {a}, 0px 2px 2px {a}"),
         "md" => format!("0px 1px 1px {b}, 0px 1px 2px {b}, 0px 2px 4px {b}"),
         "lg" => format!("0px 1px 2px {b}, 0px 3px 2px {b}, 0px 4px 8px {b}"),
-        "DEFAULT" => format!("0 1px 2px {}", c("rgba(0,0,0,0.2)")),
+        "DEFAULT" => format!("0 1px 2px {}", c("0.2")),
         "none" => "none".to_string(),
         _ => return None,
     })
@@ -212,7 +219,7 @@ fn text_shadow_value(key: &str) -> Option<String> {
 /// for its special-cased "shadow" value, since "text-" is already the
 /// registered catchall prefix bare `text-shadow` falls under.
 pub(super) fn text_shadow_default() -> String {
-    text_shadow_value("DEFAULT").expect("\"DEFAULT\" is a real text_shadow_value key")
+    text_shadow_value("DEFAULT", None).expect("\"DEFAULT\" is a real text_shadow_value key")
 }
 
 /// "text-shadow-" is two-way ambiguous, same shape as `resolve_bg_keyword`'s
@@ -221,7 +228,9 @@ pub(super) fn text_shadow_default() -> String {
 fn text_shadow_dash_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declaration>> {
     let value = parsed.value.as_deref()?;
     if !parsed.is_arbitrary {
-        if let Some(v) = text_shadow_value(value) {
+        // `text-shadow-lg`, `text-shadow-lg/30`
+        let (key, alpha) = split_opacity(value);
+        if let Some(v) = text_shadow_value(key, alpha.as_ref()) {
             return Some(vec![decl("text-shadow", &v)]);
         }
         // `text-shadow-<color>` / `text-shadow-initial` only set the color
@@ -230,6 +239,11 @@ fn text_shadow_dash_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<V
             return Some(vec![decl("--kb-text-shadow-color", "initial")]);
         }
         return color_value(theme, parsed).map(|c| vec![decl("--kb-text-shadow-color", &c)]);
+    }
+    // `text-shadow-[#333]`, `text-shadow-(color:--c)`: the color, like a
+    // named one. Anything else is a whole text-shadow.
+    if is_color(parsed, value) {
+        return Some(vec![decl("--kb-text-shadow-color", value)]);
     }
     Some(vec![decl("text-shadow", value)])
 }
@@ -289,10 +303,16 @@ fn ease_value(key: &str) -> Option<&'static str> {
 
 pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
     match parsed.utility.as_str() {
-        "shadow" if parsed.value.is_none() => shadow_value("DEFAULT").map(|v| shadow_layer("--kb-shadow", &v)),
+        "shadow" if parsed.value.is_none() => shadow_value("DEFAULT", None).map(|v| shadow_layer("--kb-shadow", &v)),
         "shadow" => {
             let value = parsed.value.as_deref()?;
             if parsed.is_arbitrary {
+                // `shadow-[#333]`, `shadow-[color:red]`, `shadow-(color:--c)`
+                // color the shadow, as a named `shadow-<color>` does. They
+                // used to be written into `box-shadow` as if a whole shadow.
+                if is_color(parsed, value) {
+                    return Some(vec![decl("--kb-shadow-color", value)]);
+                }
                 return Some(shadow_layer("--kb-shadow", value));
             }
             if value == "initial" {
@@ -302,7 +322,9 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
             // recognized tier name means a shadow layer, anything else is a
             // `shadow-{color}` (see `shadow_color_declarations`'s own doc
             // comment for how the two compose).
-            shadow_value(value)
+            // `shadow-xl/20`: the tier, its default color at 20% (Tailwind v4).
+            let (key, alpha) = split_opacity(value);
+            shadow_value(key, alpha.as_ref())
                 .map(|v| shadow_layer("--kb-shadow", &v))
                 .or_else(|| shadow_color_declarations(theme, parsed))
         }
@@ -312,13 +334,17 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "inset-shadow" => {
             let value = parsed.value.as_deref()?;
             if parsed.is_arbitrary {
+                if is_color(parsed, value) {
+                    return Some(vec![decl("--kb-inset-shadow-color", value)]);
+                }
                 return Some(shadow_layer("--kb-inset-shadow", value));
             }
             if value == "initial" {
                 return Some(vec![decl("--kb-inset-shadow-color", "initial")]);
             }
-            inset_shadow_value(value)
-                .map(|v| shadow_layer("--kb-inset-shadow", v))
+            let (key, alpha) = split_opacity(value);
+            inset_shadow_value(key, alpha.as_ref())
+                .map(|v| shadow_layer("--kb-inset-shadow", &v))
                 .or_else(|| color_value(theme, parsed).map(|c| vec![decl("--kb-inset-shadow-color", &c)]))
         }
         // Bare `inset-ring` parses as utility "inset" + value "ring" (the
@@ -368,6 +394,17 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "transition-colors" => Some(transition(
             "color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --kb-gradient-from, --kb-gradient-via, --kb-gradient-to",
         )),
+        // `transition-[width]`, `transition-[opacity,transform]`: any property
+        // list. "transition-" isn't a value prefix, so the bracket arrives as
+        // part of the utility name and never went through the parser's
+        // arbitrary-value safety check; only property-name characters pass.
+        u if u.starts_with("transition-[") && u.ends_with(']') => {
+            let list = &u["transition-[".len()..u.len() - 1];
+            let safe = !list.is_empty() && list.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b',' | b'_'));
+            safe.then(|| transition(&list.replace('_', " ").replace(',', ", ")))
+        }
+        // `transition-(--props)`: the property list from a variable.
+        u if u.starts_with("transition-(") => arbitrary_modifier(&u["transition-".len()..]).map(|v| transition(&v)),
         "transition-opacity" => Some(transition("opacity")),
         "transition-shadow" => Some(transition("box-shadow")),
         "transition-transform" => Some(transition("transform")),
@@ -387,6 +424,11 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // same whichever of the two classes lands later in the stylesheet.
         // A number of milliseconds (`duration-150`) or an arbitrary value;
         // anything else used to become e.g. `bananams`.
+        // `duration-initial`: drop back to the transition's default duration
+        // (`--kb-duration: initial` makes every `transition-*` take its own fallback).
+        "duration" if !parsed.is_arbitrary && parsed.value.as_deref() == Some("initial") => {
+            Some(vec![decl("--kb-duration", "initial")])
+        }
         "duration" => {
             let value = parsed.value.as_deref()?;
             if !parsed.is_arbitrary && !crate::resolvers::layout::is_whole_number(value) {
@@ -457,7 +499,7 @@ mod tests {
     #[test]
     fn bare_shadow_resolves_to_the_default_tier() {
         let t = ThemeConfig::default();
-        assert_eq!(resolve(&parse_class("shadow"), &t), Some(shadow_layer("--kb-shadow", &shadow_value("DEFAULT").unwrap())));
+        assert_eq!(resolve(&parse_class("shadow"), &t), Some(shadow_layer("--kb-shadow", &shadow_value("DEFAULT", None).unwrap())));
     }
 
     #[test]
@@ -467,7 +509,7 @@ mod tests {
             let class = format!("shadow-{key}");
             assert_eq!(
                 resolve(&parse_class(&class), &t),
-                Some(shadow_layer("--kb-shadow", &shadow_value(key).unwrap())),
+                Some(shadow_layer("--kb-shadow", &shadow_value(key, None).unwrap())),
                 "shadow-{key} should resolve",
             );
         }
@@ -481,7 +523,7 @@ mod tests {
         // var() fallback, so pairing it with shadow-red-500 on the same
         // element recolors it without shadow-lg needing to know about
         // shadow-red-500 at resolve time at all.
-        let lg = shadow_value("lg").unwrap();
+        let lg = shadow_value("lg", None).unwrap();
         assert!(lg.contains("var(--kb-shadow-color, rgb(0 0 0 / 0.1))"), "got: {lg}");
     }
 
@@ -491,12 +533,12 @@ mod tests {
         t.colors.insert("red-5".to_string(), crate::theme::ColorValue::Plain("#ef4444".to_string()));
         assert_eq!(resolve(&parse_class("shadow-red-5"), &t), Some(vec![decl("--kb-shadow-color", "#ef4444")]));
         assert_eq!(resolve(&parse_class("shadow-not-a-color"), &t), None);
-        // Arbitrary "shadow-[...]" stays the pre-existing raw box-shadow
-        // passthrough, not a color override — see shadow_color_declarations's
-        // own doc comment for why the two can't be disambiguated.
+        // An arbitrary color is a color too (it used to be written into
+        // `box-shadow` as if it were a whole shadow); a whole shadow still is one.
+        assert_eq!(resolve(&parse_class("shadow-[#112233]"), &t), Some(vec![decl("--kb-shadow-color", "#112233")]));
         assert_eq!(
-            resolve(&parse_class("shadow-[#112233]"), &t),
-            Some(shadow_layer("--kb-shadow", "#112233")),
+            resolve(&parse_class("shadow-[0_1px_2px_#112233]"), &t),
+            Some(shadow_layer("--kb-shadow", "0 1px 2px #112233")),
         );
     }
 
@@ -674,7 +716,7 @@ mod tests {
     #[test]
     fn resolves_text_shadow_named_size_color_and_arbitrary() {
         let t = theme_with_color();
-        assert_eq!(resolve(&parse_class("text-shadow-sm"), &t), Some(vec![decl("text-shadow", &text_shadow_value("sm").unwrap())]));
+        assert_eq!(resolve(&parse_class("text-shadow-sm"), &t), Some(vec![decl("text-shadow", &text_shadow_value("sm", None).unwrap())]));
         assert_eq!(resolve(&parse_class("text-shadow-none"), &t), Some(vec![decl("text-shadow", "none")]));
         // Tailwind v4: a color only sets the variable the sizes read
         assert_eq!(resolve(&parse_class("text-shadow-blue-6"), &t), Some(vec![decl("--kb-text-shadow-color", "#2563eb")]));
@@ -694,7 +736,7 @@ mod tests {
 
     #[test]
     fn resolves_bare_text_shadow_via_the_shared_default_helper() {
-        assert_eq!(text_shadow_default(), text_shadow_value("DEFAULT").unwrap());
+        assert_eq!(text_shadow_default(), text_shadow_value("DEFAULT", None).unwrap());
     }
 
     #[test]

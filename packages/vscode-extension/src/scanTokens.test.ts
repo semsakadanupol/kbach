@@ -47,6 +47,40 @@ describe('scanClassTokens', () => {
     expect(scanClassTokens(code)).toEqual([]);
   });
 
+  it('skips compared strings in a clsx() call, keeping offsets of the real classes', () => {
+    // Regression: 'diff', 'add' and 'code' were underlined as unknown classes.
+    const code = "clsx('px-5', lang === 'diff' && type === \"add\" && 'bg-green-6/10', tone !== 'code' ? 'a-1' : 'b-2')";
+    const tokens = scanClassTokens(code);
+    expect(tokens.map((t) => t.token)).toEqual(['px-5', 'bg-green-6/10', 'a-1', 'b-2']);
+    for (const t of tokens) expect(code.slice(t.start, t.end)).toBe(t.token);
+  });
+
+  it('ignores className/clsx examples inside comments, keeping offsets of real code after them', () => {
+    const code = [
+      '// e.g. clsx(lang === x && "diff-in-line-comment")',
+      '/* <div className="in-block-comment" /> */',
+      'const url = "https://example.com"; <div className="flex p-4" />',
+    ].join('\n');
+    const tokens = scanClassTokens(code);
+    expect(tokens.map((t) => t.token)).toEqual(['flex', 'p-4']);
+    for (const t of tokens) expect(code.slice(t.start, t.end)).toBe(t.token);
+  });
+
+  it('ignores a className attribute written inside a JS string, but not after an apostrophe in JSX text', () => {
+    const code = [
+      "const fixture = '<div className=\"sample-in-string\" />';",
+      "<p>Don't <b className=\"flex\">x</b></p>",
+      '<p className="p-4" />',
+    ].join('\n');
+    expect(scanClassTokens(code).map((t) => t.token)).toEqual(['flex', 'p-4']);
+  });
+
+  it('ignores a composer call written inside a string', () => {
+    // Regression: the "call" ran on into the following lines, flagging prose.
+    const code = "const sample = 'see clsx(';\nit('handles multiple className attributes', () => {});\n<div className=\"flex\" />";
+    expect(scanClassTokens(code).map((t) => t.token)).toEqual(['flex']);
+  });
+
   it('does not hang on a huge never-closing composer call', () => {
     const code = `cn(${'('.repeat(200_000)}`;
     expect(() => scanClassTokens(code)).not.toThrow();
@@ -68,5 +102,8 @@ describe('splitRespectingBrackets', () => {
     expect(splitRespectingBrackets('dark:hover:bg-blue-6')).toEqual(['dark', 'hover', 'bg-blue-6']);
     expect(splitRespectingBrackets('sm:bg-[url(a:b)]')).toEqual(['sm', 'bg-[url(a:b)]']);
     expect(splitRespectingBrackets('flex')).toEqual(['flex']);
+    // the `:` of a type hint in the variable shorthand is not a separator
+    expect(splitRespectingBrackets('hover:text-(length:--size)')).toEqual(['hover', 'text-(length:--size)']);
+    expect(splitRespectingBrackets('supports-(--x):shadow-(color:--c)')).toEqual(['supports-(--x)', 'shadow-(color:--c)']);
   });
 });

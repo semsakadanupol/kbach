@@ -31,7 +31,7 @@ fn kbach_shade(tailwind: &str) -> Option<u32> {
         "950" => Some(11),
         n => {
             let n: u32 = n.parse().ok()?;
-            (n % 100 == 0 && (100..=900).contains(&n)).then_some(n / 100 + 1)
+            (n.is_multiple_of(100) && (100..=900).contains(&n)).then_some(n / 100 + 1)
         }
     }
 }

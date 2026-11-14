@@ -5,7 +5,7 @@
  * unknown-style-property warning, same precedent the Rust engine documents).
  */
 import { colorValue, isLength } from './color';
-import { decl, resolveLength, type Declaration } from '../shared';
+import { decl, negate, resolveLength, type Declaration } from '../shared';
 import type { ParsedClass } from '../parser';
 import type { ThemeConfig } from '../../theme';
 
@@ -189,12 +189,13 @@ function outlineValue(theme: ThemeConfig, parsed: ParsedClass): Declaration[] | 
   return color === null ? null : [decl('outline-color', color)];
 }
 
+/** Negatable (`-outline-offset-2`), like border.rs. */
 function outlineOffsetValue(parsed: ParsedClass): Declaration[] | null {
   const value = parsed.value;
   if (value === null) return null;
-  if (parsed.isArbitrary) return [decl('outline-offset', value)];
-  const w = outlineWidthValue(value);
-  return w === null ? null : [decl('outline-offset', w)];
+  const v = parsed.isArbitrary ? value : outlineWidthValue(value);
+  if (v === null) return null;
+  return [decl('outline-offset', parsed.negative ? negate(v) : v)];
 }
 
 // (No ring helpers: rings are web-only on native, see the 'ring' case below.)

@@ -287,12 +287,13 @@ fn outline_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declar
     color_value(theme, parsed).map(|v| vec![decl("outline-color", &v)])
 }
 
+/// Negatable: `-outline-offset-2` pulls the outline inside the element
+/// (the minus used to be dropped).
 fn outline_offset_value(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
     let value = parsed.value.as_deref()?;
-    if parsed.is_arbitrary {
-        return Some(vec![decl("outline-offset", value)]);
-    }
-    outline_width_value(value).map(|v| vec![decl("outline-offset", &v)])
+    let v = if parsed.is_arbitrary { value.to_string() } else { outline_width_value(value)? };
+    let v = if parsed.negative { super::negate(&v) } else { v };
+    Some(vec![decl("outline-offset", &v)])
 }
 
 /// The `box-shadow` declaration EVERY `ring-*`/`ring-offset-*` utility

@@ -129,12 +129,14 @@ theme)`.
 Native has no selector/cascade engine. Two groups:
 
 **Resolved in the engine from live parameters:**
-- `dark:` — current OS/app color scheme.
+- `dark:` — current OS/app color scheme; `not-dark:` is the other one.
 - `sm:` `md:` `lg:` `xl:` `2xl:` — window width vs `theme.screens`, plus
   any breakpoint a config adds (`3xl:`, `tablet:`), and `max-<name>:`
-  (strictly below that width).
+  (strictly below that width). `not-<name>:` / `not-max-<name>:` flip
+  either one.
 - `min-[500px]:` / `max-[30rem]:` — arbitrary width breakpoints (constant
-  px/rem only).
+  px/rem only). `max-[…]` is strictly below its width, like `max-<name>:`;
+  through core-engine 1.0.0-beta.18 it also held at exactly that width.
 - `active:` — `Pressable` press state (via its style-callback).
 
 **Resolved in `jsxRuntimeCore.ts` from React props, before the engine sees

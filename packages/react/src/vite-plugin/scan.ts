@@ -126,13 +126,28 @@ const NOT_A_CLASS_NAME_RE = /[${}]|-$|^[?:&|!"'=<>]+$/;
  */
 function hasUnbracketedParen(token: string): boolean {
   let bracketDepth = 0;
-  for (const ch of token) {
+  for (let i = 0; i < token.length; i++) {
+    const ch = token[i];
     if (ch === '[') bracketDepth++;
     else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
-    else if ((ch === '(' || ch === ')') && bracketDepth === 0) return true;
+    else if ((ch === '(' || ch === ')') && bracketDepth === 0) {
+      // The one unbracketed parenthesis that IS Kbach syntax: Tailwind v4's
+      // CSS-variable shorthand, `p-(--gap)`, `text-(length:--size)`,
+      // `bg-blue-6/(--o)`, `supports-(--x):flex` — a variable name, with an
+      // optional type hint, right after a `-` or `/`. Skipped whole; the
+      // prose shapes this function exists for (`kb()`, `clsx(...)`) never
+      // look like that. Before, every class written this way was dropped
+      // here and never reached the engine in a static build.
+      const shorthand = ch === '(' && i > 0 && (token[i - 1] === '-' || token[i - 1] === '/') ? VAR_SHORTHAND_RE.exec(token.slice(i)) : null;
+      if (shorthand === null) return true;
+      i += shorthand[0].length - 1;
+    }
   }
   return false;
 }
+
+/** `(--gap)` / `(length:--size)` at the start of the text. */
+const VAR_SHORTHAND_RE = /^\((?:[a-z-]+:)?--[A-Za-z0-9_-]+\)/;
 
 function pushTokens(str: string, into: Set<string>): void {
   for (const tok of splitClassTokens(str)) {
@@ -170,11 +185,21 @@ function pushTemplateLiteralBody(body: string, into: Set<string>): void {
   pushTokens(body.replace(/\$\{(?:[^{}]|\{[^{}]*\})*\}/g, () => '$'), into);
 }
 
+// A string on either side of a comparison is a value being tested, not a
+// class: in `clsx(lang === 'diff' && 'bg-green-6/10')` only the second
+// string is classes. Without this, 'diff' was warned about as an unknown
+// class (and `tone === 'code' ? 'a' : 'b'` warned about "code").
+const COMPARED_BEFORE_RE = /[=!]==?\s*$/;
+const COMPARED_AFTER_RE = /^\s*[=!]==?/;
+
 function pushClassLikeStrings(text: string, into: Set<string>): void {
   const quotedStringRe = /(["'`])((?:(?!\1).)*)\1/g;
   let qm: RegExpExecArray | null;
   while ((qm = quotedStringRe.exec(text)) !== null) {
-    const [, quote, content] = qm;
+    const [whole, quote, content] = qm;
+    const before = text.slice(Math.max(0, qm.index - 4), qm.index);
+    const after = text.slice(qm.index + whole.length, qm.index + whole.length + 4);
+    if (COMPARED_BEFORE_RE.test(before) || COMPARED_AFTER_RE.test(after)) continue;
     if (quote === '`') pushTemplateLiteralBody(content!, into);
     else pushTokens(content!, into);
   }

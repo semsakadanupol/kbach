@@ -29,16 +29,19 @@ fn resolve_auto_size(parsed: &ParsedClass, property: &str) -> Option<Vec<Declara
 }
 
 /// Shared by col-start/col-end/row-start/row-end: `auto`, an arbitrary
-/// value, or a plain unitless grid line number.
+/// value, or a plain unitless grid line number. A leading `-` counts from
+/// the end (`-col-end-1` is line -1); it used to be dropped.
 fn resolve_placement(parsed: &ParsedClass, property: &str) -> Option<Vec<Declaration>> {
     let value = parsed.value.as_deref()?;
     if value == "auto" {
-        return Some(vec![decl(property, "auto")]);
+        return (!parsed.negative).then(|| vec![decl(property, "auto")]);
     }
     if parsed.is_arbitrary {
-        return Some(vec![decl(property, value)]);
+        let v = if parsed.negative { super::negate(value) } else { value.to_string() };
+        return Some(vec![decl(property, &v)]);
     }
-    value.parse::<i64>().ok().map(|n| vec![decl(property, &n.to_string())])
+    let n: i64 = value.parse().ok()?;
+    Some(vec![decl(property, &(if parsed.negative { -n } else { n }).to_string())])
 }
 
 /// Shared by col-span/row-span: `full` (span the entire axis) or a plain
@@ -112,8 +115,9 @@ pub fn resolve(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
             if value == "none" || value == "subgrid" {
                 return Some(vec![decl("grid-template-columns", value)]);
             }
+            // Any count, as for `grid-rows-*` (Tailwind v4); it stopped at 12.
             let n: i64 = value.parse().ok()?;
-            if !(1..=12).contains(&n) {
+            if n < 1 {
                 return None;
             }
             Some(vec![decl("grid-template-columns", &format!("repeat({n}, minmax(0, 1fr))"))])
@@ -178,7 +182,12 @@ mod tests {
             resolve(&parse_class("grid-cols-[200px_1fr]")),
             Some(vec![decl("grid-template-columns", "200px 1fr")]),
         );
-        assert_eq!(resolve(&parse_class("grid-cols-13")), None);
+        // any count (it stopped at 12)
+        assert_eq!(
+            resolve(&parse_class("grid-cols-13")),
+            Some(vec![decl("grid-template-columns", "repeat(13, minmax(0, 1fr))")]),
+        );
+        assert_eq!(resolve(&parse_class("grid-cols-0")), None);
         assert_eq!(
             resolve(&parse_class("grid-rows-4")),
             Some(vec![decl("grid-template-rows", "repeat(4, minmax(0, 1fr))")]),

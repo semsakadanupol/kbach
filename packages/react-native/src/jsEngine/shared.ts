@@ -134,6 +134,18 @@ export function resolveNegatableSize(theme: ThemeConfig, parsed: ParsedClass): s
 }
 
 /** Resolves a 0-100 percentage utility value to a 0-1 decimal string. Arbitrary values pass through as-is. */
+/**
+ * A value with its sign flipped, for the leading `-` on utilities that
+ * aren't lengths from the spacing scale (`-outline-offset-2`). A plain
+ * number flips its sign; anything else is multiplied by -1. Mirrors
+ * resolvers/mod.rs's `negate`.
+ */
+export function negate(value: string): string {
+  const numeric = (v: string) => /^[\d.]/.test(v);
+  if (value.startsWith('-')) return numeric(value.slice(1)) ? value.slice(1) : `calc(${value} * -1)`;
+  return numeric(value) ? `-${value}` : `calc(${value} * -1)`;
+}
+
 export function resolvePercent(parsed: ParsedClass): string | null {
   // Real Tailwind has no negative opacity — same check Rust's
   // resolve_percent makes. Without this, "-opacity-50" resolved to 0.5

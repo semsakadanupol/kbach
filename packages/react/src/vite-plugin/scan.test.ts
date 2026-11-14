@@ -7,6 +7,24 @@ describe('extractClassStrings', () => {
     expect(extractClassStrings(code)).toEqual(expect.arrayContaining(['bg-blue-6', 'p-4']));
   });
 
+  it('keeps every class shape the engine takes, the CSS-variable shorthand included', () => {
+    // Regression: a token with a parenthesis outside brackets was dropped,
+    // so `p-(--gap)` and every other `(--var)` form never reached the engine.
+    const classes = [
+      'p-(--gap)', 'text-(length:--size)', 'bg-blue-6/(--o)', 'supports-(--x):flex', 'shadow-(color:--c)', 'transform-(--t)', 'list-(--l)',
+      'bg-linear-(--g)', 'mask-y-to-(--m)', 'hover:bg-(--c)/50',
+      'bg-blue-6/[0.37]', 'bg-white/2.5', '@container-size/main', '[@media(min-width:900px)]:flex', 'bg-linear-to-r/[in_hsl_longer_hue]',
+      'text-[14px]/[20px]', '*:data-[x]:flex', 'w-[--spacing(4)]', '-scale-x-100', 'not-dark:flex', 'shadow-xl/20', 'aspect-3/2',
+    ];
+    const code = `<div className="${classes.join(' ')}" />`;
+    expect(extractClassStrings(code)).toEqual(expect.arrayContaining(classes));
+    // prose with a call in it is still not a class
+    const prose = extractClassStrings('<p className="flex">{`kb() and clsx(a) run-(time)`}</p>');
+    expect(prose).not.toContain('kb()');
+    expect(prose).not.toContain('clsx(a)');
+    expect(prose).not.toContain('run-(time)');
+  });
+
   it('extracts a simple string kb attribute', () => {
     const code = `<div kb="flex items-center" />`;
     expect(extractClassStrings(code)).toEqual(expect.arrayContaining(['flex', 'items-center']));
@@ -26,6 +44,18 @@ describe('extractClassStrings', () => {
   it('extracts from a clsx() call', () => {
     const code = `clsx('bg-blue-6', isActive && 'p-4', { 'gap-4': hasGap })`;
     expect(extractClassStrings(code)).toEqual(expect.arrayContaining(['bg-blue-6', 'p-4', 'gap-4']));
+  });
+
+  it('skips strings that are compared, not classes', () => {
+    // Regression: 'diff', 'add' and 'code' were warned about as unknown classes.
+    const code = [
+      "clsx('px-5', lang === 'diff' && tokens[0]?.type === 'add' && 'bg-green-6/10', tone !== \"code\" ? 'text-muted' : 'text-ink')",
+      "<p className={x == 'a' ? 'flex' : 'grid'} />",
+      "clsx({ 'font-bold': active })",
+    ].join('\n');
+    const tokens = extractClassStrings(code);
+    expect(tokens).toEqual(expect.arrayContaining(['px-5', 'bg-green-6/10', 'text-muted', 'text-ink', 'flex', 'grid', 'font-bold']));
+    for (const compared of ['diff', 'add', 'code', 'a']) expect(tokens).not.toContain(compared);
   });
 
   it('extracts from a cn() call', () => {

@@ -18,7 +18,7 @@
  * already rewritten any mode-aware color NAME to a plain hex value.
  */
 import type { ColorEntry, ThemeConfig } from '../../theme';
-import type { ParsedClass } from '../parser';
+import { colorWithOpacity, parseAlpha, type Alpha, type ParsedClass } from '../parser';
 
 // Only used within this file — not part of the jsEngine's public surface.
 function lookupHex(theme: ThemeConfig, key: string): string | null {
@@ -41,7 +41,7 @@ const MODE_AWARE_COLOR_PREFIXES = ['bg-', 'text-', 'border-'] as const;
  * class resolved to nothing — a real, reported bug: any mode-aware custom
  * color completely lost inline opacity support.
  */
-function findModeAwareColor(base: string, theme: ThemeConfig): { prefix: string; opacity: number | null; light: string; dark: string } | null {
+function findModeAwareColor(base: string, theme: ThemeConfig): { prefix: string; opacity: Alpha | null; light: string; dark: string } | null {
   const important = base.startsWith('!') ? '!' : '';
   const rest = important ? base.slice(1) : base;
   for (const prefix of MODE_AWARE_COLOR_PREFIXES) {
@@ -62,11 +62,11 @@ function findModeAwareColor(base: string, theme: ThemeConfig): { prefix: string;
  * color's light/dark sides get IDENTICAL opacity handling. Mirrors
  * `resolvers/color.rs`'s `apply_opacity_to_hex`.
  */
-function applyOpacityToHex(hex: string, opacity: number | null): string {
+function applyOpacityToHex(hex: string, opacity: Alpha | null): string {
   if (opacity === null) return hex;
-  const rgb = hexToRgb(hex);
-  if (rgb === null) return hex;
-  return `rgba(${rgb.join(',')},${opacity / 100})`;
+  if (hexToRgb(hex) === null) return hex;
+  // back into a class token (`bg-[…]`): spaces are written as underscores
+  return colorWithOpacity(hex.trim(), opacity).replace(/ /g, '_');
 }
 
 /**
@@ -143,16 +143,16 @@ function hexToRgb(hex: string): [number, number, number] | null {
  * FRACTIONS (`w-1/2`), a completely different meaning, but no real color
  * name is ever literally digits, so there's no actual ambiguity between
  * the two uses in practice. Mirrors `resolvers/color.rs`'s `split_opacity`.
+ *
+ * Every form Tailwind v4 takes (parser.ts `parseAlpha`): `/50`, `/2.5`,
+ * `/[0.37]`, `/[37%]`, `/(--o)`. Split at the FIRST `/` (a color name has
+ * none), so a `/` inside `/[calc(1/2)]` stays with the opacity.
  */
-function splitOpacity(value: string): [string, number | null] {
-  const slash = value.lastIndexOf('/');
+function splitOpacity(value: string): [string, Alpha | null] {
+  const slash = value.indexOf('/');
   if (slash === -1) return [value, null];
-  const opacityText = value.slice(slash + 1);
-  const n = Number(opacityText);
-  if (opacityText !== '' && Number.isInteger(n) && n >= 0 && n <= 100) {
-    return [value.slice(0, slash), n];
-  }
-  return [value, null];
+  const alpha = parseAlpha(value.slice(slash + 1));
+  return alpha === null ? [value, null] : [value.slice(0, slash), alpha];
 }
 
 /**
@@ -170,10 +170,9 @@ export function colorValue(theme: ThemeConfig, parsed: ParsedClass): string | nu
   const [name, opacity] = splitOpacity(value);
   const hex = lookupHex(theme, name);
   if (hex === null) return null;
-  if (opacity === null) return hex;
-  const rgb = hexToRgb(hex);
-  if (rgb === null) return hex;
-  return `rgba(${rgb.join(',')},${opacity / 100})`;
+  // rgba() for a hex with a known opacity, color-mix() otherwise (a
+  // non-hex color, a runtime `/(--o)`) — color.rs's identical rule.
+  return opacity === null ? hex : colorWithOpacity(hex, opacity);
 }
 
 // Mirrors resolvers/color.rs's identical LENGTH_UNITS constant exactly.

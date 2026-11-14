@@ -236,6 +236,20 @@ fn native_modifier_state(modifier: &str, theme: &ThemeConfig, color_scheme: &str
         if let Some(&max) = modifier.strip_prefix("max-").and_then(|bp| theme.screens.get(bp)) {
             return Some(width < max);
         }
+        // `min-md:` is `md:` spelled out
+        if let Some(&min) = modifier.strip_prefix("min-").and_then(|bp| theme.screens.get(bp)) {
+            return Some(width >= min);
+        }
+        // `not-dark:`, and `not-` on a breakpoint: `not-md:`, `not-max-md:`.
+        if let Some(rest) = modifier.strip_prefix("not-") {
+            if rest == "dark" {
+                return Some(color_scheme != "dark");
+            }
+            let is_breakpoint = |name: &str| theme.screens.contains_key(name);
+            if is_breakpoint(rest) || rest.strip_prefix("max-").is_some_and(is_breakpoint) || rest.strip_prefix("min-").is_some_and(is_breakpoint) {
+                return native_modifier_state(rest, theme, color_scheme, pressed, width).map(|holds| !holds);
+            }
+        }
         return None;
     };
     if let Some(DarkScheme::Dark) = def.dark_scheme {
@@ -252,7 +266,7 @@ fn native_modifier_state(modifier: &str, theme: &ThemeConfig, color_scheme: &str
     // comparison the named sm/md/lg/xl/2xl tier above already does, just
     // against a value parsed out of the modifier's own `media_query` text
     // instead of looked up from `theme.screens` by name. `media_query` is
-    // always exactly `"(min-width: <value>)"`/`"(max-width: <value>)"` for
+    // always exactly `"(min-width: <value>)"`/`"(width < <value>)"` for
     // these two (see registry.rs's own `bracket_content(name, "min-"/"max-")`
     // arms) — reuses `calc::reduce_constant_math` (wrapped in a trivial
     // `calc(...)` — that function only ever recognizes an actual calc/min/
@@ -263,13 +277,15 @@ fn native_modifier_state(modifier: &str, theme: &ThemeConfig, color_scheme: &str
     // it's unreducible everywhere else on native: there's no live layout to
     // resolve it against at the point a modifier's state is decided.
     if let Some(mq) = &def.media_query {
+        // `max-[…]` is strictly below its width (`(width < …)`), so it never
+        // overlaps `min-[…]` at the same value.
         let (is_min, value) = if let Some(v) = mq.strip_prefix("(min-width:") {
             (true, v.strip_suffix(')')?)
         } else {
-            (false, mq.strip_prefix("(max-width:")?.strip_suffix(')')?)
+            (false, mq.strip_prefix("(width <")?.strip_suffix(')')?)
         };
         let px = crate::calc::reduce_constant_math(&format!("calc({})", value.trim()))?;
-        return Some(if is_min { width >= px } else { width <= px });
+        return Some(if is_min { width >= px } else { width < px });
     }
     None
 }
@@ -980,9 +996,12 @@ mod tests {
         let wide = resolve_style("bg-blue-6 max-[30rem]:bg-blue-8", &t, "light", false, 900.0);
         assert_eq!(wide.get("backgroundColor").unwrap(), "#2563eb");
 
-        // 30rem = 480px — AT the breakpoint still counts as matching (real CSS max-width semantics).
+        // 30rem = 480px — AT the breakpoint no longer matches: `max-[…]` is
+        // strictly below, like `max-md:` (so it never overlaps `min-[30rem]:`).
         let at_breakpoint = resolve_style("bg-blue-6 max-[30rem]:bg-blue-8", &t, "light", false, 480.0);
-        assert_eq!(at_breakpoint.get("backgroundColor").unwrap(), "#1e40af");
+        assert_eq!(at_breakpoint.get("backgroundColor").unwrap(), "#2563eb");
+        let just_below = resolve_style("bg-blue-6 max-[30rem]:bg-blue-8", &t, "light", false, 479.0);
+        assert_eq!(just_below.get("backgroundColor").unwrap(), "#1e40af");
 
         let narrow = resolve_style("bg-blue-6 max-[30rem]:bg-blue-8", &t, "light", false, 300.0);
         assert_eq!(narrow.get("backgroundColor").unwrap(), "#1e40af");

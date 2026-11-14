@@ -67,6 +67,9 @@ pub struct ModifierDef {
     pub forces_important: bool,
 }
 
+/// The media query `hover:` and the variants built on it are wrapped in.
+const HOVER_MEDIA: &str = "(hover: hover)";
+
 const BASE: ModifierDef = ModifierDef {
     pseudo: None,
     pseudo_element: None,
@@ -84,7 +87,9 @@ pub static MODIFIERS: LazyLock<HashMap<&'static str, ModifierDef>> = LazyLock::n
     let mut m = HashMap::new();
 
     // ── Interactive pseudo-classes (tier 10) ────────────────────────────────
-    m.insert("hover", ModifierDef { pseudo: Some(":hover"), order: 10.0, ..BASE });
+    // Hover applies only where the primary input can hover (Tailwind v4):
+    // on a touch screen `:hover` sticks after a tap until the next one.
+    m.insert("hover", ModifierDef { pseudo: Some(":hover"), media_query: Some(HOVER_MEDIA), order: 10.0, ..BASE });
     m.insert("focus", ModifierDef { pseudo: Some(":focus"), order: 11.0, ..BASE });
     m.insert("focus-visible", ModifierDef { pseudo: Some(":focus-visible"), order: 12.0, ..BASE });
     m.insert("focus-within", ModifierDef { pseudo: Some(":focus-within"), order: 13.0, ..BASE });
@@ -129,13 +134,17 @@ pub static MODIFIERS: LazyLock<HashMap<&'static str, ModifierDef>> = LazyLock::n
     m.insert("empty", ModifierDef { pseudo: Some(":empty"), order: 5.45, ..BASE });
 
     // ── Native element-state attributes (tier 6) ────────────────────────────
-    m.insert("open", ModifierDef { pseudo: Some("[open]"), order: 6.0, ..BASE });
-    m.insert("inert", ModifierDef { pseudo: Some("[inert]"), order: 6.1, ..BASE });
+    // `open:` also matches an open popover and anything `:open` (Tailwind
+    // v4); inside `:is()` a browser that doesn't know `:open` skips just
+    // that part. `inert:` reaches the descendants of an inert element,
+    // which are inert too.
+    m.insert("open", ModifierDef { pseudo: Some(":is([open], :popover-open, :open)"), order: 6.0, ..BASE });
+    m.insert("inert", ModifierDef { pseudo: Some(":is([inert], [inert] *)"), order: 6.1, ..BASE });
 
     // ── Ancestor/sibling state (tier 20) ────────────────────────────────────
-    m.insert("group-hover", ModifierDef { ancestor_selector: Some(".group:hover "), order: 20.0, ..BASE });
+    m.insert("group-hover", ModifierDef { ancestor_selector: Some(".group:hover "), media_query: Some(HOVER_MEDIA), order: 20.0, ..BASE });
     m.insert("group-focus", ModifierDef { ancestor_selector: Some(".group:focus "), order: 21.0, ..BASE });
-    m.insert("peer-hover", ModifierDef { ancestor_selector: Some(".peer:hover ~ "), order: 22.0, ..BASE });
+    m.insert("peer-hover", ModifierDef { ancestor_selector: Some(".peer:hover ~ "), media_query: Some(HOVER_MEDIA), order: 22.0, ..BASE });
     m.insert("peer-focus", ModifierDef { ancestor_selector: Some(".peer:focus ~ "), order: 23.0, ..BASE });
     m.insert("peer-checked", ModifierDef { ancestor_selector: Some(".peer:checked ~ "), order: 24.0, ..BASE });
 
@@ -197,6 +206,11 @@ pub static MODIFIERS: LazyLock<HashMap<&'static str, ModifierDef>> = LazyLock::n
     m.insert("pointer-fine", ModifierDef { media_query: Some("(pointer: fine)"), order: 37.6, ..BASE });
     m.insert("any-pointer-coarse", ModifierDef { media_query: Some("(any-pointer: coarse)"), order: 37.7, ..BASE });
     m.insert("any-pointer-fine", ModifierDef { media_query: Some("(any-pointer: fine)"), order: 37.8, ..BASE });
+    m.insert("pointer-none", ModifierDef { media_query: Some("(pointer: none)"), order: 37.81, ..BASE });
+    m.insert("any-pointer-none", ModifierDef { media_query: Some("(any-pointer: none)"), order: 37.82, ..BASE });
+    m.insert("forced-colors", ModifierDef { media_query: Some("(forced-colors: active)"), order: 37.9, ..BASE });
+    m.insert("inverted-colors", ModifierDef { media_query: Some("(inverted-colors: inverted)"), order: 37.91, ..BASE });
+    m.insert("noscript", ModifierDef { media_query: Some("(scripting: none)"), order: 37.92, ..BASE });
 
     // ── Direction pseudo-classes (tier 17.95) — grouped with the other
     // static pseudo-class shortcuts above rather than the media-query tier:
@@ -259,16 +273,6 @@ pub struct ResolvedModifier {
     /// by `css.rs`, the exact same shape `media_query` gets wrapped in
     /// `@media`, just a different at-rule keyword (Phase 25).
     pub container_query: Option<String>,
-    /// Mirrors `is_responsive`, but for `@sm:`/`@md:`/`@lg:`/`@xl:`/`@2xl:`
-    /// (Phase 25's container-relative responsive variants) — `css.rs` looks
-    /// up the SAME `theme.screens` width a plain `sm:` would use, just
-    /// wraps the rule in `@container (min-width: ...)` instead of `@media
-    /// (min-width: ...)`. Reusing `theme.screens` (rather than a separate
-    /// `theme.containers` scale) is a deliberate scope simplification, not
-    /// an oversight — real Tailwind lets these scales differ, but doing so
-    /// here would mean threading a second theme map through every call site
-    /// `is_responsive` already touches, for a rarely-exercised customization.
-    pub is_container_responsive: bool,
     pub starting_style: bool,
     pub order: f64,
     pub forces_important: bool,
@@ -286,7 +290,6 @@ impl From<ModifierDef> for ResolvedModifier {
             dark_scheme: def.dark_scheme,
             is_responsive: def.is_responsive,
             container_query: None,
-            is_container_responsive: false,
             starting_style: def.starting_style,
             order: def.order,
             forces_important: def.forces_important,
@@ -352,12 +355,10 @@ fn split_named_group_suffix(name: &str) -> Option<(&str, &str)> {
 /// enough; the `/` is backslash-escaped since it's a literal character
 /// inside a CSS class selector otherwise reserved for other meanings.
 fn rename_group_or_peer_selector(ancestor: &str, group_name: &str) -> String {
-    if let Some(rest) = ancestor.strip_prefix(".group") {
-        format!(".group\\/{group_name}{rest}")
-    } else if let Some(rest) = ancestor.strip_prefix(".peer") {
-        format!(".peer\\/{group_name}{rest}")
+    if ancestor.starts_with(".group") || (ancestor.contains(".group") && !ancestor.starts_with(".peer")) {
+        ancestor.replacen(".group", &format!(".group\\/{group_name}"), 1)
     } else {
-        ancestor.to_string()
+        ancestor.replacen(".peer", &format!(".peer\\/{group_name}"), 1)
     }
 }
 
@@ -411,7 +412,6 @@ impl Default for ResolvedModifier {
             dark_scheme: None,
             is_responsive: false,
             container_query: None,
-            is_container_responsive: false,
             starting_style: false,
             order: 0.0,
             forces_important: false,
@@ -439,8 +439,98 @@ fn container_query_only(container_query: String, order: f64) -> ResolvedModifier
     ResolvedModifier { container_query: Some(container_query), order, ..Default::default() }
 }
 
-fn container_responsive_only(order: f64) -> ResolvedModifier {
-    ResolvedModifier { is_container_responsive: true, order, ..Default::default() }
+/// Tailwind CSS v4's container sizes, for `@sm:` … `@7xl:` and `@max-sm:` …:
+/// their own scale (`@sm` is 24rem), not the screen breakpoints (`sm` is 40rem).
+const CONTAINER_SIZES: [(&str, &str); 13] = [
+    ("3xs", "16rem"), ("2xs", "18rem"), ("xs", "20rem"), ("sm", "24rem"), ("md", "28rem"),
+    ("lg", "32rem"), ("xl", "36rem"), ("2xl", "42rem"), ("3xl", "48rem"), ("4xl", "56rem"),
+    ("5xl", "64rem"), ("6xl", "72rem"), ("7xl", "80rem"),
+];
+
+/// `"sm"` -> `Some((3, "24rem"))`: a container size and its rank in the scale.
+pub(crate) fn container_size(name: &str) -> Option<(usize, &'static str)> {
+    CONTAINER_SIZES.iter().position(|(n, _)| *n == name).map(|i| (i, CONTAINER_SIZES[i].1))
+}
+
+/// A container query's condition and cascade tier, from what follows the
+/// `@`: `sm` … `7xl` and `min-sm` (the container scale, at least that
+/// wide), `max-md` (strictly narrower), and the same with any length:
+/// `[400px]`, `min-[400px]`, `max-[400px]`. Shared with css.rs's named
+/// form (`@md/main:`). Ordered by size: the larger min-width later (it wins
+/// when both hold), the larger max-width earlier.
+///
+/// `max-` is `width < …`, not `max-width`: `@md:` and `@max-md:` never both
+/// hold, as with the screen breakpoints (they used to overlap at exactly
+/// the boundary).
+pub(crate) fn container_condition(query: &str) -> Option<(String, f64)> {
+    let bracket = |q: &str| -> Option<String> {
+        let inner = q.strip_prefix('[')?.strip_suffix(']')?;
+        (!inner.is_empty() && crate::parser::is_safe_arbitrary_value(inner)).then(|| unescape(inner))
+    };
+    if let Some((rank, size)) = container_size(query).or_else(|| query.strip_prefix("min-").and_then(container_size)) {
+        return Some((format!("(min-width: {size})"), 45.2 + rank as f64 * 0.001));
+    }
+    if let Some((rank, size)) = query.strip_prefix("max-").and_then(container_size) {
+        return Some((format!("(width < {size})"), 45.15 - rank as f64 * 0.001));
+    }
+    if let Some(v) = bracket(query).or_else(|| query.strip_prefix("min-").and_then(bracket)) {
+        return Some((format!("(min-width: {v})"), 45.1));
+    }
+    query.strip_prefix("max-").and_then(bracket).map(|v| (format!("(width < {v})"), 45.1))
+}
+
+/// `(hover: hover)` when the wrapped variant is `hover` (`group-hover`,
+/// `peer-hover`, `in-hover`, `has-hover`), as for `hover:` itself.
+fn hover_media(wrapped: &str) -> Option<String> {
+    (wrapped == "hover").then(|| HOVER_MEDIA.to_string())
+}
+
+/// The `@supports` condition of `supports-…:` — a declaration in brackets
+/// (`supports-[display:grid]` -> `(display:grid)`), a whole condition
+/// (`supports-[not_(display:grid)]`, `supports-[selector(:has(a))]`), a
+/// variable (`supports-(--x)`), or a bare property (`supports-grid` ->
+/// `(grid: var(--kb))`: is the property known at all).
+fn supports_condition(rest: &str) -> Option<String> {
+    if let Some(value) = crate::parser::arbitrary_modifier(rest) {
+        // A condition already: optional identifier, then a parenthesis.
+        let after_ident = value.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_').trim_start();
+        return Some(if after_ident.starts_with('(') { value } else { format!("({value})") });
+    }
+    let property = !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+    property.then(|| format!("({rest}: var(--kb))"))
+}
+
+/// A variant that is only a condition on the element itself — `hover`,
+/// `checked`, `data-open`, `aria-[sort=asc]`, `nth-3`, `has-checked`,
+/// `not-first` — as its selector text, for the variants that wrap another
+/// one (`group-*`, `peer-*`, `in-*`, `not-*`, `has-*`). `None` for anything
+/// with an ancestor, an at-rule, a pseudo-element or a theme lookup.
+fn self_condition(name: &str) -> Option<String> {
+    if let Some(def) = get_modifier(name) {
+        return def.pseudo.map(String::from);
+    }
+    let r = resolve_dynamic(name)?;
+    let only_selector = r.ancestor_selector.is_none()
+        && r.descendant_selector.is_none()
+        && r.pseudo_element.is_none()
+        && r.media_query.is_none()
+        && r.container_query.is_none()
+        && r.supports_query.is_none()
+        && r.dark_scheme.is_none()
+        && !r.is_responsive
+        && !r.starting_style;
+    if only_selector {
+        r.pseudo
+    } else {
+        None
+    }
+}
+
+/// `data-open` -> `[data-open]`: Tailwind CSS v4's bare data-attribute
+/// variant (the attribute is present). Plain names only.
+fn data_attribute(rest: &str) -> Option<String> {
+    let plain = !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    plain.then(|| format!("[data-{rest}]"))
 }
 
 /// Real Tailwind's `[&...]:` escape hatch — a raw CSS selector fragment as
@@ -462,6 +552,21 @@ fn container_responsive_only(order: f64) -> ResolvedModifier {
 /// leave unsupported rather than guess at which occurrence is "the" one.
 fn resolve_arbitrary_variant(inner: &str) -> Option<ResolvedModifier> {
     let spaced = unescape(inner);
+    // `[@media(min-width:900px)]:`, `[@supports(display:grid)]:`,
+    // `[@container(min-width:300px)]:` — a whole at-rule condition.
+    for (keyword, order) in [("@media", 45.6), ("@supports", 45.5), ("@container", 45.3)] {
+        if let Some(condition) = spaced.strip_prefix(keyword) {
+            let condition = condition.trim().to_string();
+            if condition.is_empty() {
+                return None;
+            }
+            return Some(match keyword {
+                "@media" => media_only(condition, order),
+                "@supports" => supports_query_only(condition, order),
+                _ => container_query_only(condition, order),
+            });
+        }
+    }
     if spaced.matches('&').count() != 1 {
         return None;
     }
@@ -549,11 +654,18 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
     // `:not(...)`, ...). Deliberately NOT wrapped in `:has(...)` the way
     // `group-has-`/`peer-has-` are — this condition applies to the group/
     // peer element ITSELF, not something it contains.
+    // With an `&` the condition says where the group itself goes:
+    // `group-[&_p]:` is `.group p `, `group-[.foo_&]:` is `.foo .group `.
+    // (The `&` used to be left in the selector as written.)
     if let Some(inner) = bracket_content(name, "group-") {
-        return Some(ancestor_only(format!(".group{} ", unescape(inner)), 25.0));
+        let condition = unescape(inner);
+        let selector = if condition.contains('&') { condition.replace('&', ".group") } else { format!(".group{condition}") };
+        return Some(ancestor_only(format!("{selector} "), 25.0));
     }
     if let Some(inner) = bracket_content(name, "peer-") {
-        return Some(ancestor_only(format!(".peer{} ~ ", unescape(inner)), 26.0));
+        let condition = unescape(inner);
+        let selector = if condition.contains('&') { condition.replace('&', ".peer") } else { format!(".peer{condition}") };
+        return Some(ancestor_only(format!("{selector} ~ "), 26.0));
     }
     if let Some(inner) = bracket_content(name, "has-") {
         return Some(pseudo_only(format!(":has({})", unescape(inner)), 18.0));
@@ -562,13 +674,45 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
         return Some(pseudo_only(format!(":not({})", unescape(inner)), 18.1));
     }
     if let Some(rest) = name.strip_prefix("not-") {
-        // "not-" wrapping a KNOWN pseudo-class modifier (not-hover,
-        // not-disabled, not-first, ...) — negates that modifier's own
-        // pseudo. Only meaningful for pseudo-class-shaped modifiers, not
-        // ancestor/media ones (real Tailwind doesn't support
-        // "not-group-hover"/"not-sm" either), so `def.pseudo` is checked
-        // specifically, not just "does this modifier exist at all".
-        return get_modifier(rest).and_then(|def| def.pseudo).map(|p| pseudo_only(format!(":not({p})"), 18.1));
+        // "not-" wrapping a condition on the element itself (not-hover,
+        // not-first, not-data-open, not-aria-[sort=asc], ...) negates its
+        // selector; wrapping a plain media variant (not-print,
+        // not-forced-colors) negates the query: `@media not (...)`.
+        // Not ancestor ones: Tailwind CSS has no "not-group-hover" either.
+        if let Some(p) = self_condition(rest) {
+            return Some(pseudo_only(format!(":not({p})"), 18.1));
+        }
+        // Any variant that is only an at-rule condition, dynamic ones too:
+        // `not-max-[900px]:`, `not-@md:`, `not-supports-[display:grid]:`.
+        let inner = resolve(rest)?;
+        let only_at_rule = inner.pseudo.is_none()
+            && inner.pseudo_element.is_none()
+            && inner.ancestor_selector.is_none()
+            && inner.descendant_selector.is_none()
+            && inner.dark_scheme.is_none()
+            && !inner.is_responsive
+            && !inner.starting_style;
+        if !only_at_rule {
+            return None;
+        }
+        let order = inner.order + 0.001;
+        return match (inner.media_query, inner.container_query, inner.supports_query) {
+            (Some(mq), None, None) => Some(media_only(format!("not {mq}"), order)),
+            (None, Some(cq), None) => Some(container_query_only(format!("not {cq}"), order)),
+            (None, None, Some(sq)) => Some(supports_query_only(format!("not {sq}"), order)),
+            _ => None,
+        };
+    }
+    // `has-checked` -> `:has(*:checked)`: Tailwind CSS v4's has-<variant>,
+    // the shorthand for `has-[:checked]` (the bracket form is matched above).
+    // (Neither returns on a miss: `data-[...]` is matched further down.)
+    if let Some(rest) = name.strip_prefix("has-") {
+        if let Some(p) = self_condition(rest) {
+            return Some(ResolvedModifier { media_query: hover_media(rest), ..pseudo_only(format!(":has(*{p})"), 18.0) });
+        }
+    }
+    if let Some(a) = name.strip_prefix("data-").and_then(data_attribute) {
+        return Some(pseudo_only(a, 18.2));
     }
     if let Some(inner) = bracket_content(name, "data-") {
         return Some(pseudo_only(attr_selector("data", inner), 18.2));
@@ -579,15 +723,16 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
     if let Some(inner) = bracket_content(name, "min-") {
         return Some(media_only(format!("(min-width: {})", unescape(inner)), 45.0));
     }
+    // Strictly below, like `max-md:`: `max-[900px]:` and `min-[900px]:`
+    // never both hold. (It was `max-width`, which includes 900px itself.)
     if let Some(inner) = bracket_content(name, "max-") {
-        return Some(media_only(format!("(max-width: {})", unescape(inner)), 45.0));
+        return Some(media_only(format!("(width < {})", unescape(inner)), 45.0));
     }
-    // `@supports (...)` feature query — self-contained bracket condition,
-    // same shape as `min-[...]`/`max-[...]` above, just a different at-rule
-    // keyword (`css.rs` wraps `supports_query` in `@supports`, independent
-    // of and freely nestable with `@media`/`@container`).
-    if let Some(inner) = bracket_content(name, "supports-") {
-        return Some(supports_query_only(format!("({})", unescape(inner)), 45.5));
+    // `@supports (...)` feature query (`css.rs` wraps `supports_query` in
+    // `@supports`, independent of and freely nestable with `@media`/
+    // `@container`). See `supports_condition` for the forms.
+    if let Some(condition) = name.strip_prefix("supports-").and_then(supports_condition) {
+        return Some(supports_query_only(condition, 45.5));
     }
     if let Some(rest) = name.strip_prefix("group-") {
         // Generalizes ANY group-<pseudo> combination whose base pseudo
@@ -596,10 +741,13 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
         // group-focus themselves stay hardcoded in the static table above
         // (checked first by `resolve`), unaffected; this only ever fires
         // for combinations NOT already there.
-        return get_modifier(rest).and_then(|def| def.pseudo).map(|p| ancestor_only(format!(".group{p} "), 25.0));
+        // Any condition on the group itself, not only a pseudo-class:
+        // group-data-open, group-data-[state=open], group-aria-[…],
+        // group-has-checked, group-nth-2, group-not-first, …
+        return self_condition(rest).map(|p| ResolvedModifier { media_query: hover_media(rest), ..ancestor_only(format!(".group{p} "), 25.0) });
     }
     if let Some(rest) = name.strip_prefix("peer-") {
-        return get_modifier(rest).and_then(|def| def.pseudo).map(|p| ancestor_only(format!(".peer{p} ~ "), 26.0));
+        return self_condition(rest).map(|p| ResolvedModifier { media_query: hover_media(rest), ..ancestor_only(format!(".peer{p} ~ "), 26.0) });
     }
     // `in-*` (real Tailwind v4's context-aware ancestor variant) —
     // functionally `group-*` without needing a `.group` class on the
@@ -625,26 +773,16 @@ fn resolve_dynamic(name: &str) -> Option<ResolvedModifier> {
         return Some(ancestor_only(format!(":where({}) ", unescape(inner)), 27.0));
     }
     if let Some(rest) = name.strip_prefix("in-") {
-        return get_modifier(rest).and_then(|def| def.pseudo).map(|p| ancestor_only(format!(":where({p}) "), 27.0));
+        return self_condition(rest).map(|p| ResolvedModifier { media_query: hover_media(rest), ..ancestor_only(format!(":where({p}) "), 27.0) });
     }
     // Container queries (Phase 25) — an "@"-prefixed modifier wraps in
     // `@container` instead of `@media`. `@min-[...]`/`@max-[...]` are fully
     // self-contained (their condition text needs no theme lookup, same
-    // shape as `min-[...]`/`max-[...]` above); `@sm`/`@md`/`@lg`/`@xl`/
-    // `@2xl` reuse the SAME 5 fixed names (and the same `theme.screens`
-    // values) the plain viewport-responsive tier uses — `css.rs` does the
-    // actual width lookup when `is_container_responsive` is set, exactly
-    // mirroring how `is_responsive` already works for the viewport case.
-    if let Some(inner) = bracket_content(name, "@min-") {
-        return Some(container_query_only(format!("(min-width: {})", unescape(inner)), 45.1));
-    }
-    if let Some(inner) = bracket_content(name, "@max-") {
-        return Some(container_query_only(format!("(max-width: {})", unescape(inner)), 45.1));
-    }
-    if let Some(bare) = name.strip_prefix('@') {
-        if matches!(bare, "sm" | "md" | "lg" | "xl" | "2xl") {
-            return Some(container_responsive_only(45.2));
-        }
+    // shape as `min-[...]`/`max-[...]` above); `@sm`, `@max-md`, … use
+    // Tailwind CSS v4's container scale (`CONTAINER_SIZES`). Before
+    // 1.0.0-beta.19 they used the screen widths (`@sm` was 640px, not 24rem).
+    if let Some((condition, order)) = name.strip_prefix('@').and_then(container_condition) {
+        return Some(container_query_only(condition, order));
     }
     // The generic `[&...]:` fallback — deliberately checked LAST: every
     // named prefix above (`has-`, `data-`, `nth-`, ...) requires real text
@@ -715,8 +853,8 @@ mod tests {
         assert_eq!(resolve("first").unwrap().pseudo.as_deref(), Some(":first-child"));
         assert_eq!(resolve("only").unwrap().pseudo.as_deref(), Some(":only-child"));
         assert_eq!(resolve("odd").unwrap().pseudo.as_deref(), Some(":nth-child(odd)"));
-        assert_eq!(resolve("open").unwrap().pseudo.as_deref(), Some("[open]"));
-        assert_eq!(resolve("inert").unwrap().pseudo.as_deref(), Some("[inert]"));
+        assert_eq!(resolve("open").unwrap().pseudo.as_deref(), Some(":is([open], :popover-open, :open)"));
+        assert_eq!(resolve("inert").unwrap().pseudo.as_deref(), Some(":is([inert], [inert] *)"));
     }
 
     #[test]
@@ -770,7 +908,7 @@ mod tests {
         assert_eq!(min.media_query.as_deref(), Some("(min-width: 600px)"));
         assert!(!min.is_responsive);
         let max = resolve("max-[800px]").unwrap();
-        assert_eq!(max.media_query.as_deref(), Some("(max-width: 800px)"));
+        assert_eq!(max.media_query.as_deref(), Some("(width < 800px)"));
     }
 
     #[test]
@@ -778,18 +916,23 @@ mod tests {
         let min = resolve("@min-[400px]").unwrap();
         assert_eq!(min.container_query.as_deref(), Some("(min-width: 400px)"));
         assert!(min.media_query.is_none());
-        assert!(!min.is_container_responsive);
         let max = resolve("@max-[900px]").unwrap();
-        assert_eq!(max.container_query.as_deref(), Some("(max-width: 900px)"));
+        assert_eq!(max.container_query.as_deref(), Some("(width < 900px)"));
     }
 
     #[test]
-    fn resolves_named_container_responsive_breakpoints() {
-        for name in ["@sm", "@md", "@lg", "@xl", "@2xl"] {
+    fn resolves_named_container_sizes_from_the_container_scale() {
+        for (name, size) in [("@3xs", "16rem"), ("@sm", "24rem"), ("@md", "28rem"), ("@2xl", "42rem"), ("@7xl", "80rem")] {
             let r = resolve(name).unwrap_or_else(|| panic!("{name} should resolve"));
-            assert!(r.is_container_responsive, "{name} should be container-responsive");
-            assert!(r.container_query.is_none());
+            assert_eq!(r.container_query, Some(format!("(min-width: {size})")), "{name}");
+            assert!(r.media_query.is_none());
         }
+        assert_eq!(resolve("@max-md").unwrap().container_query.as_deref(), Some("(width < 28rem)"));
+        assert_eq!(resolve("@min-md").unwrap().container_query.as_deref(), Some("(min-width: 28rem)"));
+        assert_eq!(resolve("@[400px]").unwrap().container_query.as_deref(), Some("(min-width: 400px)"));
+        assert!(resolve("@sm").unwrap().order < resolve("@lg").unwrap().order);
+        assert!(resolve("@max-sm").unwrap().order > resolve("@max-lg").unwrap().order);
+        assert!(resolve("@8xl").is_none());
         // A bare "@" name that ISN'T one of the five known breakpoints is
         // unresolvable — not every "@word" is a container variant.
         assert!(resolve("@notabreakpoint").is_none());

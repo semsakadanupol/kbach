@@ -1,5 +1,5 @@
 use super::{decl, resolve_percent, Declaration};
-use crate::parser::ParsedClass;
+use crate::parser::{color_with_opacity, parse_alpha, Alpha, ParsedClass};
 use crate::theme::{ColorValue, ThemeConfig};
 
 /// Looks up a named theme color as a plain hex string. Mode-aware colors
@@ -36,12 +36,15 @@ pub(super) fn lookup_hex<'a>(theme: &'a ThemeConfig, key: &str) -> Option<&'a st
 /// utilities also use "/" for FRACTIONS (`w-1/2`), a completely different
 /// meaning, but no real color name is ever literally digits, so there's no
 /// actual ambiguity between the two uses in practice.
-fn split_opacity(value: &str) -> (&str, Option<u8>) {
-    if let Some((name, opacity_text)) = value.rsplit_once('/') {
-        if let Ok(n) = opacity_text.parse::<u8>() {
-            if n <= 100 {
-                return (name, Some(n));
-            }
+///
+/// Every form Tailwind v4 takes (parser.rs `parse_alpha`): `/50`, a decimal
+/// `/2.5`, a bracketed `/[0.37]` or `/[37%]`, and a runtime `/(--o)`. Split
+/// at the FIRST `/` (a color name has none), so a `/` inside the brackets of
+/// `/[calc(1/2)]` stays with the opacity.
+pub(super) fn split_opacity(value: &str) -> (&str, Option<Alpha>) {
+    if let Some((name, opacity_text)) = value.split_once('/') {
+        if let Some(alpha) = parse_alpha(opacity_text) {
+            return (name, Some(alpha));
         }
     }
     (value, None)
@@ -66,16 +69,17 @@ pub(super) fn color_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<S
     }
     let (name, opacity) = split_opacity(value);
     let hex = lookup_hex(theme, name)?;
-    Some(match (opacity, hex.strip_prefix('#').and_then(hex_to_rgb)) {
-        (Some(pct), Some((r, g, b))) => format!("rgba({r},{g},{b},{})", pct as f64 / 100.0),
-        // Any color that isn't hex (a CSS-variable color such as the CDN's
+    Some(match opacity {
+        // A hex color with a known opacity is a plain `rgba(...)`. Any other
+        // color (a CSS-variable color such as the CDN's
         // `rgb(var(--kb-color-card))`, a config color like `red` or
-        // `rgb(10 20 30)`, `currentColor`) gets its opacity through
-        // `color-mix`, as Tailwind v4 does. Regression: the opacity suffix
-        // was silently dropped (`bg-card/80` rendered fully opaque).
-        // `inherit` can't be mixed, so it stays as-is. Native strips this
-        // back to the plain color (resolve_style.rs `rn_style_value`).
-        (Some(pct), None) if hex != "inherit" => format!("color-mix(in srgb, {hex} {pct}%, transparent)"),
+        // `rgb(10 20 30)`, `currentColor`), and any runtime opacity
+        // (`/(--o)`), goes through `color-mix`, as Tailwind v4 does.
+        // Regression: the opacity suffix was silently dropped (`bg-card/80`
+        // rendered fully opaque). `inherit` can't be mixed, so it stays
+        // as-is. Native strips this back to the plain color
+        // (resolve_style.rs `rn_style_value`).
+        Some(alpha) if hex != "inherit" => color_with_opacity(hex, &alpha),
         _ => hex.to_string(),
     })
 }
@@ -178,6 +182,25 @@ pub(super) fn is_length(parsed: &ParsedClass, value: &str) -> bool {
     }
 }
 
+/// Whether an arbitrary value is a color, for the utilities whose bracket
+/// value is otherwise a whole shadow (`shadow-[…]`, `inset-shadow-[…]`,
+/// `drop-shadow-[…]`, `text-shadow-[…]`). A `color:` hint decides
+/// (`shadow-(color:--c)`); without one, a hex, a color function or a color
+/// keyword is a color. A bare `var()` is not: `shadow-(--s)` is a shadow.
+pub(super) fn is_color(parsed: &ParsedClass, value: &str) -> bool {
+    const FUNCTIONS: &[&str] = &["rgb(", "rgba(", "hsl(", "hsla(", "hwb(", "lab(", "lch(", "oklab(", "oklch(", "color(", "color-mix("];
+    match parsed.type_hint.as_deref() {
+        Some("color") => true,
+        Some(_) => false,
+        None => {
+            let keyword = !value.is_empty()
+                && value.bytes().all(|b| b.is_ascii_alphabetic())
+                && !matches!(value, "none" | "inherit" | "initial" | "unset" | "revert");
+            value.starts_with('#') || FUNCTIONS.iter().any(|f| value.starts_with(f)) || keyword
+        }
+    }
+}
+
 /// Whether an arbitrary `bg-[...]` value is an image: an `image:`/`url:` hint,
 /// or a url()/image-set()/*-gradient() value.
 fn is_image(parsed: &ParsedClass, value: &str) -> bool {
@@ -207,6 +230,12 @@ fn resolve_text(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declara
                 }
                 return Some(decls);
             }
+            // `text-sm/6`: the size with its own line-height. Set straight,
+            // as Tailwind CSS does (no --kb-leading: the class says both).
+            if let Some((size, leading)) = super::typography::split_size_leading(value) {
+                let lh = super::typography::size_leading_web(leading)?;
+                return Some(vec![decl("font-size", size), decl("line-height", &lh)]);
+            }
             if let Some(align) = super::typography::text_align(value) {
                 return Some(vec![decl("text-align", align)]);
             }
@@ -231,7 +260,15 @@ fn resolve_text(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declara
         // number+known-length-unit, so this check is safe to run ONLY for
         // the arbitrary branch, ahead of the color fallback below.
         if is_length(parsed, value) {
-            return Some(vec![decl("font-size", value)]);
+            // `text-[14px]/[20px]`: the size with its line-height.
+            let mut decls = vec![decl("font-size", value)];
+            if let Some(leading) = parsed.modifier.as_deref() {
+                decls.push(decl("line-height", &super::typography::size_leading_web(leading)?));
+            }
+            return Some(decls);
+        }
+        if parsed.modifier.is_some() {
+            return None;
         }
     }
     color_declarations(theme, parsed, "color", "--text-opacity")
@@ -385,7 +422,7 @@ const MODE_AWARE_COLOR_PREFIXES: [&str; 3] = ["bg-", "text-", "border-"];
 /// function), and the whole class resolved to nothing at all — confirmed as
 /// a real, reported bug: any mode-aware custom color completely lost inline
 /// opacity support, native and web alike, with no warning explaining why.
-fn find_mode_aware_color<'a>(base: &'a str, theme: &'a ThemeConfig) -> Option<(String, Option<u8>, &'a str, &'a str)> {
+fn find_mode_aware_color<'a>(base: &'a str, theme: &'a ThemeConfig) -> Option<(String, Option<Alpha>, &'a str, &'a str)> {
     let (important, rest) = match base.strip_prefix('!') {
         Some(r) => ("!", r),
         None => ("", base),
@@ -406,10 +443,12 @@ fn find_mode_aware_color<'a>(base: &'a str, theme: &'a ThemeConfig) -> Option<(S
 /// color's light/dark sides get IDENTICAL opacity handling. Returns `hex`
 /// unchanged when there's no opacity, or when `hex` isn't a `#`-prefixed
 /// value `hex_to_rgb` can decompose (same tolerant fallback `color_value`
-/// uses).
-fn apply_opacity_to_hex(hex: &str, opacity: Option<u8>) -> String {
-    match (opacity, hex.strip_prefix('#').and_then(hex_to_rgb)) {
-        (Some(pct), Some((r, g, b))) => format!("rgba({r},{g},{b},{})", pct as f64 / 100.0),
+/// uses). The result goes back into a class token (`bg-[…]`), so the spaces
+/// of a `color-mix(...)` (a runtime opacity, `bg-surface/(--o)`) are written
+/// as underscores, the arbitrary-value spelling.
+fn apply_opacity_to_hex(hex: &str, opacity: Option<&Alpha>) -> String {
+    match opacity {
+        Some(alpha) if hex.strip_prefix('#').and_then(hex_to_rgb).is_some() => color_with_opacity(hex, alpha).replace(' ', "_"),
         _ => hex.to_string(),
     }
 }
@@ -417,8 +456,8 @@ fn apply_opacity_to_hex(hex: &str, opacity: Option<u8>) -> String {
 fn expand_base(base: &str, theme: &ThemeConfig) -> Option<(String, String)> {
     let (prefix, opacity, light, dark) = find_mode_aware_color(base, theme)?;
     Some((
-        format!("{prefix}[{}]", apply_opacity_to_hex(light, opacity)),
-        format!("{prefix}[{}]", apply_opacity_to_hex(dark, opacity)),
+        format!("{prefix}[{}]", apply_opacity_to_hex(light, opacity.as_ref())),
+        format!("{prefix}[{}]", apply_opacity_to_hex(dark, opacity.as_ref())),
     ))
 }
 
@@ -462,7 +501,7 @@ pub fn substitute_mode_aware_color_token(token: &str, theme: &ThemeConfig, color
     match find_mode_aware_color(base, theme) {
         Some((prefix, opacity, light, dark)) => {
             let hex = if color_scheme == "dark" { dark } else { light };
-            format!("{modifier_prefix}{prefix}[{}]", apply_opacity_to_hex(hex, opacity))
+            format!("{modifier_prefix}{prefix}[{}]", apply_opacity_to_hex(hex, opacity.as_ref()))
         }
         None => token.to_string(),
     }

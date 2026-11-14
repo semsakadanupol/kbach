@@ -69,6 +69,21 @@ const CASES = [
   '-rotate-[30deg]', '-rotate-[-30deg]', '-skew-x-[5deg]', '-rotate-y-[30deg]',
   // number utilities take only numbers and their keywords
   'z-50', '-z-10', 'z-auto', 'order-first', 'order-last', 'order-none', 'order-3', '-order-2', 'grow', 'grow-2', 'shrink-0',
+  // text-<size>/<leading> (a named or unitless leading is multiplied out), arbitrary font weights
+  'text-sm/6', 'text-lg/tight', 'text-xs/loose', 'text-sm/[20px]', 'text-base/[1.75]', 'text-sm/px',
+  'font-[600]', 'font-[number:700]', 'font-[Inter]', 'font-[family-name:Inter]', 'font-[Inter,_sans-serif]',
+  // 1.0.0-beta.19, from the comparison with Tailwind CSS 4.3.5 —
+  // every opacity form: decimal, bracketed fraction / percentage (named and arbitrary colors)
+  'bg-blue-6/2.5', 'bg-blue-6/[0.37]', 'bg-blue-6/[37%]', 'bg-blue-6/57', 'bg-[#ff0000]/[0.37]', 'bg-[#ff0000]/[37%]', 'bg-[#ff0000]/2.5',
+  'text-blue-6/[0.5]', 'border-blue-6/[25%]',
+  // an arbitrary size with a line height
+  'text-[14px]/[20px]', 'text-[14px]/6', 'text-[14px]/[1.5]', 'text-[1rem]/tight',
+  // a ratio without brackets; a negative scale and outline offset
+  'aspect-3/2', 'aspect-16/9', '-scale-x-100', '-scale-50', '-scale-y-[2]', '-outline-offset-2', '-outline-offset-[3px]',
+  // Tailwind's CSS functions in an arbitrary value
+  'w-[--spacing(4)]', 'p-[--spacing(2.5)]', 'bg-[--alpha(#ff0000/50%)]',
+  // the four palettes Tailwind v4.2 added
+  'bg-mauve-6', 'text-olive-8', 'border-mist-3', 'bg-taupe-11/50',
   // a realistic combined string
   'flex-2 border-2 border-x p-px -translate-1/2 rounded-4xl leading-12',
   'rounded-sm shadow-sm outline-2 ring-2 text-sm leading-6',
@@ -89,6 +104,15 @@ describe('jsEngine <-> Rust native engine parity', () => {
     'drop-shadow-blue-6', 'text-shadow-blue-6', 'contain-size', 'wrap-anywhere', 'placeholder-blue-6',
     // not React Native styles: used to leak through as objectPosition/containerType
     'object-top-left', 'object-top', '@container', '@container-normal',
+    // arbitrary object-position / vertical-align, duration-initial; a variable line height or
+    // weight, and a weight RN can't take (only the hundreds)
+    'object-[25%_75%]', 'object-(--p)', 'align-[4px]', 'align-middle', 'duration-initial',
+    'text-sm/(--lh)', 'font-(--w)', 'font-[550]',
+    // 1.0.0-beta.19: a runtime opacity or line height, size containers, max-w-screen-<bp>,
+    // gradients/filters/grid, and the bracket forms on web-only utilities
+    'bg-blue-6/(--o)', 'bg-[#ff0000]/(--o)', 'text-[14px]/(--lh)', '@container-size', '@container-size/main', '@container-[size]',
+    'max-w-screen-md', 'bg-linear-to-r/oklch', 'grayscale-50', 'grid-cols-13', 'shadow-xl/20', 'shadow-[#333]', 'scale-(--s)',
+    'transform-[rotateX(10deg)]', 'list-[upper-roman]', 'contain-[layout_paint]', 'content-none',
   ])('%s is web-only: no style on either engine', (cls) => {
     // Regression: native used to receive `KbRingWidth` and a var()-built
     // `boxShadow` string, neither of which RN can use.
@@ -118,10 +142,15 @@ describe('jsEngine <-> Rust native engine parity', () => {
     const CLASSES = [
       '3xl:p-4', 'tablet:flex-row', 'max-md:p-4', 'max-3xl:p-4', 'max-tablet:p-4',
       'md:max-xl:p-2', 'bg-white max-md:bg-black', 'p-1 tablet:p-2 3xl:p-3',
+      // min-<name> is the breakpoint spelled out; web-only variants never apply on native
+      'min-md:p-4', 'min-tablet:p-4', 'min-nope:p-4', 'data-open:p-4', 'group-data-open:p-4', 'has-checked:p-4', 'forced-colors:p-4', '@sm:p-4',
       // never a breakpoint: unknown names, and inherited Object properties
       'hovr:p-4', 'max-nope:p-4', 'constructor:p-4', 'max-constructor:p-4', 'toString:p-4',
       // named containers are web-only
       '@container/main',
+      // not- on a breakpoint; max-[…] is strictly below (800 is one of the widths)
+      'not-md:p-4', 'not-max-md:p-4', 'not-min-md:p-4', 'not-tablet:p-4', 'not-3xl:p-4', 'not-nope:p-4', 'not-constructor:p-4',
+      'max-[800px]:p-4', 'min-[800px]:p-4', 'max-[50rem]:p-4', 'not-hover:p-4', 'pointer-none:p-4', 'hover:p-4',
     ];
     it.each(CLASSES)('%s matches at every width', (cls) => {
       for (const width of [300, 800, 1000, 1500, 2000]) {
@@ -140,10 +169,24 @@ describe('jsEngine <-> Rust native engine parity', () => {
       expect(at('p-1 tablet:p-2 3xl:p-3', 1000).r).toEqual({ padding: 8 });
       expect(at('p-1 tablet:p-2 3xl:p-3', 2000).r).toEqual({ padding: 12 });
       expect(at('constructor:p-4', 2000).j).toEqual({});
+      expect(at('not-md:p-4', 767).r).toEqual({ padding: 16 });
+      expect(at('not-md:p-4', 768).r).toEqual({});
+      expect(at('not-max-md:p-4', 768).r).toEqual({ padding: 16 });
+      expect(at('max-[800px]:p-4', 799).r).toEqual({ padding: 16 });
+      expect(at('max-[800px]:p-4', 800).r).toEqual({}); // strictly below, like max-md
+    });
+
+    it('not-dark is the other color scheme, on both engines', () => {
+      for (const scheme of ['light', 'dark']) {
+        const { __kbachWarnings: _r, ...r } = JSON.parse(resolve_style_json('not-dark:p-4 dark:p-2', themeJsonWide, scheme, false, 400));
+        const { __kbachWarnings: _j, ...j } = resolveStyleJs('not-dark:p-4 dark:p-2', theme, scheme, false, 400) as Record<string, unknown>;
+        expect(j).toEqual(r);
+        expect(r).toEqual({ padding: scheme === 'dark' ? 8 : 16 });
+      }
     });
   });
 
-  it.each(['z-banana', 'order-banana', 'grow-banana', 'shrink-banana', 'z-1.5'])('%s is not a class on either engine', (cls) => {
+  it.each(['z-banana', 'order-banana', 'grow-banana', 'shrink-banana', 'z-1.5', 'text-sm/banana', 'text-sm/', 'align-banana'])('%s is not a class on either engine', (cls) => {
     // Regression: these used to pass any value through (z-index: banana).
     expect(rust(cls)).toEqual({});
     expect(js(cls)).toEqual({});

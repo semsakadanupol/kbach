@@ -196,6 +196,10 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "contain-layout" => Some(contain("--kb-contain-layout", "layout")),
         "contain-paint" => Some(contain("--kb-contain-paint", "paint")),
         "contain-style" => Some(contain("--kb-contain-style", "style")),
+        // `contain-[layout_paint]`, `contain-(--c)`: the whole value.
+        u if u.starts_with("contain-[") || u.starts_with("contain-(") => {
+            crate::parser::arbitrary_modifier(&u["contain-".len()..]).map(|v| vec![decl("contain", &v)])
+        }
         "contain-none" => Some(vec![decl("contain", "none")]),
         "contain-strict" => Some(vec![decl("contain", "strict")]),
         "contain-content" => Some(vec![decl("contain", "content")]),

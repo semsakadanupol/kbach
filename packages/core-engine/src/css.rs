@@ -187,14 +187,18 @@ fn apply_important(decl_text: &str) -> String {
     decl_text.split("; ").map(|d| format!("{d} !important")).collect::<Vec<_>>().join("; ")
 }
 
-fn wrap_dark_scheme(scheme: DarkScheme, strategy: DarkModeStrategy, selector: &str, decls: &str) -> String {
+/// `selectors` is usually one; `marker:`/`selection:` have two (the element
+/// and its descendants), and an ancestor prefix has to go on each.
+fn wrap_dark_scheme(scheme: DarkScheme, strategy: DarkModeStrategy, selectors: &[String], decls: &str) -> String {
+    let under = |ancestor: &str| selectors.iter().map(|s| format!("{ancestor} {s}")).collect::<Vec<_>>().join(", ");
+    let plain = selectors.join(", ");
     match (scheme, strategy) {
-        (DarkScheme::Dark, DarkModeStrategy::Media) => format!("@media (prefers-color-scheme: dark) {{ {selector} {{ {decls} }} }}"),
-        (DarkScheme::Dark, DarkModeStrategy::Class) => format!(".dark {selector} {{ {decls} }}"),
-        (DarkScheme::Dark, DarkModeStrategy::Attribute) => format!("[data-theme=\"dark\"] {selector} {{ {decls} }}"),
-        (DarkScheme::Light, DarkModeStrategy::Media) => format!("@media (prefers-color-scheme: light) {{ {selector} {{ {decls} }} }}"),
-        (DarkScheme::Light, DarkModeStrategy::Class) => format!(".light {selector} {{ {decls} }}"),
-        (DarkScheme::Light, DarkModeStrategy::Attribute) => format!("[data-theme=\"light\"] {selector} {{ {decls} }}"),
+        (DarkScheme::Dark, DarkModeStrategy::Media) => format!("@media (prefers-color-scheme: dark) {{ {plain} {{ {decls} }} }}"),
+        (DarkScheme::Dark, DarkModeStrategy::Class) => format!("{} {{ {decls} }}", under(".dark")),
+        (DarkScheme::Dark, DarkModeStrategy::Attribute) => format!("{} {{ {decls} }}", under("[data-theme=\"dark\"]")),
+        (DarkScheme::Light, DarkModeStrategy::Media) => format!("@media (prefers-color-scheme: light) {{ {plain} {{ {decls} }} }}"),
+        (DarkScheme::Light, DarkModeStrategy::Class) => format!("{} {{ {decls} }}", under(".light")),
+        (DarkScheme::Light, DarkModeStrategy::Attribute) => format!("{} {{ {decls} }}", under("[data-theme=\"light\"]")),
     }
 }
 
@@ -235,6 +239,15 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
     let mut needs_content_var = false;
     let mut ancestor_prefix = String::new();
     let mut descendant_suffix = String::new();
+    // Variants written AFTER `*:`/`**:` are conditions on the children, not
+    // on the element carrying the class: `*:data-[x]:flex` is `.c > *[data-x]`
+    // (the children that have data-x), as in Tailwind CSS. They used to land
+    // on the element itself (`.c[data-x] > *`).
+    let mut child_pseudo_suffix = String::new();
+    let mut child_pseudo_element_suffix = String::new();
+    // `marker:`/`selection:` also style the element's descendants (Tailwind
+    // CSS): `marker:text-blue-6` on a `<ul>` colors its items' markers.
+    let mut reaches_descendants = false;
     let mut media_wrappers: Vec<String> = Vec::new();
     let mut container_wrappers: Vec<String> = Vec::new();
     let mut supports_wrappers: Vec<String> = Vec::new();
@@ -242,7 +255,6 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
     let mut needs_important = parsed.important;
     let mut order = 0.0_f64;
     let mut min_width: Option<f64> = None;
-    let mut container_min_width: Option<f64> = None;
     let mut needs_starting_style = false;
 
     for modifier in &parsed.modifiers {
@@ -266,17 +278,35 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
                     container_wrappers.push(condition);
                     order = order.max(45.2);
                 }
+                ThemeModifier::Media(condition) => {
+                    media_wrappers.push(condition);
+                    order = order.max(45.0);
+                }
+                // `not-dark:` — the opposite of whatever `dark:` is under
+                // this theme's strategy.
+                ThemeModifier::NotDark => {
+                    match theme.dark_mode {
+                        DarkModeStrategy::Media => media_wrappers.push("not (prefers-color-scheme: dark)".to_string()),
+                        DarkModeStrategy::Class => pseudo_suffix.push_str(":not(.dark *)"),
+                        DarkModeStrategy::Attribute => pseudo_suffix.push_str(":not([data-theme=\"dark\"] *)"),
+                    }
+                    order = order.max(30.0);
+                }
             }
             continue;
         };
+        let on_children = !descendant_suffix.is_empty();
         if let Some(p) = def.pseudo {
-            pseudo_suffix.push_str(&p);
+            if on_children { child_pseudo_suffix.push_str(&p) } else { pseudo_suffix.push_str(&p) }
         }
         if let Some(pe) = def.pseudo_element {
-            pseudo_element_suffix.push_str(&pe);
             if pe == "::before" || pe == "::after" {
                 needs_content_var = true;
             }
+            if pe == "::marker" || pe == "::selection" {
+                reaches_descendants = true;
+            }
+            if on_children { child_pseudo_element_suffix.push_str(&pe) } else { pseudo_element_suffix.push_str(&pe) }
         }
         if let Some(a) = def.ancestor_selector {
             ancestor_prefix.push_str(&a);
@@ -305,16 +335,6 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
         if def.is_responsive {
             let width = theme.screens.get(modifier).copied().unwrap_or(0.0);
             min_width = Some(min_width.map_or(width, |w: f64| w.max(width)));
-        }
-        if def.is_container_responsive {
-            // `modifier` is the raw "@sm"/"@md"/... text; `theme.screens` is
-            // keyed by the bare name ("sm"/"md"/...) the plain viewport-
-            // responsive tier already uses — see `ResolvedModifier::
-            // is_container_responsive`'s doc comment for why this
-            // deliberately reuses that same scale.
-            let bare = modifier.trim_start_matches('@');
-            let width = theme.screens.get(bare).copied().unwrap_or(0.0);
-            container_min_width = Some(container_min_width.map_or(width, |w: f64| w.max(width)));
         }
         if def.order > order {
             order = def.order;
@@ -345,7 +365,9 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
         _ => 0.0,
     };
 
-    if needs_content_var {
+    // (A `content-*` utility under `before:`/`after:` already declares
+    // `content: var(--kb-content)` itself, with the variable set.)
+    if needs_content_var && !decl_text.contains("content: var(--kb-content)") {
         decl_text = format!("{decl_text}; content: var(--kb-content, \"\")");
     }
 
@@ -364,23 +386,24 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
     // combinator is an implicit side effect of the utility value, so the
     // explicit choice wins rather than the two silently combining.
     let child_suffix = if needs_child_combinator && descendant_suffix.is_empty() { CHILD_COMBINATOR_SUFFIX } else { "" };
-    let base_selector = match mode {
-        SelectorMode::Class => {
-            let escaped = escape_selector(&parsed.original);
-            format!(".{escaped}{pseudo_suffix}{pseudo_element_suffix}{child_suffix}{descendant_suffix}")
-        }
-        SelectorMode::DataAttribute => {
-            let attr_value = escape_attr_value(&parsed.original);
-            format!("[data-kb~=\"{attr_value}\"]{pseudo_suffix}{pseudo_element_suffix}{child_suffix}{descendant_suffix}")
-        }
+    let class = match mode {
+        SelectorMode::Class => format!(".{}", escape_selector(&parsed.original)),
+        SelectorMode::DataAttribute => format!("[data-kb~=\"{}\"]", escape_attr_value(&parsed.original)),
     };
-    let selector = format!("{ancestor_prefix}{base_selector}");
+    // The element (with its own conditions), then what it reaches, then the
+    // conditions on those.
+    let element = format!("{ancestor_prefix}{class}{pseudo_suffix}");
+    let reached = format!("{child_suffix}{descendant_suffix}{child_pseudo_suffix}{child_pseudo_element_suffix}");
+    let mut selectors = vec![format!("{element}{pseudo_element_suffix}{reached}")];
+    if reaches_descendants && reached.is_empty() {
+        selectors.push(format!("{element} *{pseudo_element_suffix}"));
+    }
 
     let decl_text = if needs_important { apply_important(&decl_text) } else { decl_text };
 
     let mut rule = match dark_scheme {
-        Some(scheme) => wrap_dark_scheme(scheme, theme.dark_mode, &selector, &decl_text),
-        None => format!("{selector} {{ {decl_text} }}"),
+        Some(scheme) => wrap_dark_scheme(scheme, theme.dark_mode, &selectors, &decl_text),
+        None => format!("{} {{ {decl_text} }}", selectors.join(", ")),
     };
 
     // Wrapped innermost-first: `@starting-style` right around the base
@@ -395,9 +418,6 @@ fn build_rule_with_mode(parsed: &ParsedClass, decls: &[Declaration], theme: &The
 
     for cq in &container_wrappers {
         rule = format!("@container {cq} {{ {rule} }}");
-    }
-    if let Some(width) = container_min_width {
-        rule = format!("@container (min-width: {width}px) {{ {rule} }}");
     }
 
     for sq in &supports_wrappers {
@@ -424,6 +444,11 @@ enum ThemeModifier {
     MaxWidth(f64),
     /// A named container query condition, `<name> (min-width: …)`.
     Container(String),
+    /// A media condition built from the theme: `not-md` is
+    /// `not (min-width: 768px)`.
+    Media(String),
+    /// `not-dark`: depends on the theme's dark-mode strategy.
+    NotDark,
 }
 
 /// `None` = genuinely unknown, so the caller drops the whole rule.
@@ -442,22 +467,38 @@ fn theme_modifier(modifier: &str, theme: &ThemeConfig) -> Option<ThemeModifier> 
             return Some(ThemeModifier::MaxWidth(width));
         }
     }
-    // Named container queries: `@md/main:`, `@min-[400px]/main:`.
+    // `min-md:` is `md:` spelled out (Tailwind CSS v4 has both).
+    if let Some(bp) = modifier.strip_prefix("min-") {
+        if theme.screens.contains_key(bp) {
+            return theme_modifier(bp, theme);
+        }
+    }
+    // Named container queries: `@md/main:`, `@min-[400px]/main:`, and every
+    // other form the unnamed one takes (registry.rs `container_condition`).
     if let Some(rest) = modifier.strip_prefix('@') {
         let (query, name) = rest.rsplit_once('/')?;
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
             return None;
         }
-        let condition = if let Some(&width) = theme.screens.get(query) {
-            format!("(min-width: {width}px)")
-        } else if let Some(v) = query.strip_prefix("min-[").and_then(|v| v.strip_suffix(']')) {
-            format!("(min-width: {})", v.replace('_', " "))
-        } else if let Some(v) = query.strip_prefix("max-[").and_then(|v| v.strip_suffix(']')) {
-            format!("(max-width: {})", v.replace('_', " "))
-        } else {
-            return None;
-        };
+        let (condition, _) = crate::registry::container_condition(query)?;
         return Some(ThemeModifier::Container(format!("{name} {condition}")));
+    }
+    // `not-` on anything above (the registry's own `not-` covers the
+    // variants it knows): `not-md:`, `not-max-md:`, `not-3xl:`,
+    // `not-@md/main:`, and `not-dark:`.
+    if let Some(rest) = modifier.strip_prefix("not-") {
+        if rest == "dark" {
+            return Some(ThemeModifier::NotDark);
+        }
+        return Some(match theme_modifier(rest, theme)? {
+            ThemeModifier::MinWidth(width, _) => ThemeModifier::Media(format!("not (min-width: {width}px)")),
+            ThemeModifier::MaxWidth(width) => ThemeModifier::Media(format!("not (width < {width}px)")),
+            ThemeModifier::Container(condition) => {
+                let (name, query) = condition.split_once(' ')?;
+                ThemeModifier::Container(format!("{name} not {query}"))
+            }
+            ThemeModifier::Media(_) | ThemeModifier::NotDark => return None,
+        });
     }
     None
 }
@@ -622,7 +663,7 @@ mod tests {
     fn in_star_variant_matches_any_ancestor_in_that_state_via_where() {
         let theme = ThemeConfig::default();
         let rule = build_rule(&parse_class("in-hover:opacity-100"), &[decl("opacity", "1")], &theme).unwrap();
-        assert_eq!(rule.rule, ":where(:hover) .in-hover\\:opacity-100 { opacity: 1 }");
+        assert_eq!(rule.rule, "@media (hover: hover) { :where(:hover) .in-hover\\:opacity-100 { opacity: 1 } }");
     }
 
     #[test]
@@ -666,7 +707,47 @@ mod tests {
         let parsed = parse_class("hover:bg-blue-8");
         let decls = vec![decl("background-color", "#1e40af")];
         let rule = build_rule(&parsed, &decls, &theme).unwrap();
-        assert_eq!(rule.rule, ".hover\\:bg-blue-8:hover { background-color: #1e40af }");
+        // only where the device can hover (Tailwind v4)
+        assert_eq!(rule.rule, "@media (hover: hover) { .hover\\:bg-blue-8:hover { background-color: #1e40af } }");
+    }
+
+    #[test]
+    fn a_variant_after_the_children_variant_is_a_condition_on_the_children() {
+        let theme = ThemeConfig::default();
+        let d = [decl("display", "flex")];
+        // the children that have data-x, not the children of an element that has it
+        assert_eq!(build_rule(&parse_class("*:data-[x]:flex"), &d, &theme).unwrap().rule, ".\\*\\:data-\\[x\\]\\:flex > *[data-x] { display: flex }");
+        assert_eq!(build_rule(&parse_class("**:data-avatar:flex"), &d, &theme).unwrap().rule, ".\\*\\*\\:data-avatar\\:flex *[data-avatar] { display: flex }");
+        assert_eq!(build_rule(&parse_class("*:first:flex"), &d, &theme).unwrap().rule, ".\\*\\:first\\:flex > *:first-child { display: flex }");
+        // written before it, the condition stays on the element
+        assert_eq!(build_rule(&parse_class("first:*:flex"), &d, &theme).unwrap().rule, ".first\\:\\*\\:flex:first-child > * { display: flex }");
+        assert!(build_rule(&parse_class("*:before:flex"), &d, &theme).unwrap().rule.starts_with(".\\*\\:before\\:flex > *::before {"));
+    }
+
+    #[test]
+    fn marker_and_selection_also_reach_descendants() {
+        let d = [decl("color", "red")];
+        let theme = ThemeConfig::default();
+        assert_eq!(build_rule(&parse_class("marker:x"), &d, &theme).unwrap().rule, ".marker\\:x::marker, .marker\\:x *::marker { color: red }");
+        assert_eq!(build_rule(&parse_class("selection:x"), &d, &theme).unwrap().rule, ".selection\\:x::selection, .selection\\:x *::selection { color: red }");
+        // an ancestor prefix goes on both selectors
+        let class = ThemeConfig { dark_mode: DarkModeStrategy::Class, ..Default::default() };
+        assert_eq!(
+            build_rule(&parse_class("dark:marker:x"), &d, &class).unwrap().rule,
+            ".dark .dark\\:marker\\:x::marker, .dark .dark\\:marker\\:x *::marker { color: red }",
+        );
+        // other pseudo-elements stay on the element alone
+        assert_eq!(build_rule(&parse_class("placeholder:x"), &d, &theme).unwrap().rule, ".placeholder\\:x::placeholder { color: red }");
+    }
+
+    #[test]
+    fn a_content_utility_under_before_declares_content_once() {
+        let theme = ThemeConfig::default();
+        let parsed = parse_class("before:content-['x']");
+        let decls = crate::resolvers::resolve_utility(&parsed, &theme).unwrap();
+        let rule = build_rule(&parsed, &decls, &theme).unwrap().rule;
+        assert_eq!(rule.matches("content:").count(), 2, "{rule}"); // `--kb-content:` and `content:`
+        assert!(rule.ends_with("{ --kb-content: 'x'; content: var(--kb-content) }"), "{rule}");
     }
 
     #[test]
@@ -675,7 +756,7 @@ mod tests {
         let parsed = parse_class("group-hover:text-blue-6");
         let decls = vec![decl("color", "#2563eb")];
         let rule = build_rule(&parsed, &decls, &theme).unwrap();
-        assert_eq!(rule.rule, ".group:hover .group-hover\\:text-blue-6 { color: #2563eb }");
+        assert_eq!(rule.rule, "@media (hover: hover) { .group:hover .group-hover\\:text-blue-6 { color: #2563eb } }");
     }
 
     #[test]
@@ -707,7 +788,7 @@ mod tests {
         let rule = build_rule(&parsed, &decls, &theme).unwrap();
         assert_eq!(
             rule.rule,
-            ".group\\/sidebar:hover .group-hover\\/sidebar\\:opacity-100 { opacity: 1 }",
+            "@media (hover: hover) { .group\\/sidebar:hover .group-hover\\/sidebar\\:opacity-100 { opacity: 1 } }",
         );
     }
 
@@ -781,14 +862,15 @@ mod tests {
     }
 
     #[test]
-    fn builds_a_named_container_responsive_rule_reusing_theme_screens() {
+    fn builds_a_named_container_size_rule_from_the_container_scale() {
+        // the container scale, not the screens (sm is 640px here, @sm is 24rem)
         let mut screens = std::collections::HashMap::new();
         screens.insert("sm".to_string(), 640.0);
         let theme = ThemeConfig { screens, ..Default::default() };
         let parsed = parse_class("@sm:flex");
         let decls = vec![decl("display", "flex")];
         let rule = build_rule(&parsed, &decls, &theme).unwrap();
-        assert_eq!(rule.rule, "@container (min-width: 640px) { .\\@sm\\:flex { display: flex } }");
+        assert_eq!(rule.rule, "@container (min-width: 24rem) { .\\@sm\\:flex { display: flex } }");
     }
 
     #[test]
@@ -932,7 +1014,7 @@ border-left-width: calc(1px * calc(1 - var(--kb-divide-x-reverse, 0))) }",
         // The pseudo-CLASS (:hover) comes before the pseudo-ELEMENT
         // (::before), matching CSS's own required ordering, regardless of
         // which order the modifiers were written in.
-        assert!(rule.rule.starts_with(".hover\\:before\\:block:hover::before"), "got: {}", rule.rule);
+        assert!(rule.rule.contains("{ .hover\\:before\\:block:hover::before {"), "got: {}", rule.rule);
     }
 
     #[test]
@@ -1002,7 +1084,7 @@ border-left-width: calc(1px * calc(1 - var(--kb-divide-x-reverse, 0))) }",
         let parsed = parse_class("hover:bg-blue-8");
         let decls = vec![decl("background-color", "#1e40af")];
         let rule = build_rule_for_attribute(&parsed, &decls, &theme).unwrap();
-        assert_eq!(rule.rule, "[data-kb~=\"hover:bg-blue-8\"]:hover { background-color: #1e40af }");
+        assert_eq!(rule.rule, "@media (hover: hover) { [data-kb~=\"hover:bg-blue-8\"]:hover { background-color: #1e40af } }");
     }
 
     #[test]
@@ -1032,7 +1114,7 @@ border-left-width: calc(1px * calc(1 - var(--kb-divide-x-reverse, 0))) }",
     fn attribute_mode_prefixes_ancestor_selectors_and_wraps_dark_mode_the_same_as_class_mode() {
         let theme = ThemeConfig { dark_mode: DarkModeStrategy::Attribute, ..Default::default() };
         let group = build_rule_for_attribute(&parse_class("group-hover:text-blue-6"), &[decl("color", "#2563eb")], &theme).unwrap();
-        assert_eq!(group.rule, ".group:hover [data-kb~=\"group-hover:text-blue-6\"] { color: #2563eb }");
+        assert_eq!(group.rule, "@media (hover: hover) { .group:hover [data-kb~=\"group-hover:text-blue-6\"] { color: #2563eb } }");
 
         let dark = build_rule_for_attribute(&parse_class("dark:bg-blue-8"), &[decl("background-color", "#1e40af")], &theme).unwrap();
         assert_eq!(dark.rule, "[data-theme=\"dark\"] [data-kb~=\"dark:bg-blue-8\"] { background-color: #1e40af }");

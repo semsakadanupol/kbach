@@ -143,6 +143,20 @@ pub(crate) fn resolve_negatable_length(theme: &ThemeConfig, parsed: &ParsedClass
     Some(format!("-{px}px"))
 }
 
+/// A value with its sign flipped, for the leading `-` on utilities that
+/// aren't lengths from the spacing scale (`-col-start-2`,
+/// `-underline-offset-2`, `-tracking-wide`, `-outline-offset-[3px]`). A
+/// plain number, with or without a unit, flips its sign; anything else
+/// (`var()`, `calc()`) is multiplied by -1.
+pub(crate) fn negate(value: &str) -> String {
+    let numeric = value.starts_with(|c: char| c.is_ascii_digit() || c == '.');
+    match value.strip_prefix('-') {
+        Some(positive) if positive.starts_with(|c: char| c.is_ascii_digit() || c == '.') => positive.to_string(),
+        None if numeric => format!("-{value}"),
+        _ => format!("calc({value} * -1)"),
+    }
+}
+
 /// `w-1/2`/`h-2/3`/`top-1/2`-style fractions -> a percentage. Shared by
 /// `spacing.rs`'s `resolve_size` (width/height-family) and `layout.rs`'s
 /// `resolve_negatable_size` (inset-family, below) — real Tailwind's own
@@ -228,6 +242,7 @@ fn resolve_arbitrary_property(parsed: &ParsedClass) -> Option<Vec<Declaration>> 
 pub fn resolve_utility(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
     resolve_arbitrary_property(parsed)
         .or_else(|| layout::resolve_screen_size(parsed))
+        .or_else(|| layout::resolve_screen_breakpoint(parsed, theme))
         .or_else(|| layout::resolve_flex(parsed, true))
         .or_else(|| layout::resolve(parsed, theme))
         .or_else(|| spacing::resolve(parsed, theme))
@@ -427,6 +442,11 @@ fn resolve_typography_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Optio
     match parsed.utility.as_str() {
         "font" if parsed.is_arbitrary => {
             let value = parsed.value.as_deref()?;
+            if typography::arbitrary_font_is_weight(parsed, value) {
+                // React Native takes the nine hundreds only (and no variables)
+                let n: u32 = value.parse().ok()?;
+                return (n.is_multiple_of(100) && (100..=900).contains(&n)).then(|| vec![decl("font-weight", value)]);
+            }
             Some(vec![decl("font-family", &first_font_name(value))])
         }
         "font" => {
@@ -511,13 +531,25 @@ fn resolve_text_native(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<
             if let Some(size) = typography::text_size(value) {
                 return Some(vec![decl("font-size", size)]);
             }
+            if let Some((size, leading)) = typography::split_size_leading(value) {
+                let lh = typography::size_leading_native(size, leading)?;
+                return Some(vec![decl("font-size", size), decl("line-height", &lh)]);
+            }
             if let Some(align) = typography::text_align(value) {
                 return Some(vec![decl("text-align", align)]);
             }
         }
     } else if let Some(value) = parsed.value.as_deref() {
         if color::is_length(parsed, value) {
-            return Some(vec![decl("font-size", value)]);
+            // `text-[14px]/[20px]`, as on web; native needs an absolute line height.
+            let mut decls = vec![decl("font-size", value)];
+            if let Some(leading) = parsed.modifier.as_deref() {
+                decls.push(decl("line-height", &typography::size_leading_native(value, leading)?));
+            }
+            return Some(decls);
+        }
+        if parsed.modifier.is_some() {
+            return None;
         }
     }
     native_hex_color(parsed, theme).map(|hex| vec![decl("color", &hex)])

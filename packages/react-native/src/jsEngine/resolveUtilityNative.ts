@@ -45,6 +45,11 @@ function resolveTypographyNative(parsed: ParsedClass, theme: ThemeConfig): Decla
     case 'font': {
       if (parsed.value === null) return null;
       if (parsed.isArbitrary) {
+        if (typography.arbitraryFontIsWeight(parsed, parsed.value)) {
+          // React Native takes the nine hundreds only (and no variables)
+          const n = Number(parsed.value);
+          return /^\d+$/.test(parsed.value) && n % 100 === 0 && n >= 100 && n <= 900 ? [decl('font-weight', parsed.value)] : null;
+        }
         return [decl('font-family', firstFontName(parsed.value))];
       }
       const w = typography.fontWeight(parsed.value);
@@ -114,10 +119,23 @@ function resolveTextNative(parsed: ParsedClass, theme: ThemeConfig): Declaration
   if (!parsed.isArbitrary && parsed.value !== null) {
     const size = typography.textSize(parsed.value);
     if (size !== null) return [decl('font-size', size)];
+    // `text-sm/6`: the size with its own line height
+    const sized = typography.splitSizeLeading(parsed.value);
+    if (sized !== null) {
+      const lh = typography.sizeLeadingNative(sized[0], sized[1]);
+      return lh === null ? null : [decl('font-size', sized[0]), decl('line-height', lh)];
+    }
     const align = typography.textAlign(parsed.value);
     if (align !== null) return [decl('text-align', align)];
-  } else if (parsed.isArbitrary && parsed.value !== null && color.isLength(parsed, parsed.value)) {
-    return [decl('font-size', parsed.value)];
+  } else if (parsed.isArbitrary && parsed.value !== null) {
+    const leading = parsed.modifier ?? null;
+    if (color.isLength(parsed, parsed.value)) {
+      // `text-[14px]/[20px]`: the size with its line height
+      if (leading === null) return [decl('font-size', parsed.value)];
+      const lh = typography.sizeLeadingNative(parsed.value, leading);
+      return lh === null ? null : [decl('font-size', parsed.value), decl('line-height', lh)];
+    }
+    if (leading !== null) return null;
   }
   const hex = nativeHexColor(parsed, theme);
   return hex === null ? null : [decl('color', hex)];

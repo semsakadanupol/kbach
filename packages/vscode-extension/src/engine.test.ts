@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isKnownToken, describeToken, suggestFromEngine, resolveThemeJsonForDir, invalidateThemeJsonForRoot } from './engine';
+import { isKnownToken, describeToken, suggestFromEngine, resolveThemeJsonForDir, invalidateThemeJsonForRoot, DEFAULT_THEME_JSON } from './engine';
 
 describe('isKnownToken', () => {
   it('is true for a real static utility', () => {
@@ -25,6 +25,25 @@ describe('isKnownToken', () => {
   it('is true for a modifier-prefixed class', () => {
     expect(isKnownToken('dark:bg-blue-6')).toBe(true);
     expect(isKnownToken('sm:flex')).toBe(true);
+  });
+});
+
+describe('isKnownToken — classes that used to be underlined by mistake', () => {
+  it('accepts group/peer markers, named or not', () => {
+    for (const t of ['group', 'peer', 'group/code', 'peer/field']) expect(isKnownToken(t)).toBe(true);
+    expect(isKnownToken('group/')).toBe(false);
+    expect(isKnownToken('groups')).toBe(false);
+  });
+
+  it('accepts a light/dark theme color on every color utility (ring-, decoration-, …)', () => {
+    const theme = JSON.parse(DEFAULT_THEME_JSON);
+    theme.colors.line = { light: '#e4dccb', dark: '#33424a' };
+    theme.colors.accent = { light: '#87642f', dark: '#d6b46f' };
+    const json = JSON.stringify(theme);
+    for (const t of ['bg-line', 'ring-line', 'border-line', 'decoration-accent/40', 'hover:decoration-accent', 'shadow-accent/10']) {
+      expect(isKnownToken(t, json), t).toBe(true);
+    }
+    expect(isKnownToken('ring-nope', json)).toBe(false);
   });
 });
 

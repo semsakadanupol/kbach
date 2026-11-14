@@ -137,6 +137,21 @@ call arguments' QUOTED string literals — no backtick-template-literal
 catch-all. `completionContext.ts` (completion) is looser: any open string
 whose nearby context looks like one of those same shapes.
 
+Since 0.1.3 it also skips (each was a real false-positive underline):
+- comments, blanked to spaces first so offsets still match the document;
+- a `className="…"` or `clsx(` that starts inside a JS string (a test
+  fixture or code sample). `'…'`/`"…"` strings end at the line's end, so
+  an apostrophe in JSX text (`<p>Don't</p>`) never swallows real code;
+- a string on either side of a comparison inside `clsx(…)`
+  (`tone === 'code' ? …`).
+
+`isKnownToken` (engine.ts) also accepts the `group`/`peer` markers
+(named or not), and a light/dark theme color that resolves in the
+CSS-variable form the static build uses (`withColorVariablesJson`): the
+engine's per-mode class expansion doesn't cover `ring-`/`decoration-`/
+`shadow-`, so `ring-line` used to be underlined. Hover still reads the
+theme as-is (real hex values).
+
 This asymmetry is intentional, not an oversight. A missed context in
 completion just means no suggestions pop up — harmless. A false positive
 in diagnostics is a live, visible squiggly underline on text that was

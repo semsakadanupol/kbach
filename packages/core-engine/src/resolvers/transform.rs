@@ -63,11 +63,9 @@
 //! `rotate-z`/`skew-x`/`skew-y` ALSO support it (`-rotate-45`), via `angle`'s
 //! own negation of the parsed numeric degree value — real Tailwind
 //! genuinely does register a negative named scale for these. `scale`/
-//! `scale-x`/`scale-y`/`scale-z` are the one exception: real Tailwind has
-//! no negative named scale factor at all (there's no `-scale-50`); a
-//! mirrored/flipped scale is written directly via an arbitrary value
-//! instead (`scale-x-[-1]`), which already works today since arbitrary
-//! values can contain a literal "-".
+//! `scale-x`/`scale-y`/`scale-z` take it too (`-scale-x-100` mirrors;
+//! Tailwind v4 has it, and through 1.0.0-beta.18 the minus was dropped
+//! here), via `scale_factor`.
 
 use super::{decl, resolve_negatable_length, resolve_negatable_size, Declaration};
 use crate::parser::ParsedClass;
@@ -84,10 +82,23 @@ fn composed(var_decls: Vec<Declaration>) -> Vec<Declaration> {
 
 /// Non-arbitrary: `scale-150` -> value="150" -> 150/100 = 1.5.
 /// Arbitrary: `scale-[1.75]` -> value="1.75" -> used as the factor directly.
+/// A leading `-` mirrors (`-scale-x-100` is -1, Tailwind v4's flip); it used
+/// to be dropped.
 fn scale_factor(parsed: &ParsedClass) -> Option<f64> {
     let value = parsed.value.as_deref()?;
     let n: f64 = value.parse().ok()?;
-    Some(if parsed.is_arbitrary { n } else { n / 100.0 })
+    let n = if parsed.is_arbitrary { n } else { n / 100.0 };
+    Some(if parsed.negative { -n } else { n })
+}
+
+/// The web's scale operand: `scale_factor`, or a runtime value as written
+/// (`scale-(--s)`, `scale-x-[calc(…)]`). Native needs the number.
+fn scale_operand(parsed: &ParsedClass) -> Option<String> {
+    if let Some(n) = scale_factor(parsed) {
+        return Some(format!("{n}"));
+    }
+    let value = parsed.value.as_deref().filter(|_| parsed.is_arbitrary)?;
+    (value.starts_with("var(") || value.starts_with("calc(")).then(|| if parsed.negative { super::negate(value) } else { value.to_string() })
 }
 
 /// Non-arbitrary: `rotate-45` -> "45deg", negative-aware (`-rotate-45` ->
@@ -146,6 +157,12 @@ const ORIGIN_KEYWORDS: &[(&str, &str)] = &[
 pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
     match parsed.utility.as_str() {
         "transform-none" => Some(vec![decl("transform", "none")]),
+        // `transform-[rotateX(10deg)]`, `transform-(--t)`: the whole
+        // transform, replacing the composed one. "transform-" isn't a value
+        // prefix, so the bracket is part of the utility name.
+        u if u.starts_with("transform-[") || u.starts_with("transform-(") => {
+            crate::parser::arbitrary_modifier(&u["transform-".len()..]).map(|v| vec![decl("transform", &v)])
+        }
         // Bare `transform`: applies the compose chain with nothing set, the
         // Tailwind v4 meaning (turn the transform pipeline on). Same CPU
         // shape every other transform utility here emits.
@@ -245,19 +262,19 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
             Some(composed(vec![decl("--kb-translate-z", &format!("translateZ({v})"))]))
         }
         "scale-z" => {
-            let n = scale_factor(parsed)?;
+            let n = scale_operand(parsed)?;
             Some(composed(vec![decl("--kb-scale-z", &format!("scaleZ({n})"))]))
         }
         "scale" => {
-            let n = scale_factor(parsed)?;
+            let n = scale_operand(parsed)?;
             Some(composed(vec![decl("--kb-scale-x", &format!("scaleX({n})")), decl("--kb-scale-y", &format!("scaleY({n})"))]))
         }
         "scale-x" => {
-            let n = scale_factor(parsed)?;
+            let n = scale_operand(parsed)?;
             Some(composed(vec![decl("--kb-scale-x", &format!("scaleX({n})"))]))
         }
         "scale-y" => {
-            let n = scale_factor(parsed)?;
+            let n = scale_operand(parsed)?;
             Some(composed(vec![decl("--kb-scale-y", &format!("scaleY({n})"))]))
         }
         "rotate" => {

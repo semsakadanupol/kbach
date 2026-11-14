@@ -43,6 +43,11 @@ const OBJECT_POSITION: &[(&str, &str)] = &[
 /// "object-" is two-way ambiguous, same shape as "bg-": a recognized
 /// object-fit keyword takes priority, anything else is checked against the
 /// object-position keyword set.
+/// `object-[25%_75%]`, `object-(--pos)`: any object-position.
+fn resolve_object_arbitrary(value: &str) -> Option<Vec<Declaration>> {
+    Some(vec![decl("object-position", value)])
+}
+
 fn resolve_object(value: &str) -> Option<Vec<Declaration>> {
     if let Some(fit) = OBJECT_FIT.iter().find(|(k, _)| *k == value).map(|(_, v)| *v) {
         return Some(vec![decl("object-fit", fit)]);
@@ -140,13 +145,10 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         // resolution). `@container/sidebar` also names it, so a descendant
         // can target that ancestor with `@md/sidebar:` (css.rs's
         // `theme_modifier`). Web only: native drops both properties.
-        "@container" => Some(vec![decl("container-type", "inline-size")]),
-        u if u.starts_with("@container/") => {
-            let name = &u["@container/".len()..];
-            let valid = !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-            valid.then(|| vec![decl("container-type", "inline-size"), decl("container-name", name)])
-        }
-        "@container-normal" => Some(vec![decl("container-type", "normal")]),
+        // `@container-size` (Tailwind v4.3) also tracks the block size, for
+        // `cqh`/`cqb` units; `@container-[size]` takes any container-type;
+        // every form takes a `/name`.
+        u if u.starts_with("@container") => container(&u["@container".len()..]),
         "items-center" => Some(vec![decl("align-items", "center")]),
         "items-start" => Some(vec![decl("align-items", "flex-start")]),
         "items-end" => Some(vec![decl("align-items", "flex-end")]),
@@ -273,7 +275,12 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
                 "square" => Some(vec![decl("aspect-ratio", "1 / 1")]),
                 "video" => Some(vec![decl("aspect-ratio", "16 / 9")]),
                 "auto" => Some(vec![decl("aspect-ratio", "auto")]),
-                _ => None,
+                // `aspect-3/2`, `aspect-16/9`: any ratio of two numbers
+                // (Tailwind v4), without brackets.
+                _ => {
+                    let (w, h) = value.split_once('/')?;
+                    (is_plain_number(w) && is_plain_number(h)).then(|| vec![decl("aspect-ratio", &format!("{w} / {h}"))])
+                }
             }
         }
         "box-border" => Some(vec![decl("box-sizing", "border-box")]),
@@ -294,6 +301,7 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "visible" => Some(vec![decl("visibility", "visible")]),
         "invisible" => Some(vec![decl("visibility", "hidden")]),
         "collapse" => Some(vec![decl("visibility", "collapse")]),
+        "object" if parsed.is_arbitrary => resolve_object_arbitrary(parsed.value.as_deref()?),
         "object" => resolve_object(parsed.value.as_deref()?),
         // The base rule — `width: 100%` plus `theme.container`'s optional
         // `center`/`padding` (real Tailwind's own `theme.container` config;
@@ -353,6 +361,43 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "box-decoration-clone" => Some(vec![decl("box-decoration-break", "clone")]),
         _ => None,
     }
+}
+
+/// What follows `@container` in the class: nothing (inline-size),
+/// `-normal`, `-size`, `-[<container-type>]`, each with an optional `/name`.
+fn container(rest: &str) -> Option<Vec<Declaration>> {
+    let (kind, name) = match rest.rsplit_once('/') {
+        Some((kind, name)) => (kind, Some(name)),
+        None => (rest, None),
+    };
+    let container_type = match kind {
+        "" => "inline-size".to_string(),
+        "-normal" => "normal".to_string(),
+        "-size" => "size".to_string(),
+        _ => {
+            let raw = crate::parser::arbitrary_modifier(kind.strip_prefix('-')?)?;
+            raw.bytes().all(|b| b.is_ascii_alphabetic() || b == b'-' || b == b' ').then_some(raw)?
+        }
+    };
+    let mut decls = vec![decl("container-type", &container_type)];
+    if let Some(name) = name {
+        let valid = !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        if !valid {
+            return None;
+        }
+        decls.push(decl("container-name", name));
+    }
+    Some(decls)
+}
+
+/// `max-w-screen-md`: the `md` breakpoint as a max-width (Tailwind v4 has
+/// only the `max-w-` form). Web-only, with the rest of the screen sizes.
+pub fn resolve_screen_breakpoint(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
+    if parsed.utility != "max-w" || parsed.is_arbitrary || parsed.negative {
+        return None;
+    }
+    let width = theme.screens.get(parsed.value.as_deref()?.strip_prefix("screen-")?)?;
+    Some(vec![decl("max-width", &format!("{width}px"))])
 }
 
 /// The `flex-` utility family — flex-direction (`row`/`col`/`row-reverse`/

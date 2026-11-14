@@ -226,8 +226,11 @@ export function resolve(parsed: ParsedClass, theme: ThemeConfig): Declaration[] 
           return [decl('aspect-ratio', '16 / 9')];
         case 'auto':
           return [decl('aspect-ratio', 'auto')];
-        default:
-          return null;
+        default: {
+          // `aspect-3/2`: any ratio of two numbers, like layout.rs
+          const m = /^(\d+(?:\.\d*)?|\.\d+)\/(\d+(?:\.\d*)?|\.\d+)$/.exec(value);
+          return m ? [decl('aspect-ratio', `${m[1]} / ${m[2]}`)] : null;
+        }
       }
     }
     default:

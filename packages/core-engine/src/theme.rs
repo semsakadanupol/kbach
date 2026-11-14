@@ -118,13 +118,13 @@ pub fn parse_theme_cached(theme_json: &str) -> Option<Rc<ThemeConfig>> {
 /// deserialization above (a caller's *actual* theme stays arbitrary,
 /// fully-configurable JSON, per this module's own opening doc comment).
 /// This is the separate, single-source-of-truth *starter* palette every
-/// platform's `defaultTheme` ships with — 22 families x 12 shades
+/// platform's `defaultTheme` ships with — 26 families x 12 shades
 /// (1 = lightest, 12 = darkest), ported from
 /// `old-kbach/packages/ui/src/core/theme.ts`'s `defaultColors`, plus a
 /// small hand-picked "metals & materials" set (coal/gold/silver/bronze/
 /// copper) — standalone flat accent colors like `black`/`white` below, not
 /// full 12-shade families (there's no Tailwind/Radix convention for those
-/// names to follow the way the 22 families do). Consumed via `lib.rs`'s
+/// names to follow the way the 26 families do). Consumed via `lib.rs`'s
 /// `default_colors_json()` WASM export by
 /// `packages/core-engine/scripts/generate-palette.mjs`, which writes it
 /// into `packages/react/src/generatedPalette.ts` and
@@ -163,6 +163,25 @@ pub const DEFAULT_COLORS: &[(&str, &str)] = &[
     ("stone-1", "#fafaf9"), ("stone-2", "#f5f5f4"), ("stone-3", "#e7e5e4"), ("stone-4", "#d6d3d1"),
     ("stone-5", "#a8a29e"), ("stone-6", "#78716c"), ("stone-7", "#57534e"), ("stone-8", "#44403c"),
     ("stone-9", "#292524"), ("stone-10", "#1c1917"), ("stone-11", "#0c0a09"), ("stone-12", "#070605"),
+
+    // The four tinted neutrals Tailwind CSS v4.2 added, converted from its
+    // oklch values to sRGB hex (shades 1-11 are its 50-950). Shade 12 is
+    // shade 11 at 0.58x, the step the families above take.
+    ("mauve-1", "#fafafa"), ("mauve-2", "#f3f1f3"), ("mauve-3", "#e7e4e7"), ("mauve-4", "#d7d0d7"),
+    ("mauve-5", "#a89ea9"), ("mauve-6", "#79697b"), ("mauve-7", "#594c5b"), ("mauve-8", "#463947"),
+    ("mauve-9", "#2a212c"), ("mauve-10", "#1d161e"), ("mauve-11", "#0c090c"), ("mauve-12", "#070507"),
+
+    ("olive-1", "#fbfbf9"), ("olive-2", "#f4f4f0"), ("olive-3", "#e8e8e3"), ("olive-4", "#d8d8d0"),
+    ("olive-5", "#abab9c"), ("olive-6", "#7c7c67"), ("olive-7", "#5b5b4b"), ("olive-8", "#474739"),
+    ("olive-9", "#2b2b22"), ("olive-10", "#1d1d16"), ("olive-11", "#0c0c09"), ("olive-12", "#070705"),
+
+    ("mist-1", "#f9fbfb"), ("mist-2", "#f1f3f3"), ("mist-3", "#e3e7e8"), ("mist-4", "#d0d6d8"),
+    ("mist-5", "#9ca8ab"), ("mist-6", "#67787c"), ("mist-7", "#4b585b"), ("mist-8", "#394447"),
+    ("mist-9", "#22292b"), ("mist-10", "#161b1d"), ("mist-11", "#090b0c"), ("mist-12", "#050607"),
+
+    ("taupe-1", "#fbfaf9"), ("taupe-2", "#f3f1f1"), ("taupe-3", "#e8e4e3"), ("taupe-4", "#d8d2d0"),
+    ("taupe-5", "#aba09c"), ("taupe-6", "#7c6d67"), ("taupe-7", "#5b4f4b"), ("taupe-8", "#473c39"),
+    ("taupe-9", "#2b2422"), ("taupe-10", "#1d1816"), ("taupe-11", "#0c0a09"), ("taupe-12", "#070605"),
 
     ("red-1", "#fef2f2"), ("red-2", "#fee2e2"), ("red-3", "#fecaca"), ("red-4", "#fca5a5"),
     ("red-5", "#f87171"), ("red-6", "#ef4444"), ("red-7", "#dc2626"), ("red-8", "#b91c1c"),

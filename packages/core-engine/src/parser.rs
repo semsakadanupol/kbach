@@ -87,7 +87,9 @@ const VALUE_PREFIXES: &[&str] = &[
     // "bg-" — plus "tab-" (tab-size; no collision with "table-auto"/
     // "table-fixed" below, which don't share "tab-" as a literal 4-char
     // prefix: the 4th character of "table-" is "l", not "-").
-    "leading-", "tracking-", "font-stretch-", "font-features-", "font-", "tab-",
+    // "align-" (vertical-align): no other utility starts with it, so
+    // `align-middle` and `align-[4px]` both land on the one "align" arm.
+    "leading-", "tracking-", "font-stretch-", "font-features-", "font-", "tab-", "align-",
     // Layout: position/inset/z. "inset-x-"/"inset-y-" before bare "inset-".
     // "inset-shadow-"/"inset-ring-" (inner box-shadow layers, effects.rs)
     // before the bare "inset-" position catchall.
@@ -223,6 +225,10 @@ pub struct ParsedClass {
     /// and hint `length`. Tells an ambiguous utility (`text-`, `bg-`,
     /// `border-`, `stroke-`, …) which property the value is for.
     pub type_hint: Option<String>,
+    /// The text after the `/` of an arbitrary value when it isn't an opacity:
+    /// the line-height of `text-[14px]/[20px]` (`[20px]`), still as written.
+    /// Only `text-` keeps one; an opacity on a color is mixed into `value`.
+    pub modifier: Option<String>,
 }
 
 /// Rejects arbitrary values that could smuggle extra CSS declarations or
@@ -441,7 +447,7 @@ pub fn parse_class(token: &str) -> ParsedClass {
         let raw = &base[1..base.len() - 1];
         if let Some((property, value)) = raw.split_once(':') {
             if !property.is_empty() && !value.is_empty() && is_safe_arbitrary_value(raw) {
-                let value = normalize_math_whitespace(&value.replace('_', " "));
+                let value = normalize_math_whitespace(&expand_theme_functions(&value.replace('_', " ")));
                 return ParsedClass {
                     modifiers,
                     utility: ARBITRARY_PROPERTY_SENTINEL.to_string(),
@@ -451,6 +457,7 @@ pub fn parse_class(token: &str) -> ParsedClass {
                     negative,
                     original: token.to_string(),
                     type_hint: None,
+                    modifier: None,
                 };
             }
         }
@@ -465,9 +472,11 @@ pub fn parse_class(token: &str) -> ParsedClass {
         // `text-(length:--size)` is `text-[length:var(--size)]`.
         let shorthand = paren_var_shorthand(value);
         let value = shorthand.as_deref().unwrap_or(value);
-        // Opacity on an arbitrary color: `bg-[#c7a25d]/40`. Split it off here; the
-        // color is mixed below once the value is known to be a color.
-        let (value, arbitrary_opacity) = split_arbitrary_opacity(value);
+        // A modifier after an arbitrary value: an opacity on a color
+        // (`bg-[#c7a25d]/40`, `/[0.37]`, `/(--o)`) or a line-height on a size
+        // (`text-[14px]/[20px]`). Split it off here; what it means is decided
+        // below, once the value's type is known.
+        let (value, tail) = split_bracket_modifier(value);
 
         if value.len() >= 2 && value.starts_with('[') && value.ends_with(']') {
             let raw = &value[1..value.len() - 1];
@@ -486,6 +495,10 @@ pub fn parse_class(token: &str) -> ParsedClass {
             // has needed one yet, and Tailwind's own is a rarely-used escape
             // hatch for a rarely-used case.
             let raw = raw.replace('_', " ");
+            // `--spacing(4)` / `--alpha(red / 50%)` (Tailwind v4's CSS
+            // functions) become plain CSS first, so the math pass below sees
+            // real lengths.
+            let raw = expand_theme_functions(&raw);
             // THEN normalize calc()/min()/max()/clamp() operator spacing —
             // real CSS requires whitespace around a BINARY +/- (to
             // disambiguate from a unit's sign or exponent), which is
@@ -498,13 +511,19 @@ pub fn parse_class(token: &str) -> ParsedClass {
             // handled as opaque, etc).
             let raw = normalize_math_whitespace(&raw);
             let (mut type_hint, mut raw) = split_type_hint(raw);
-            if let Some(pct) = arbitrary_opacity {
-                // Only a color takes an opacity; `w-[10px]/50` resolves to nothing.
-                if !(type_hint.as_deref() == Some("color") || (type_hint.is_none() && looks_like_color(&raw))) {
-                    continue;
+            let mut modifier = None;
+            if let Some(tail) = tail {
+                let is_color = type_hint.as_deref() == Some("color") || (type_hint.is_none() && looks_like_color(&raw));
+                match parse_alpha(tail).filter(|_| is_color) {
+                    Some(alpha) => {
+                        raw = color_with_opacity(&raw, &alpha);
+                        type_hint = Some("color".to_string());
+                    }
+                    // `text-[14px]/[20px]`: the size's line-height.
+                    None if *prefix == "text-" => modifier = Some(tail.to_string()),
+                    // Only a color takes an opacity; `w-[10px]/50` resolves to nothing.
+                    None => continue,
                 }
-                raw = color_with_opacity(&raw, pct);
-                type_hint = Some("color".to_string());
             }
             return ParsedClass {
                 modifiers,
@@ -515,11 +534,12 @@ pub fn parse_class(token: &str) -> ParsedClass {
                 negative,
                 original: token.to_string(),
                 type_hint,
+                modifier,
             };
         }
 
-        let value = match arbitrary_opacity {
-            Some(pct) => format!("{value}/{pct}"),
+        let value = match tail {
+            Some(tail) => format!("{value}/{tail}"),
             None => value.to_string(),
         };
         return ParsedClass {
@@ -531,6 +551,7 @@ pub fn parse_class(token: &str) -> ParsedClass {
             negative,
             original: token.to_string(),
             type_hint: None,
+            modifier: None,
         };
     }
 
@@ -543,14 +564,29 @@ pub fn parse_class(token: &str) -> ParsedClass {
         negative,
         original: token.to_string(),
         type_hint: None,
+        modifier: None,
     }
 }
 
 /// The type hints Tailwind CSS accepts at the start of an arbitrary value.
 const TYPE_HINTS: &[&str] = &[
     "color", "length", "size", "line-width", "percentage", "number", "integer", "image", "url", "position",
-    "bg-size", "family-name", "absolute-size", "relative-size", "angle", "shadow", "any",
+    "bg-size", "family-name", "generic-name", "absolute-size", "relative-size", "angle", "shadow", "any",
 ];
+
+/// A bracketed or variable modifier after a `/`, as in `text-sm/[20px]` or
+/// `text-sm/(--lh)`: the CSS value (`20px`, `var(--lh)`), with the same
+/// rules as an arbitrary value (underscores are spaces, unsafe text is
+/// refused). `None` for anything else, a plain `6` included.
+pub(crate) fn arbitrary_modifier(modifier: &str) -> Option<String> {
+    let shorthand = paren_var_shorthand(modifier);
+    let bracketed = shorthand.as_deref().unwrap_or(modifier);
+    let raw = bracketed.strip_prefix('[')?.strip_suffix(']')?;
+    if raw.is_empty() || !is_safe_arbitrary_value(raw) {
+        return None;
+    }
+    Some(normalize_math_whitespace(&raw.replace('_', " ")))
+}
 
 /// `length:var(--x)` -> (Some("length"), "var(--x)"). A value with no
 /// known hint is returned whole (`var(--x)`, `#fff`, `url(a:b)`).
@@ -588,19 +624,150 @@ fn paren_var_shorthand(value: &str) -> Option<String> {
     })
 }
 
-/// `[#c7a25d]/40` -> (`[#c7a25d]`, Some(40)). Only a 0-100 whole number after
-/// the last `]`, so a slash inside the brackets (`w-[calc(100%/3)]`) is never split.
-fn split_arbitrary_opacity(value: &str) -> (&str, Option<u8>) {
-    if value.starts_with('[') {
-        if let Some((bracketed, pct)) = value.rsplit_once("]/") {
-            if let Ok(n) = pct.parse::<u8>() {
-                if n <= 100 {
-                    return (&value[..bracketed.len() + 1], Some(n));
+/// `[#c7a25d]/40` -> (`[#c7a25d]`, Some("40")); `[14px]/[20px]` ->
+/// (`[14px]`, Some("[20px]")). The split is at the `/` right after the
+/// bracket that closes the first one, so a slash inside the brackets
+/// (`w-[calc(100%/3)]`) is never split.
+fn split_bracket_modifier(value: &str) -> (&str, Option<&str>) {
+    if !value.starts_with('[') {
+        return (value, None);
+    }
+    let mut depth = 0i32;
+    for (i, ch) in value.char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return match value[i + 1..].strip_prefix('/') {
+                        Some(tail) if !tail.is_empty() => (&value[..=i], Some(tail)),
+                        _ => (value, None),
+                    };
                 }
             }
+            _ => {}
         }
     }
     (value, None)
+}
+
+/// An opacity modifier, the part after a color's `/`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Alpha {
+    /// 0-1: `/50` and `/[50%]` are 0.5, `/2.5` is 0.025, `/[0.37]` is 0.37.
+    Fraction(f64),
+    /// A CSS value only known at runtime: `/(--o)`, `/[var(--o)]`, `/[calc(…)]`.
+    Raw(String),
+}
+
+impl Alpha {
+    /// For `color-mix()`: `50%`, or the raw value.
+    pub(crate) fn percent(&self) -> String {
+        match self {
+            Alpha::Fraction(f) => format!("{}%", trim_number(f * 100.0)),
+            Alpha::Raw(v) => v.clone(),
+        }
+    }
+
+    /// For an `rgb(… / <alpha>)` slot: `0.5`, or the raw value.
+    pub(crate) fn number(&self) -> String {
+        match self {
+            Alpha::Fraction(f) => trim_number(*f),
+            Alpha::Raw(v) => v.clone(),
+        }
+    }
+}
+
+/// A number without float noise: 57 (not 56.99999999999999), 0.025, 2.5.
+pub(crate) fn trim_number(n: f64) -> String {
+    let rounded = (n * 1_000_000.0).round() / 1_000_000.0;
+    format!("{rounded}")
+}
+
+/// Reads an opacity modifier: a 0-100 number with an optional decimal part
+/// (`50`, `2.5`), a bracketed fraction or percentage (`[0.37]`, `[37%]`), or
+/// a runtime value (`(--o)`, `[var(--o)]`, `[calc(…)]`). `None` for anything
+/// else, a length such as `[20px]` included.
+pub(crate) fn parse_alpha(modifier: &str) -> Option<Alpha> {
+    if let Some(raw) = arbitrary_modifier(modifier) {
+        if let Some(pct) = raw.strip_suffix('%') {
+            let n: f64 = pct.parse().ok()?;
+            return (0.0..=100.0).contains(&n).then_some(Alpha::Fraction(n / 100.0));
+        }
+        if let Ok(n) = raw.parse::<f64>() {
+            return (0.0..=1.0).contains(&n).then_some(Alpha::Fraction(n));
+        }
+        return (raw.starts_with("var(") || raw.starts_with("calc(")).then_some(Alpha::Raw(raw));
+    }
+    let plain = !modifier.is_empty()
+        && modifier != "."
+        && modifier.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+        && modifier.bytes().filter(|b| *b == b'.').count() <= 1;
+    if !plain {
+        return None;
+    }
+    let n: f64 = modifier.parse().ok()?;
+    (n <= 100.0).then_some(Alpha::Fraction(n / 100.0))
+}
+
+/// Tailwind v4's CSS functions inside an arbitrary value, as plain CSS:
+/// `--spacing(4)` is `16px` (the spacing step; `calc(4px * …)` when the
+/// argument isn't a number) and `--alpha(red / 50%)` is `color-mix(in srgb,
+/// red 50%, transparent)`. Everything else is returned as written.
+fn expand_theme_functions(raw: &str) -> String {
+    if !raw.contains("--spacing(") && !raw.contains("--alpha(") {
+        return raw.to_string();
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    loop {
+        let next = [("--spacing(", true), ("--alpha(", false)]
+            .iter()
+            .filter_map(|(name, is_spacing)| rest.find(name).map(|i| (i, name.len(), *is_spacing)))
+            .min_by_key(|(i, _, _)| *i);
+        let Some((start, name_len, is_spacing)) = next else { break };
+        // The argument runs to the parenthesis that closes this call.
+        let args_from = start + name_len;
+        let mut depth = 1i32;
+        let mut close = None;
+        for (i, ch) in rest[args_from..].char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(args_from + i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(close) = close else { break };
+        let arg = expand_theme_functions(rest[args_from..close].trim());
+        out.push_str(&rest[..start]);
+        if is_spacing {
+            match arg.parse::<f64>() {
+                Ok(n) => out.push_str(&format!("{}px", trim_number(n * 4.0))),
+                Err(_) => out.push_str(&format!("calc(4px * {arg})")),
+            }
+        } else {
+            match arg.rsplit_once('/') {
+                Some((color, alpha)) => {
+                    let alpha = alpha.trim();
+                    let pct = match alpha.parse::<f64>() {
+                        Ok(n) => format!("{}%", trim_number(n * 100.0)),
+                        Err(_) => alpha.to_string(),
+                    };
+                    out.push_str(&format!("color-mix(in srgb, {} {pct}, transparent)", color.trim()));
+                }
+                None => out.push_str(&arg),
+            }
+        }
+        rest = &rest[close + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Whether an arbitrary value is shaped like a color: hex, a color
@@ -610,18 +777,18 @@ fn looks_like_color(value: &str) -> bool {
     value.starts_with('#') || FUNCTIONS.iter().any(|f| value.starts_with(f)) || (!value.is_empty() && value.bytes().all(|b| b.is_ascii_alphabetic()))
 }
 
-/// The color at `pct`% opacity: rgba() for a #rgb/#rrggbb hex, color-mix()
-/// for anything else (as Tailwind v4 does).
-fn color_with_opacity(color: &str, pct: u8) -> String {
+/// The color at that opacity: rgba() for a #rgb/#rrggbb hex with a known
+/// alpha, color-mix() for anything else (as Tailwind v4 does).
+pub(crate) fn color_with_opacity(color: &str, alpha: &Alpha) -> String {
     let hex = color.strip_prefix('#').filter(|h| h.is_ascii() && (h.len() == 3 || h.len() == 6));
-    if let Some(h) = hex {
+    if let (Some(h), Alpha::Fraction(_)) = (hex, alpha) {
         let full: String = if h.len() == 3 { h.chars().flat_map(|c| [c, c]).collect() } else { h.to_string() };
         let byte = |i: usize| u8::from_str_radix(&full[i..i + 2], 16).ok();
         if let (Some(r), Some(g), Some(b)) = (byte(0), byte(2), byte(4)) {
-            return format!("rgba({r},{g},{b},{})", pct as f64 / 100.0);
+            return format!("rgba({r},{g},{b},{})", alpha.number());
         }
     }
-    format!("color-mix(in srgb, {color} {pct}%, transparent)")
+    format!("color-mix(in srgb, {color} {}, transparent)", alpha.percent())
 }
 
 #[cfg(test)]

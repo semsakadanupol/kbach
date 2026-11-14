@@ -32,7 +32,7 @@ const VALUE_PREFIXES: readonly string[] = [
   'rounded-t-', 'rounded-r-', 'rounded-b-', 'rounded-l-', 'rounded-',
   'ring-offset-', 'ring-', 'outline-offset-', 'outline-', 'shadow-', 'opacity-',
   'duration-', 'delay-', 'ease-', 'cursor-', 'mix-blend-', 'animate-',
-  'leading-', 'tracking-', 'font-',
+  'leading-', 'tracking-', 'font-', 'align-',
   'z-', 'inset-x-', 'inset-y-', 'inset-', 'top-', 'right-', 'bottom-', 'left-', 'start-', 'end-',
   'overflow-x-', 'overflow-y-', 'overscroll-x-', 'overscroll-y-', 'overscroll-', 'aspect-',
   'divide-color-', 'space-x-', 'space-y-',
@@ -87,6 +87,12 @@ export interface ParsedClass {
   negative: boolean;
   /** The full original token text, unmodified. */
   original: string;
+  /**
+   * The text after the `/` of an arbitrary value when it isn't an opacity:
+   * the line height of `text-[14px]/[20px]` (`[20px]`), as written. Only
+   * `text-` keeps one — mirrors parser.rs's `modifier`.
+   */
+  modifier?: string | null;
 }
 
 /** Rejects arbitrary values that could smuggle extra CSS declarations/selectors — a value containing `{`, `}`, or `;`. Only used within this file — not part of the jsEngine's public surface. */
@@ -182,8 +188,22 @@ function normalizeMathWhitespace(raw: string): string {
 /** The type hints Tailwind CSS accepts at the start of an arbitrary value (parser.rs `TYPE_HINTS`). */
 const TYPE_HINTS = new Set([
   'color', 'length', 'size', 'line-width', 'percentage', 'number', 'integer', 'image', 'url', 'position',
-  'bg-size', 'family-name', 'absolute-size', 'relative-size', 'angle', 'shadow', 'any',
+  'bg-size', 'family-name', 'generic-name', 'absolute-size', 'relative-size', 'angle', 'shadow', 'any',
 ]);
+
+/**
+ * A bracketed or variable modifier after a `/` (`text-sm/[20px]`,
+ * `text-sm/(--lh)`): its CSS value, with an arbitrary value's rules
+ * (underscores are spaces, unsafe text is refused). Null otherwise
+ * (parser.rs `arbitrary_modifier`).
+ */
+export function arbitraryModifier(modifier: string): string | null {
+  const bracketed = parenVarShorthand(modifier) ?? modifier;
+  if (!(bracketed.length > 2 && bracketed.startsWith('[') && bracketed.endsWith(']'))) return null;
+  const raw = bracketed.slice(1, -1);
+  if (!isSafeArbitraryValue(raw)) return null;
+  return normalizeMathWhitespace(raw.replace(/_/g, ' '));
+}
 
 /** `length:var(--x)` -> ['length', 'var(--x)']; no known hint -> [null, raw]. */
 function splitTypeHint(raw: string): [string | null, string] {
@@ -201,16 +221,109 @@ function parenVarShorthand(value: string): string | null {
   return hint ? `[${hint}:var(--${name})]${tail}` : `[var(--${name})]${tail}`;
 }
 
-/** `[#c7a25d]/40` -> ['[#c7a25d]', 40] (parser.rs `split_arbitrary_opacity`). */
-function splitArbitraryOpacity(value: string): [string, number | null] {
-  if (value.startsWith('[')) {
-    const i = value.lastIndexOf(']/');
-    if (i !== -1) {
-      const pct = value.slice(i + 2);
-      if (/^\d+$/.test(pct) && Number(pct) <= 100) return [value.slice(0, i + 1), Number(pct)];
+/**
+ * `[#c7a25d]/40` -> ['[#c7a25d]', '40']; `[14px]/[20px]` -> ['[14px]', '[20px]'].
+ * Split at the `/` right after the bracket that closes the first one, so a
+ * slash inside the brackets is never split (parser.rs `split_bracket_modifier`).
+ */
+function splitBracketModifier(value: string): [string, string | null] {
+  if (!value.startsWith('[')) return [value, null];
+  let depth = 0;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch === '[') depth += 1;
+    else if (ch === ']') {
+      depth -= 1;
+      if (depth === 0) {
+        const after = value.slice(i + 1);
+        return after.startsWith('/') && after.length > 1 ? [value.slice(0, i + 1), after.slice(1)] : [value, null];
+      }
     }
   }
   return [value, null];
+}
+
+/**
+ * An opacity modifier (parser.rs `Alpha`): a 0-1 fraction (`/50` is 0.5,
+ * `/2.5` is 0.025, `/[0.37]`, `/[37%]`), or a runtime CSS value
+ * (`/(--o)`, `/[calc(…)]`).
+ */
+export type Alpha = { fraction: number } | { raw: string };
+
+/** A number without float noise: 57, not 56.99999999999999 (parser.rs `trim_number`). */
+export function trimNumber(n: number): string {
+  return `${Math.round(n * 1_000_000) / 1_000_000}`;
+}
+
+/** parser.rs `parse_alpha`; null for anything that isn't an opacity (`[20px]`, `150`). */
+export function parseAlpha(modifier: string): Alpha | null {
+  const raw = arbitraryModifier(modifier);
+  if (raw !== null) {
+    if (raw.endsWith('%')) {
+      const n = strictNumber(raw.slice(0, -1));
+      return n !== null && n >= 0 && n <= 100 ? { fraction: n / 100 } : null;
+    }
+    const n = strictNumber(raw);
+    if (n !== null) return n >= 0 && n <= 1 ? { fraction: n } : null;
+    return raw.startsWith('var(') || raw.startsWith('calc(') ? { raw } : null;
+  }
+  if (!/^(?:\d+\.?\d*|\.\d+)$/.test(modifier)) return null;
+  const n = Number(modifier);
+  return n <= 100 ? { fraction: n / 100 } : null;
+}
+
+/** A plain decimal number, the shapes Rust's `f64::from_str` takes here; null otherwise. */
+function strictNumber(text: string): number | null {
+  return /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(text) ? Number(text) : null;
+}
+
+/**
+ * Tailwind v4's CSS functions inside an arbitrary value, as plain CSS:
+ * `--spacing(4)` is `16px`, `--alpha(red / 50%)` is a `color-mix()`
+ * (parser.rs `expand_theme_functions`).
+ */
+function expandThemeFunctions(raw: string): string {
+  if (!raw.includes('--spacing(') && !raw.includes('--alpha(')) return raw;
+  let out = '';
+  let rest = raw;
+  for (;;) {
+    const found = (['--spacing(', '--alpha('] as const)
+      .map((name) => ({ name, at: rest.indexOf(name) }))
+      .filter((f) => f.at !== -1)
+      .sort((a, b) => a.at - b.at)[0];
+    if (found === undefined) break;
+    const argsFrom = found.at + found.name.length;
+    let depth = 1;
+    let close = -1;
+    for (let i = argsFrom; i < rest.length; i++) {
+      if (rest[i] === '(') depth += 1;
+      else if (rest[i] === ')') {
+        depth -= 1;
+        if (depth === 0) {
+          close = i;
+          break;
+        }
+      }
+    }
+    if (close === -1) break;
+    const arg = expandThemeFunctions(rest.slice(argsFrom, close).trim());
+    out += rest.slice(0, found.at);
+    if (found.name === '--spacing(') {
+      const n = strictNumber(arg);
+      out += n !== null ? `${trimNumber(n * 4)}px` : `calc(4px * ${arg})`;
+    } else {
+      const slash = arg.lastIndexOf('/');
+      if (slash === -1) {
+        out += arg;
+      } else {
+        const alpha = arg.slice(slash + 1).trim();
+        const n = strictNumber(alpha);
+        out += `color-mix(in srgb, ${arg.slice(0, slash).trim()} ${n !== null ? `${trimNumber(n * 100)}%` : alpha}, transparent)`;
+      }
+    }
+    rest = rest.slice(close + 1);
+  }
+  return out + rest;
 }
 
 const COLOR_FUNCTIONS = ['rgb(', 'rgba(', 'hsl(', 'hsla(', 'hwb(', 'lab(', 'lch(', 'oklab(', 'oklch(', 'color(', 'color-mix(', 'var('];
@@ -220,15 +333,15 @@ function looksLikeColor(value: string): boolean {
   return value.startsWith('#') || COLOR_FUNCTIONS.some((f) => value.startsWith(f)) || /^[A-Za-z]+$/.test(value);
 }
 
-/** rgba() for #rgb/#rrggbb, color-mix() otherwise (parser.rs `color_with_opacity`). */
-function colorWithOpacity(color: string, pct: number): string {
+/** rgba() for #rgb/#rrggbb with a known alpha, color-mix() otherwise (parser.rs `color_with_opacity`). */
+export function colorWithOpacity(color: string, alpha: Alpha): string {
   const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(color);
-  if (m) {
+  if (m && 'fraction' in alpha) {
     const h = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
     const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
-    return `rgba(${r},${g},${b},${pct / 100})`;
+    return `rgba(${r},${g},${b},${trimNumber(alpha.fraction)})`;
   }
-  return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+  return `color-mix(in srgb, ${color} ${'fraction' in alpha ? `${trimNumber(alpha.fraction * 100)}%` : alpha.raw}, transparent)`;
 }
 
 /**
@@ -290,7 +403,7 @@ export function parseClass(token: string): ParsedClass {
       const property = raw.slice(0, colonIdx);
       const rawValue = raw.slice(colonIdx + 1);
       if (property !== '' && rawValue !== '' && isSafeArbitraryValue(raw)) {
-        const value = normalizeMathWhitespace(rawValue.replace(/_/g, ' '));
+        const value = normalizeMathWhitespace(expandThemeFunctions(rawValue.replace(/_/g, ' ')));
         return {
           modifiers,
           utility: ARBITRARY_PROPERTY_SENTINEL,
@@ -308,9 +421,10 @@ export function parseClass(token: string): ParsedClass {
     if (!base.startsWith(prefix)) continue;
     const written = base.slice(prefix.length);
     if (written === '') continue;
-    // `p-(--gap)` -> `p-[var(--gap)]`, and an opacity on an arbitrary
-    // color (`bg-[#c7a25d]/40`) split off — parser.rs's identical steps.
-    const [value, arbitraryOpacity] = splitArbitraryOpacity(parenVarShorthand(written) ?? written);
+    // `p-(--gap)` -> `p-[var(--gap)]`, and the modifier after an arbitrary
+    // value (an opacity on a color, `bg-[#c7a25d]/40`, or a line height on
+    // a size, `text-[14px]/[20px]`) split off — parser.rs's identical steps.
+    const [value, tail] = splitBracketModifier(parenVarShorthand(written) ?? written);
 
     if (value.length >= 2 && value.startsWith('[') && value.endsWith(']')) {
       const raw = value.slice(1, -1);
@@ -319,13 +433,22 @@ export function parseClass(token: string): ParsedClass {
         // (mirrors Rust's `continue` — a later, shorter prefix might still match).
         continue;
       }
-      const spaced = normalizeMathWhitespace(raw.replace(/_/g, ' '));
+      const spaced = normalizeMathWhitespace(expandThemeFunctions(raw.replace(/_/g, ' ')));
       let [typeHint, hinted] = splitTypeHint(spaced);
-      if (arbitraryOpacity !== null) {
-        // Only a color takes an opacity; `w-[10px]/50` resolves to nothing.
-        if (!(typeHint === 'color' || (typeHint === null && looksLikeColor(hinted)))) continue;
-        hinted = colorWithOpacity(hinted, arbitraryOpacity);
-        typeHint = 'color';
+      let modifier: string | null = null;
+      if (tail !== null) {
+        const isColor = typeHint === 'color' || (typeHint === null && looksLikeColor(hinted));
+        const alpha = isColor ? parseAlpha(tail) : null;
+        if (alpha !== null) {
+          hinted = colorWithOpacity(hinted, alpha);
+          typeHint = 'color';
+        } else if (prefix === 'text-') {
+          // `text-[14px]/[20px]`: the size's line height
+          modifier = tail;
+        } else {
+          // Only a color takes an opacity; `w-[10px]/50` resolves to nothing.
+          continue;
+        }
       }
       return {
         modifiers,
@@ -336,6 +459,7 @@ export function parseClass(token: string): ParsedClass {
         important,
         negative,
         original: token,
+        modifier,
       };
     }
 
@@ -343,7 +467,7 @@ export function parseClass(token: string): ParsedClass {
       modifiers,
       utility: prefix.slice(0, -1),
       // a named value keeps its own /opacity (`bg-blue-6/50`)
-      value: arbitraryOpacity === null ? value : `${value}/${arbitraryOpacity}`,
+      value: tail === null ? value : `${value}/${tail}`,
       isArbitrary: false,
       important,
       negative,

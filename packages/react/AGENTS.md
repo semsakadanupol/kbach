@@ -75,7 +75,11 @@ write `className="..."` normally.
 
 1. At build time the plugin walks your `include` dirs (`src`, `app`,
    `pages`, `components` by default), extracts every string that looks like
-   a class list, and hands each to the WASM engine.
+   a class list, and hands each to the WASM engine. A string on either side
+   of a comparison (`lang === 'diff' && 'bg-green-6/10'` inside `clsx()`)
+   is a tested value, not classes, and is skipped (scan.ts
+   `pushClassLikeStrings`); before 1.0.0-beta.30 it was warned about as an
+   unknown class.
 2. The engine parses each class → emits CSS rules (with the correct
    `@media` / selector wrappers for modifiers).
 3. Rules are written between the `/* kbach:start */` / `/* kbach:end */`
@@ -193,6 +197,14 @@ The suggestion is computed only for a class that is really unknown.
 
 ## 9. Common failure modes
 
+- **`p-(--gap)`, `bg-blue-6/(--o)`, `text-(length:--size)` (any class
+  using the CSS-variable shorthand) produce no CSS in a static build** —
+  releases through 1.0.0-beta.29: the scanner (vite-plugin/scan.ts
+  `hasUnbracketedParen`) dropped every token with a parenthesis outside
+  brackets, to keep prose like `kb()` out of the class list, so these
+  never reached the engine. `kb()` at runtime was unaffected. The scanner
+  now lets through a `(--name)` / `(hint:--name)` group that follows a `-`
+  or `/`. The bracket spelling (`p-[var(--gap)]`) always worked.
 - **Build fails after adding/editing `kbach.config.js`** — an unquoted
   hyphenated object key (`surface-dim:` instead of `'surface-dim':`) is a
   syntax error; `loadConfigFile` (vite-plugin/index.ts) re-throws it

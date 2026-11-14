@@ -159,7 +159,59 @@ export function resolveToken(token: string, themeJson: string = DEFAULT_THEME_JS
 }
 
 export function isKnownToken(token: string, themeJson: string = DEFAULT_THEME_JSON): boolean {
-  return resolveToken(token, themeJson).rules.length > 0;
+  if (isMarkerClass(token)) return true;
+  if (resolveToken(token, themeJson).rules.length > 0) return true;
+  // A light/dark theme color compiles through its CSS variable in the
+  // static build (@kbach/react's withColorVariables), which covers every
+  // color utility; the per-mode class expansion a plain engine
+  // call falls back to doesn't (`ring-line`, `decoration-accent/40` came
+  // back empty and were underlined). Only tried when the first check fails.
+  const viaVariables = withColorVariablesJson(themeJson);
+  return viaVariables !== themeJson && resolveToken(token, viaVariables).rules.length > 0;
+}
+
+/**
+ * `group`/`peer`, or a named one (`group/sidebar`, `peer/field`): markers
+ * that `group-*`/`peer-*` variants look for, with no CSS of their own.
+ * Mirrors @kbach/react's unknownClassWarnings.ts `isMarkerClass`.
+ */
+function isMarkerClass(token: string): boolean {
+  const base = token.split(':').pop() ?? token;
+  const slash = base.lastIndexOf('/');
+  const name = slash === -1 ? base : base.slice(0, slash);
+  return (name === 'group' || name === 'peer') && (slash === -1 || slash < base.length - 1);
+}
+
+const variableThemeCache = new Map<string, string>();
+
+/**
+ * The theme JSON with each light/dark hex color replaced by
+ * `rgb(var(--kb-color-<name>))`, the form @kbach/react's static build
+ * hands the engine (colorVariables.ts `withColorVariables`). Same JSON
+ * back when there are none. Memoized per theme string.
+ */
+function withColorVariablesJson(themeJson: string): string {
+  const cached = variableThemeCache.get(themeJson);
+  if (cached !== undefined) return cached;
+  const hex = (v: unknown) => typeof v === 'string' && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v.trim());
+  let result = themeJson;
+  try {
+    const theme = JSON.parse(themeJson) as { colors?: Record<string, unknown> };
+    let changed = false;
+    for (const [name, value] of Object.entries(theme.colors ?? {})) {
+      const pair = value as { light?: unknown; dark?: unknown } | string;
+      if (typeof pair === 'object' && pair !== null && hex(pair.light) && hex(pair.dark)) {
+        theme.colors![name] = 'rgb(var(--kb-color-' + name + '))';
+        changed = true;
+      }
+    }
+    if (changed) result = JSON.stringify(theme);
+  } catch {
+    // not JSON: leave it
+  }
+  if (variableThemeCache.size > 20) variableThemeCache.clear();
+  variableThemeCache.set(themeJson, result);
+  return result;
 }
 
 /**

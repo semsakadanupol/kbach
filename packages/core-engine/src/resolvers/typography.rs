@@ -69,6 +69,59 @@ pub(super) fn line_height_size(key: &str) -> Option<String> {
     (n >= 0.0 && n.is_finite()).then(|| format!("{}rem", n * 0.25))
 }
 
+/// Tailwind v4's `text-<size>/<leading>` shorthand (`text-sm/6`,
+/// `text-lg/tight`, `text-sm/[20px]`, `text-sm/(--lh)`): the size's
+/// font-size and the leading part, unresolved. `None` unless the part
+/// before the `/` is a real size, so `text-blue-6/50` (a color with an
+/// opacity) never comes here.
+pub(super) fn split_size_leading(value: &str) -> Option<(&'static str, &str)> {
+    let (size, leading) = value.split_once('/')?;
+    Some((text_size(size)?, leading)).filter(|(_, l)| !l.is_empty())
+}
+
+/// The line-height for the leading part of `text-sm/6` on the web: the
+/// numeric scale (`6` is `1.5rem`), a named multiplier (`tight`), or an
+/// arbitrary / variable value.
+pub(super) fn size_leading_web(leading: &str) -> Option<String> {
+    crate::parser::arbitrary_modifier(leading)
+        .or_else(|| line_height_size(leading))
+        .or_else(|| leading_named(leading).map(str::to_string))
+}
+
+/// The same for native, where a line height is absolute: a named multiplier
+/// or a unitless arbitrary number is multiplied out against the size
+/// (`text-sm/tight` is 0.875rem x 1.25). A CSS variable has no meaning there.
+pub(super) fn size_leading_native(size: &str, leading: &str) -> Option<String> {
+    // The size is a named one (rem) or an arbitrary `text-[14px]` (rem or px).
+    let rem = |n: f64| -> Option<String> {
+        let (number, unit) = size.strip_suffix("rem").map(|v| (v, "rem")).or_else(|| size.strip_suffix("px").map(|v| (v, "px")))?;
+        let size: f64 = number.parse().ok()?;
+        Some(format!("{}{unit}", size * n))
+    };
+    if let Some(v) = crate::parser::arbitrary_modifier(leading) {
+        if v.starts_with("var(") {
+            return None;
+        }
+        return match v.parse::<f64>() {
+            Ok(n) => rem(n),
+            Err(_) => Some(v),
+        };
+    }
+    line_height_size(leading).or_else(|| leading_named(leading).and_then(|m| rem(m.parse().ok()?)))
+}
+
+/// An arbitrary `font-[…]`: a weight or a family? Tailwind CSS v4 decides
+/// by the type hint, else by the value: a number (`font-[550]`) or a bare
+/// CSS variable (`font-(--weight)`) is a weight; anything else
+/// (`font-[Inter]`, `font-(family-name:--font)`) is a family.
+pub(super) fn arbitrary_font_is_weight(parsed: &ParsedClass, value: &str) -> bool {
+    match parsed.type_hint.as_deref() {
+        Some("number" | "integer") => true,
+        Some(_) => false,
+        None => value.parse::<f64>().is_ok() || (value.starts_with("var(") && value.ends_with(')') && !value.contains(',')),
+    }
+}
+
 /// Web-only named `line-height` multipliers — see `line_height_size`'s doc
 /// comment for why these don't extend to native.
 fn leading_named(key: &str) -> Option<&'static str> {
@@ -115,20 +168,23 @@ pub(super) fn text_wrap(key: &str) -> Option<&'static str> {
     })
 }
 
-fn underline_offset_value(key: &str) -> Option<&'static str> {
-    Some(match key {
-        "auto" => "auto",
-        "0" => "0px",
-        "1" => "1px",
-        "2" => "2px",
-        "4" => "4px",
-        "8" => "8px",
-        _ => return None,
-    })
+/// `underline-offset-N`: any whole number of px (Tailwind v4; it used to be
+/// 0/1/2/4/8 only), negatable (`-underline-offset-2`), or `auto`.
+fn underline_offset_value(parsed: &ParsedClass, key: &str) -> Option<String> {
+    if key == "auto" {
+        return (!parsed.negative).then(|| "auto".to_string());
+    }
+    let px = super::border::whole_px(key)?;
+    Some(if parsed.negative { super::negate(&px) } else { px })
 }
 
-const DECORATION_THICKNESS: &[(&str, &str)] =
-    &[("auto", "auto"), ("from-font", "from-font"), ("0", "0px"), ("1", "1px"), ("2", "2px"), ("4", "4px"), ("8", "8px")];
+/// `decoration-N`: any whole number of px, `auto` or `from-font`.
+fn decoration_thickness(key: &str) -> Option<String> {
+    match key {
+        "auto" | "from-font" => Some(key.to_string()),
+        _ => super::border::whole_px(key),
+    }
+}
 const DECORATION_STYLE: &[&str] = &["solid", "dashed", "dotted", "double", "wavy"];
 
 /// "decoration-*" is three-way ambiguous, same shape as "border-*" in
@@ -146,8 +202,8 @@ fn decoration_value(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Dec
         }
         return Some(vec![decl("text-decoration-color", value)]);
     }
-    if let Some((_, thickness)) = DECORATION_THICKNESS.iter().find(|(k, _)| *k == value) {
-        return Some(vec![decl("text-decoration-thickness", thickness)]);
+    if let Some(thickness) = decoration_thickness(value) {
+        return Some(vec![decl("text-decoration-thickness", &thickness)]);
     }
     if DECORATION_STYLE.contains(&value) {
         return Some(vec![decl("text-decoration-style", value)]);
@@ -247,15 +303,24 @@ const CONTENT_FUNCTION_PREFIXES: &[&str] = &["attr(", "counter(", "counters(", "
 /// (see that module's own "content" arm for the disambiguation) — this
 /// arm is only ever reached for a value the align-content keyword table
 /// didn't recognize (arbitrary values, "none").
+///
+/// It also sets `content` itself, reading the variable back, as Tailwind
+/// CSS does: without it, `content-[…]` outside `before:`/`after:` (an
+/// element with its own `::before` rule in a stylesheet, an `<img>`
+/// replacement) set a variable nothing read.
 fn content_value(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
     let value = parsed.value.as_deref()?;
-    if !parsed.is_arbitrary {
-        return (value == "none").then(|| vec![decl("--kb-content", "none")]);
-    }
-    let already_quoted_or_function =
-        value.starts_with('"') || value.starts_with('\'') || CONTENT_FUNCTION_PREFIXES.iter().any(|p| value.starts_with(p));
-    let css_value = if already_quoted_or_function { value.to_string() } else { format!("\"{value}\"") };
-    Some(vec![decl("--kb-content", &css_value)])
+    let css_value = if !parsed.is_arbitrary {
+        if value != "none" {
+            return None;
+        }
+        "none".to_string()
+    } else {
+        let already_quoted_or_function =
+            value.starts_with('"') || value.starts_with('\'') || CONTENT_FUNCTION_PREFIXES.iter().any(|p| value.starts_with(p));
+        if already_quoted_or_function { value.to_string() } else { format!("\"{value}\"") }
+    };
+    Some(vec![decl("--kb-content", &css_value), decl("content", "var(--kb-content)")])
 }
 
 /// `font-variant-numeric` has FIVE independent slots real Tailwind composes
@@ -281,13 +346,14 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
     match parsed.utility.as_str() {
         // "font-" is two-way ambiguous: a recognized weight keyword means
         // `font-weight`, a recognized family keyword means `font-family`.
-        // Arbitrary values are always a family (`font-[Inter]`) — there's
-        // no arbitrary-weight syntax distinct from the plain numeric scale
-        // real Tailwind already covers via `font-<number>` (not modeled
-        // here at all; deferred, matches old-kbach's own scope).
+        // An arbitrary value is a weight when it's a number or a bare
+        // variable (`font-[550]`, `font-(--w)`), else a family
+        // (`font-[Inter]`) — see `arbitrary_font_is_weight`. `font-[550]`
+        // used to come out as `font-family: 550`.
         "font" if parsed.is_arbitrary => {
             let value = parsed.value.as_deref()?;
-            Some(vec![decl("font-family", value)])
+            let property = if arbitrary_font_is_weight(parsed, value) { "font-weight" } else { "font-family" };
+            Some(vec![decl(property, value)])
         }
         "font" => {
             let value = parsed.value.as_deref()?;
@@ -360,12 +426,13 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
                 .or_else(|| leading_named(value).map(str::to_string))
                 .map(|v| vec![decl("--kb-leading", &v), decl("line-height", &v)])
         }
+        // Negatable (`-tracking-wide`, `-tracking-[0.1em]`); the minus used
+        // to be dropped.
         "tracking" => {
             let value = parsed.value.as_deref()?;
-            if parsed.is_arbitrary {
-                return Some(vec![decl("letter-spacing", value)]);
-            }
-            tracking_named(value).map(|v| vec![decl("letter-spacing", v)])
+            let v = if parsed.is_arbitrary { value } else { tracking_named(value)? };
+            let v = if parsed.negative { super::negate(v) } else { v.to_string() };
+            Some(vec![decl("letter-spacing", &v)])
         }
         "uppercase" => Some(vec![decl("text-transform", "uppercase")]),
         "lowercase" => Some(vec![decl("text-transform", "lowercase")]),
@@ -413,9 +480,10 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "underline-offset" => {
             let value = parsed.value.as_deref()?;
             if parsed.is_arbitrary {
-                return Some(vec![decl("text-underline-offset", value)]);
+                let v = if parsed.negative { super::negate(value) } else { value.to_string() };
+                return Some(vec![decl("text-underline-offset", &v)]);
             }
-            underline_offset_value(value).map(|v| vec![decl("text-underline-offset", v)])
+            underline_offset_value(parsed, value).map(|v| vec![decl("text-underline-offset", &v)])
         }
         // Negatable (`-indent-4`, a hanging indent), like margin.
         "indent" => resolve_negatable_length(theme, parsed).map(|v| vec![decl("text-indent", &v)]),
@@ -436,15 +504,19 @@ pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declarat
         "break-all" => Some(vec![decl("word-break", "break-all")]),
         "break-keep" => Some(vec![decl("word-break", "keep-all")]),
 
-        "align-baseline" => Some(vec![decl("vertical-align", "baseline")]),
-        "align-top" => Some(vec![decl("vertical-align", "top")]),
-        "align-middle" => Some(vec![decl("vertical-align", "middle")]),
-        "align-bottom" => Some(vec![decl("vertical-align", "bottom")]),
-        "align-text-top" => Some(vec![decl("vertical-align", "text-top")]),
-        "align-text-bottom" => Some(vec![decl("vertical-align", "text-bottom")]),
-        "align-sub" => Some(vec![decl("vertical-align", "sub")]),
-        "align-super" => Some(vec![decl("vertical-align", "super")]),
+        // vertical-align: the keywords, or any value (`align-[4px]`, `align-(--x)`).
+        "align" => {
+            let value = parsed.value.as_deref()?;
+            let known = matches!(value, "baseline" | "top" | "middle" | "bottom" | "text-top" | "text-bottom" | "sub" | "super");
+            (parsed.is_arbitrary || known).then(|| vec![decl("vertical-align", value)])
+        }
 
+        // `list-[upper-roman]`, `list-(--marker)`: any list-style-type.
+        // "list-" isn't a value prefix (it would swallow `list-item`,
+        // `list-inside`, …), so the bracket is part of the utility name.
+        u if u.starts_with("list-[") || u.starts_with("list-(") => {
+            crate::parser::arbitrary_modifier(&u["list-".len()..]).map(|v| vec![decl("list-style-type", &v)])
+        }
         "list-none" => Some(vec![decl("list-style-type", "none")]),
         "list-disc" => Some(vec![decl("list-style-type", "disc")]),
         "list-decimal" => Some(vec![decl("list-style-type", "decimal")]),
@@ -700,13 +772,15 @@ mod tests {
     #[test]
     fn resolves_content_none_and_arbitrary_values() {
         let t = theme();
-        assert_eq!(resolve(&parse_class("content-none"), &t), Some(vec![decl("--kb-content", "none")]));
+        // the variable, and `content` reading it back
+        let content = |v: &str| Some(vec![decl("--kb-content", v), decl("content", "var(--kb-content)")]);
+        assert_eq!(resolve(&parse_class("content-none"), &t), content("none"));
         // Unquoted arbitrary text gets auto-quoted...
-        assert_eq!(resolve(&parse_class("content-[Hi]"), &t), Some(vec![decl("--kb-content", "\"Hi\"")]));
-        assert_eq!(resolve(&parse_class("content-[Hello_World]"), &t), Some(vec![decl("--kb-content", "\"Hello World\"")]));
+        assert_eq!(resolve(&parse_class("content-[Hi]"), &t), content("\"Hi\""));
+        assert_eq!(resolve(&parse_class("content-[Hello_World]"), &t), content("\"Hello World\""));
         // ...but a value that's already quoted, or a CSS function call, passes through as-is.
-        assert_eq!(resolve(&parse_class("content-['Hi']"), &t), Some(vec![decl("--kb-content", "'Hi'")]));
-        assert_eq!(resolve(&parse_class("content-[attr(data-content)]"), &t), Some(vec![decl("--kb-content", "attr(data-content)")]));
+        assert_eq!(resolve(&parse_class("content-['Hi']"), &t), content("'Hi'"));
+        assert_eq!(resolve(&parse_class("content-[attr(data-content)]"), &t), content("attr(data-content)"));
     }
 
     #[test]

@@ -20,8 +20,10 @@
 //! No negative-value support for `hue-rotate` (`-hue-rotate-30`) — same
 //! parser limitation every other angle/offset utility already carries.
 
+use super::color::{is_color, split_opacity};
+use super::effects::shadow_color;
 use super::{decl, Declaration};
-use crate::parser::ParsedClass;
+use crate::parser::{Alpha, ParsedClass};
 use crate::theme::ThemeConfig;
 
 const FILTER_COMPOSE: &str = "var(--kb-blur,) var(--kb-brightness,) var(--kb-contrast,) var(--kb-grayscale,) var(--kb-hue-rotate,) var(--kb-invert,) var(--kb-saturate,) var(--kb-sepia,) var(--kb-drop-shadow,)";
@@ -74,17 +76,19 @@ fn resolve_percent_fn(parsed: &ParsedClass, fn_name: &str, var_name: &str, compo
     Some(composed(var_name, format!("{fn_name}({})", n / 100.0), compose))
 }
 
-/// Shared by grayscale/invert/sepia (+ backdrop variants): bare or any
-/// non-"0" value -> full effect, `-0` -> disabled, arbitrary -> raw.
-fn resolve_binary_toggle(parsed: &ParsedClass, fn_name: &str, var_name: &str, compose: &str) -> Vec<Declaration> {
-    let call = if parsed.is_arbitrary {
-        format!("{fn_name}({})", parsed.value.as_deref().unwrap_or(""))
-    } else if parsed.value.as_deref() == Some("0") {
-        format!("{fn_name}(0)")
-    } else {
-        format!("{fn_name}(100%)")
+/// Shared by grayscale/invert/sepia (+ backdrop variants): bare -> full
+/// effect, a whole number -> that percentage (`grayscale-50` is 50%, `-0`
+/// disables), arbitrary -> raw. Every number used to mean 100%, and a
+/// non-number (`grayscale-banana`) resolved too.
+fn resolve_binary_toggle(parsed: &ParsedClass, fn_name: &str, var_name: &str, compose: &str) -> Option<Vec<Declaration>> {
+    let call = match parsed.value.as_deref() {
+        Some(value) if parsed.is_arbitrary => format!("{fn_name}({value})"),
+        None => format!("{fn_name}(100%)"),
+        Some("0") => format!("{fn_name}(0)"),
+        Some(value) if super::layout::is_whole_number(value) => format!("{fn_name}({value}%)"),
+        Some(_) => return None,
     };
-    composed(var_name, call, compose)
+    Some(composed(var_name, call, compose))
 }
 
 fn resolve_hue_rotate(parsed: &ParsedClass, var_name: &str, compose: &str) -> Option<Vec<Declaration>> {
@@ -97,19 +101,30 @@ fn resolve_hue_rotate(parsed: &ParsedClass, var_name: &str, compose: &str) -> Op
 /// v3's two-layer values are gone, v3's `sm` is now `xs`). Each shadow color
 /// reads `--kb-drop-shadow-color`, so `drop-shadow-lg drop-shadow-blue-6`
 /// is a blue lg shadow (see `resolve_drop_shadow_color`).
-fn drop_shadow_preset(key: &str) -> Option<String> {
-    let c = |default: &str| format!("var(--kb-drop-shadow-color, {default})");
+fn drop_shadow_preset(key: &str, alpha: Option<&Alpha>) -> Option<String> {
+    // `drop-shadow-xl/50`: the size, its default color at 50% (Tailwind v4).
+    let c = |default: &str| shadow_color("--kb-drop-shadow-color", default, alpha);
     Some(match key {
-        "" => format!("drop-shadow(0 1px 2px {}) drop-shadow(0 1px 1px {})", c("rgb(0 0 0 / 0.1)"), c("rgb(0 0 0 / 0.06)")),
-        "xs" => format!("drop-shadow(0 1px 1px {})", c("rgb(0 0 0 / 0.05)")),
-        "sm" => format!("drop-shadow(0 1px 2px {})", c("rgb(0 0 0 / 0.15)")),
-        "md" => format!("drop-shadow(0 3px 3px {})", c("rgb(0 0 0 / 0.12)")),
-        "lg" => format!("drop-shadow(0 4px 4px {})", c("rgb(0 0 0 / 0.15)")),
-        "xl" => format!("drop-shadow(0 9px 7px {})", c("rgb(0 0 0 / 0.1)")),
-        "2xl" => format!("drop-shadow(0 25px 25px {})", c("rgb(0 0 0 / 0.15)")),
+        "" => format!("drop-shadow(0 1px 2px {}) drop-shadow(0 1px 1px {})", c("0.1"), c("0.06")),
+        "xs" => format!("drop-shadow(0 1px 1px {})", c("0.05")),
+        "sm" => format!("drop-shadow(0 1px 2px {})", c("0.15")),
+        "md" => format!("drop-shadow(0 3px 3px {})", c("0.12")),
+        "lg" => format!("drop-shadow(0 4px 4px {})", c("0.15")),
+        "xl" => format!("drop-shadow(0 9px 7px {})", c("0.1")),
+        "2xl" => format!("drop-shadow(0 25px 25px {})", c("0.15")),
         "none" => "drop-shadow(0 0 #0000)".to_string(),
         _ => return None,
     })
+}
+
+/// What a `drop-shadow-<color>` sets: the color variable, and the size the
+/// element already has, reapplied so it picks the color up.
+fn drop_shadow_color(color: &str) -> Vec<Declaration> {
+    vec![
+        decl("--kb-drop-shadow-color", color),
+        decl("--kb-drop-shadow", "var(--kb-drop-shadow-size,)"),
+        decl("filter", FILTER_COMPOSE),
+    ]
 }
 
 /// `drop-shadow-<color>` (Tailwind v4): recolors whichever size the element
@@ -120,15 +135,15 @@ pub fn resolve_drop_shadow_color(parsed: &ParsedClass, theme: &ThemeConfig) -> O
         return None;
     }
     let color = super::color::color_value(theme, parsed)?;
-    Some(vec![
-        decl("--kb-drop-shadow-color", &color),
-        decl("--kb-drop-shadow", "var(--kb-drop-shadow-size,)"),
-        decl("filter", FILTER_COMPOSE),
-    ])
+    Some(drop_shadow_color(&color))
 }
 
 pub fn resolve(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
     match parsed.utility.as_str() {
+        // Bare `filter` / `backdrop-filter`: the composed value with nothing
+        // set, as Tailwind CSS has it (it turns the filter pipeline on).
+        "filter" if parsed.value.is_none() => Some(vec![decl("filter", FILTER_COMPOSE)]),
+        "backdrop-filter" if parsed.value.is_none() => Some(vec![decl("backdrop-filter", BACKDROP_FILTER_COMPOSE)]),
         "filter" => {
             let value = parsed.value.as_deref()?;
             if parsed.is_arbitrary {
@@ -161,12 +176,12 @@ pub fn resolve(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
         "backdrop-saturate" => resolve_percent_fn(parsed, "saturate", "--kb-backdrop-saturate", BACKDROP_FILTER_COMPOSE),
         "backdrop-opacity" => resolve_percent_fn(parsed, "opacity", "--kb-backdrop-opacity", BACKDROP_FILTER_COMPOSE),
 
-        "grayscale" => Some(resolve_binary_toggle(parsed, "grayscale", "--kb-grayscale", FILTER_COMPOSE)),
-        "backdrop-grayscale" => Some(resolve_binary_toggle(parsed, "grayscale", "--kb-backdrop-grayscale", BACKDROP_FILTER_COMPOSE)),
-        "invert" => Some(resolve_binary_toggle(parsed, "invert", "--kb-invert", FILTER_COMPOSE)),
-        "backdrop-invert" => Some(resolve_binary_toggle(parsed, "invert", "--kb-backdrop-invert", BACKDROP_FILTER_COMPOSE)),
-        "sepia" => Some(resolve_binary_toggle(parsed, "sepia", "--kb-sepia", FILTER_COMPOSE)),
-        "backdrop-sepia" => Some(resolve_binary_toggle(parsed, "sepia", "--kb-backdrop-sepia", BACKDROP_FILTER_COMPOSE)),
+        "grayscale" => resolve_binary_toggle(parsed, "grayscale", "--kb-grayscale", FILTER_COMPOSE),
+        "backdrop-grayscale" => resolve_binary_toggle(parsed, "grayscale", "--kb-backdrop-grayscale", BACKDROP_FILTER_COMPOSE),
+        "invert" => resolve_binary_toggle(parsed, "invert", "--kb-invert", FILTER_COMPOSE),
+        "backdrop-invert" => resolve_binary_toggle(parsed, "invert", "--kb-backdrop-invert", BACKDROP_FILTER_COMPOSE),
+        "sepia" => resolve_binary_toggle(parsed, "sepia", "--kb-sepia", FILTER_COMPOSE),
+        "backdrop-sepia" => resolve_binary_toggle(parsed, "sepia", "--kb-backdrop-sepia", BACKDROP_FILTER_COMPOSE),
 
         "hue-rotate" => resolve_hue_rotate(parsed, "--kb-hue-rotate", FILTER_COMPOSE),
         "backdrop-hue-rotate" => resolve_hue_rotate(parsed, "--kb-backdrop-hue-rotate", BACKDROP_FILTER_COMPOSE),
@@ -174,10 +189,14 @@ pub fn resolve(parsed: &ParsedClass) -> Option<Vec<Declaration>> {
         "drop-shadow" => {
             if parsed.is_arbitrary {
                 let value = parsed.value.as_deref()?;
+                // `drop-shadow-[#333]`, `drop-shadow-(color:--c)`: the color.
+                if is_color(parsed, value) {
+                    return Some(drop_shadow_color(value));
+                }
                 return Some(composed("--kb-drop-shadow", format!("drop-shadow({value})"), FILTER_COMPOSE));
             }
-            let value = parsed.value.as_deref().unwrap_or("");
-            drop_shadow_preset(value).map(|v| {
+            let (key, alpha) = split_opacity(parsed.value.as_deref().unwrap_or(""));
+            drop_shadow_preset(key, alpha.as_ref()).map(|v| {
                 let mut d = vec![decl("--kb-drop-shadow-size", &v)];
                 d.extend(composed("--kb-drop-shadow", v, FILTER_COMPOSE));
                 d

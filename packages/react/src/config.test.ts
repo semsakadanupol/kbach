@@ -68,7 +68,7 @@ describe('resolveKbachConfig', () => {
   });
 
   it('a color value can reference a built-in kbach palette color directly, with or without opacity', () => {
-    // The 22-family default palette is already IN theme.colors by the time
+    // The 26-family default palette is already IN theme.colors by the time
     // extend.colors resolves (resolveKbachConfig merges defaultTheme first)
     // — so a reference doesn't need to be declared earlier in the SAME
     // extend.colors object the way a custom alias does; every default

@@ -53,7 +53,7 @@ files are the authoritative reference.
 ## 1. What Kbach is
 
 A utility-first styling engine — the same class-name vocabulary as Tailwind
-CSS v4, plus Kbach's own 22-family color palette — with a **shared Rust
+CSS v4, plus Kbach's own 26-family color palette — with a **shared Rust
 core** compiled to different targets, and two thin bindings on top:
 
 | Package | Target | Resolution model |
@@ -220,8 +220,71 @@ css.rs skipped a modifier the registry didn't know, so a typo like
 `nth-3:`/`nth-last-2:`/`nth-of-type-4:` (plain-number forms) and named
 containers: `@container/main` sets `container-name` (web only; native
 drops it like `container-type`), and `@md/main:` / `@min-[400px]/main:`
-query that ancestor. Named sizes (`@md:`) still use the screen widths,
-not Tailwind's container sizes.
+query that ancestor.
+
+**Variants added in 1.0.0-beta.19** (registry.rs, with tests in lib.rs
+`variant_gap_tests`):
+- **Container sizes:** `@sm:` … `@7xl:` and `@max-md:` use Tailwind CSS v4's
+  container scale (`CONTAINER_SIZES`: `@sm` is 24rem, `@md` 28rem), named
+  ones too (`@md/main:`). They used to use the screen widths (`@md` was
+  768px). The `is_container_responsive` flag is gone; they're plain
+  `container_query` conditions.
+- **`min-<bp>:`** is `<bp>:` spelled out, on web and on both native engines.
+- **`data-open:`** is `[data-open]`.
+- **`has-checked:`** is `:has(*:checked)`, any self-condition variant.
+- **`group-*` / `peer-*` / `in-*` / `not-*`** take any variant that is only a
+  condition on the element itself (`self_condition`): `group-data-open:`,
+  `group-data-[state=open]:`, `peer-aria-[…]:`, `group-has-checked:`,
+  `not-data-open:`.
+- **Media variants:** `forced-colors:`, `inverted-colors:`, `noscript:`, and
+  `not-` on a plain media variant (`not-print:` is `@media not print`).
+- **Native:** all of these except `min-<bp>:` are web-only. Native skips a
+  class behind them, as it does for `group-*`.
+
+**Also in 1.0.0-beta.19, from a comparison with Tailwind CSS 4.3.5's own
+variant list** (registry.rs / css.rs, tests in lib.rs
+`tailwind_4_3_gap_tests`). Each of these produced no rule before:
+- **`not-` on anything at-rule shaped:** `not-md:` / `not-max-md:` /
+  `not-3xl:` (`@media not (min-width: 768px)`), `not-dark:` (media:
+  `@media not (prefers-color-scheme: dark)`; class / attribute:
+  `:not(.dark *)` / `:not([data-theme="dark"] *)`), `not-max-[900px]:`,
+  `not-@md:`, `not-@md/main:`, `not-supports-[…]:`. `not-dark:` and
+  `not-<breakpoint>:` also work on both native engines.
+- **`pointer-none:` / `any-pointer-none:`.**
+- **Container queries:** `@min-md:` (`@md:` spelled out), `@[400px]:`
+  (`@min-[400px]:` without the `min-`), named ones too. One function,
+  registry.rs `container_condition`, now serves the unnamed and the named
+  (`/main`) forms; the named `min-[…]`/`max-[…]` path used to skip the
+  arbitrary-value safety check.
+- **`supports-`:** a bare property (`supports-grid:` is `@supports (grid:
+  var(--kb))`), a variable (`supports-(--x):`), and a whole condition in
+  the brackets (`supports-[not_(display:grid)]:`,
+  `supports-[selector(:has(a))]:`), not only a declaration.
+- **Arbitrary at-rules:** `[@media(min-width:900px)]:`, `[@media_print]:`,
+  `[@supports(display:grid)]:`, `[@container(min-width:300px)]:`.
+
+**Variant behavior changed in 1.0.0-beta.19** (same comparison):
+- **`hover:` is wrapped in `@media (hover: hover)`**, as in Tailwind CSS
+  v4, and so are `group-hover:`, `peer-hover:`, `in-hover:` and
+  `has-hover:`. On a touch screen `:hover` sticks after a tap; now those
+  styles don't apply there at all. `not-hover:` stays a plain
+  `:not(:hover)`.
+- **`open:`** is `:is([open], :popover-open, :open)` (it was `[open]`, so an
+  open popover didn't match); **`inert:`** is `:is([inert], [inert] *)`.
+- **`marker:` / `selection:` also reach descendants**: the rule has two
+  selectors, `.c::marker, .c *::marker`, so `marker:text-blue-6` on a
+  `<ul>` colors its items' markers. css.rs builds a selector list for this;
+  an ancestor prefix (`.dark `) goes on each.
+- **A variant written after `*:` / `**:` is a condition on the children**:
+  `*:data-[x]:flex` is `.c > *[data-x]` (it was `.c[data-x] > *`). Written
+  before it, the condition stays on the element (`first:*:flex`). So
+  variant order matters once `*:`/`**:` is involved.
+- **`max-[900px]:`, `@max-md:`, `@max-[400px]:` are strictly below**
+  (`width < …`), like `max-md:` already was. They used `max-width`, so they
+  and the matching min variant both applied at exactly the boundary. On
+  native too (both engines).
+- **`group-[&_p]:` / `peer-[&…]:`**: an `&` in the brackets says where the
+  group goes (`.group p `). It used to be left in the selector as written.
 
 `fontFamily` values are web-shaped fallback stacks even in the native
 package — native strips them to the first name at resolve time, so the
@@ -231,7 +294,7 @@ same config works unmodified on Expo Web.
 
 `theme.colors` / `theme.spacing` / `theme.screens` / `theme.fontFamily`
 **replace** the built-in section entirely (e.g. `theme.colors` drops the
-default 22-family palette). `extend` merges on top. `container` only exists
+default 26-family palette). `extend` merges on top. `container` only exists
 under `extend` (it's inherently additive).
 
 ### 6.4 Runtime application
@@ -246,11 +309,15 @@ build-time / babel-time path needs no call.
 
 ## 7. The palette
 
-22 hue families (`gray`, `red`, `orange`, `amber`, `yellow`, `lime`,
+26 hue families (`gray`, `red`, `orange`, `amber`, `yellow`, `lime`,
 `green`, `emerald`, `teal`, `cyan`, `sky`, `blue`, `indigo`, `violet`,
-`purple`, `fuchsia`, `pink`, `rose`, `slate`, `zinc`, `neutral`, `stone`),
-shades `1`–`12` (**1 = lightest, 12 = darkest** — inverse of Tailwind's
-50–950), plus `white`, `black`, `transparent`, `current`.
+`purple`, `fuchsia`, `pink`, `rose`, `slate`, `zinc`, `neutral`, `stone`,
+and since core-engine 1.0.0-beta.19 Tailwind CSS v4.2's four tinted
+neutrals `mauve`, `olive`, `mist`, `taupe`), shades `1`–`12` (**1 =
+lightest, 12 = darkest** — inverse of Tailwind's 50–950), plus `white`,
+`black`, `transparent`, `current`. The four new families are Tailwind's
+oklch values converted to sRGB hex; their shade 12 is shade 11 at 0.58x,
+the step the older families take.
 
 Used as classes (`bg-blue-6`, `text-gray-11`) or as values via
 `useColors().blue[6]`. The shade file is generated from the Rust source of
@@ -310,6 +377,48 @@ utilities, not color names. As of 2026-11-07, against Tailwind 4.3.5:
 "Resolves" is necessary, not sufficient: each family was also checked
 against Tailwind's own output, value by value. Re-run the comparison when
 moving to a new Tailwind release; new families show up as gaps.
+
+**The class list is not the whole surface.** `getClassList()` leaves out
+variants (`getVariants()`), anything with a modifier or an arbitrary
+value, and some utilities outright (`@container-size` isn't in it). The
+2026-11-14 pass therefore ran three more checks against the same 4.3.5,
+all through `candidatesToCss()`: every variant Tailwind accepts, a
+hand-written list of 760 syntax forms, and a per-property comparison of
+the two outputs' literal values. After core-engine 1.0.0-beta.19 every
+class, every accepted variant and every probed form produces a rule, and
+the value comparison shows only notation (`-2` vs `calc(2 * -1)`) and the
+deliberate differences listed below. That pass found two kinds of gap the
+"100%" above had hidden.
+
+Forms that produced nothing: `@container-size` and `@container-[…]`
+(each with `/name`); the opacity forms `/[0.37]`, `/[37%]`, `/(--o)` and
+a decimal `/2.5` (one parser, parser.rs `parse_alpha`, used for named and
+arbitrary colors alike); gradient interpolation (`bg-linear-to-r/oklch`,
+`/longer`, `/[in_hsl_longer_hue]`, declared twice so a browser without it
+keeps the plain gradient) and `bg-gradient-to-r`; an opacity on a shadow
+size (`shadow-xl/20`, also inset-, drop- and text-shadow: the default
+color's alpha); `grid-cols-13` and up, `aspect-3/2`, `decoration-3`,
+`underline-offset-3`; `max-w-screen-md`; bare `filter` /
+`backdrop-filter`; and a bracket or variable value on `transition-`,
+`scale-`, `transform-`, `list-`, `contain-`, `bg-linear-`/`bg-radial-`,
+and the mask stops, angles and radial size. `--spacing(4)` and
+`--alpha(color / 50%)` inside an arbitrary value are expanded by the
+parser (`expand_theme_functions`); they used to be emitted verbatim.
+
+Forms that produced the wrong CSS: `grayscale-50` / `invert-20` /
+`sepia-50` and their `backdrop-` twins were always 100%; the leading `-`
+was dropped on `-col-start-2` (and `-col-end`, `-row-*`),
+`-outline-offset-2`, `-underline-offset-2`, `-tracking-wide`,
+`-bg-linear-45`, `-bg-conic-180` and `-scale-x-100`;
+`bg-[#ff0000]/[0.37]` wrote `#ff0000]/[0.37`, and `text-[14px]/[20px]`
+likewise (it is now the size with its line-height, on native too); an
+arbitrary shadow color (`shadow-[#333]`, `shadow-(color:--c)`, and the
+inset-/drop-/text- forms) was written as the whole shadow; `content-none`
+/ `content-[…]` set only `--kb-content`, never `content`; and a whole
+gradient in brackets (`bg-linear-[25deg,red_5%,yellow_60%]`) was invalid
+without a `from-*`, since the color stops were appended unconditionally
+(they now arrive through `--kb-gradient-tail`, which `from-*`/`via-*`
+set).
 
 **How the newer families are built** (same designs as Tailwind's, with
 `var()` fallbacks standing in for Tailwind's `@property` defaults, since
@@ -379,6 +488,29 @@ opacity, `w-[10px]/50`, resolves to nothing). Number utilities accept
 only numbers: `z-banana`/`order-banana`/`grow-x`/`duration-x` used to
 pass through as invalid CSS, and `order-first`/`-last`/`-none` wrote
 `order: first`; they are now ±9999/0.
+`transition-[width]` / `transition-[opacity,transform]` (a bracketed
+property list; "transition-" isn't a value prefix, so effects.rs reads the
+utility name and allows only property-name characters) produced nothing
+before 1.0.0-beta.19.
+Also new in 1.0.0-beta.19 (gaps found writing the docs site; each used to
+produce nothing, or the wrong property):
+- `text-sm/6` (size plus line-height: a number on the leading scale, a
+  named leading such as `tight`, `[20px]` or `(--lh)`). It sets
+  line-height directly, not `--kb-leading`. Native multiplies a named or
+  unitless leading by the size (`text-sm/tight` is 14 × 1.25 = 17.5) and
+  drops the class when the leading is a CSS variable.
+- `font-[550]` was `font-family: 550`. An arbitrary `font-` value is now a
+  weight when it's a number, has a `number:`/`integer:` hint, or is a bare
+  variable (`font-(--w)`, as in Tailwind CSS v4: **this changed**, it used
+  to be a family); otherwise it's a family (`font-[Inter]`,
+  `font-(family-name:--f)`, `generic-name:` is now a known hint). Native
+  takes only 100-900 in hundreds.
+- `object-[25%_75%]` / `object-(--p)` (web only), `duration-initial`
+  (`--kb-duration: initial`, like `ease-initial`), and `align-[4px]` /
+  `align-(--x)`: "align-" is now a value prefix, with the eight keywords
+  checked in one arm.
+The JS port (react-native `jsEngine/`) has the same changes;
+parity.test.ts covers them.
 
 **"Did you mean" suggestions** come from one place, suggest.rs
 `suggest_class`, exported over WASM: a Tailwind shade maps to Kbach's
@@ -389,6 +521,18 @@ React Native's dev warning. The JS port (iOS/Expo Go) mirrors the
 parser and resolver changes above; parity.test.ts covers them.
 
 **Remaining differences** (not value changes, just naming/shape):
+- **`h-screen` / `w-screen`** (and the `block-`/`inline-` forms) are
+  `100dvh` / `100dvw`, not Tailwind's `100vh` / `100vw`: deliberate, see
+  layout.rs `resolve_screen_size`.
+- **`disabled:` forces `!important`**: deliberate, see registry.rs.
+- **`font-sans`** is `ui-sans-serif, system-ui, sans-serif, …`. Tailwind
+  4.3.5's default stack starts `-apple-system, BlinkMacSystemFont, 'Segoe
+  UI', Roboto, …`. Found on 2026-11-14 and left as is.
+- **`theme(…)`**, Tailwind v3's function, isn't expanded in an arbitrary
+  value (`--spacing()` and `--alpha()` are): the parser has no theme.
+- **`ltr:` / `rtl:`** are `:dir(…)` only, without Tailwind's `[dir=…]`
+  attribute fallback.
+- **`not-hover:`** has no second rule for devices that can't hover.
 - **Border colors between children** are `divide-color-*`, not
   `divide-*` (`divide-x`/`divide-y` are the width utilities), and
   `divide-x` uses physical left/right sides, not v4's logical inline ones.
@@ -418,7 +562,7 @@ resolved in web-only dispatch paths and never reach native): table and
 `pbs`/`pbe`/`mbs`/`mbe`, `inset-s`/`-e`/`-bs`/`-be`, `scroll-ms`/…,
 `border-bs`/`-be`, `block-*`/`inline-*` viewport sizes), viewport units
 (`h-dvh`, `w-svw`, `size-lvh`, …), `h-lh`, `max-w-none`/`max-h-none`,
-`max-w-prose`, `*-safe`/last-baseline alignment, `flex-1/2`, masks,
+`max-w-prose`, `max-w-screen-<bp>`, `*-safe`/last-baseline alignment, `flex-1/2`, masks,
 `inset-shadow-*`/`inset-ring-*`, `contain-*`, `wrap-*`, and the `inherit`
 color keyword. The native merge also drops `object-position` and
 `container-type` (not RN styles; they used to leak through from
@@ -481,6 +625,19 @@ Shared across both packages, since `kbach.config.js` is read by both:
   erase each other); `ring-offset-N` alone no longer draws a ring; and
   `text-shadow-<color>` / `drop-shadow-<color>` alone draw nothing (pair
   them with a size, e.g. `text-shadow-md text-shadow-blue-6`).
+
+- **Hover styles don't show on a phone after upgrading to core-engine
+  1.0.0-beta.19** — expected: `hover:` and `group-hover:`/`peer-hover:`
+  are now inside `@media (hover: hover)`, Tailwind CSS v4's behavior
+  (§6.2). For a style that should show on touch too, use `active:` or
+  `focus:`, or `[&:hover]:` for a bare `:hover`.
+- **`*:hover:…` / `*:data-[x]:…` changed which element it styles** — same
+  release: a variant written after `*:`/`**:` is now a condition on the
+  children. Put it before the `*:` for the old meaning.
+- **`grayscale-50`, `invert-20`, `sepia-50` look fully applied, or
+  `-col-start-2` / `-outline-offset-2` / `-tracking-wide` /
+  `-scale-x-100` ignore their minus** — every release through
+  core-engine 1.0.0-beta.18. Fixed in 1.0.0-beta.19.
 
 Package-specific failure modes (stale-version symptoms, monorepo
 duplicate-instance issues, prebuilt-binary staleness, …) live in each

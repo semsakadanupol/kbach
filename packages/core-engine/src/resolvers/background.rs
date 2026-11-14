@@ -36,15 +36,6 @@ use super::{decl, Declaration};
 use crate::parser::ParsedClass;
 use crate::theme::ThemeConfig;
 
-/// Same three-character safety check as `parser::is_safe_arbitrary_value`,
-/// duplicated rather than exported: `bg-linear-[25deg]`/`bg-radial-[...]`/
-/// `bg-conic-[...]`'s bracket content isn't reached through the parser's own
-/// arbitrary-value branch (see `resolve_gradient_image`'s doc note), so it
-/// never passes through that check on its way here.
-fn is_safe_arbitrary(raw: &str) -> bool {
-    !raw.contains('{') && !raw.contains('}') && !raw.contains(';')
-}
-
 const POSITION: &[(&str, &str)] = &[
     ("top", "top"),
     ("bottom", "bottom"),
@@ -86,7 +77,11 @@ fn named(value: &str, table: &[(&'static str, &'static str)]) -> Option<&'static
     table.iter().find(|(k, _)| *k == value).map(|(_, v)| *v)
 }
 
-fn resolve_bg_keyword(value: &str) -> Option<Vec<Declaration>> {
+fn resolve_bg_keyword(value: &str, negative: bool) -> Option<Vec<Declaration>> {
+    // Only a gradient angle takes a leading `-` (`-bg-linear-45`).
+    if negative {
+        return resolve_gradient_image(value, true);
+    }
     if let Some(pos) = named(value, POSITION) {
         return Some(vec![decl("background-position", pos)]);
     }
@@ -110,61 +105,137 @@ fn resolve_bg_keyword(value: &str) -> Option<Vec<Declaration>> {
     if let Some(rep) = named(value, REPEAT) {
         return Some(vec![decl("background-repeat", rep)]);
     }
-    resolve_gradient_image(value)
+    resolve_gradient_image(value, false)
 }
 
-/// `bg-linear-to-r`/`bg-linear-45`/`bg-radial`/`bg-conic-180` etc. Bracket
-/// forms (`bg-linear-[25deg]`) are NOT reached through `parser.rs`'s own
-/// arbitrary-value branch — that only fires when the value immediately
-/// after the whole matched prefix starts with `[` (i.e. `bg-[...]`, which
-/// stays a color per this module's own doc comment), whereas here the `[`
-/// appears mid-value after a literal `linear-`/`radial-`/`conic-` prefix —
-/// so the underscore-to-space conversion and safety check are done by hand
-/// here instead.
-fn resolve_gradient_image(value: &str) -> Option<Vec<Declaration>> {
-    fn arbitrary_arg(rest: &str) -> Option<String> {
-        let raw = rest.strip_prefix('[')?.strip_suffix(']')?;
-        if !is_safe_arbitrary(raw) {
+/// The `/` of an interpolation modifier (`linear-to-r/oklch`), outside any
+/// bracket: (`linear-to-r`, Some(`oklch`)).
+fn split_interpolation(value: &str) -> (&str, Option<&str>) {
+    let mut depth = 0i32;
+    for (i, ch) in value.char_indices() {
+        match ch {
+            '[' | '(' => depth += 1,
+            ']' | ')' => depth -= 1,
+            '/' if depth == 0 => return (&value[..i], Some(&value[i + 1..])),
+            _ => {}
+        }
+    }
+    (value, None)
+}
+
+/// Tailwind v4's gradient interpolation modifiers: a color space
+/// (`/oklch`), a hue direction in oklch (`/longer`), or any
+/// `[in_hsl_longer_hue]`.
+fn interpolation(modifier: &str) -> Option<String> {
+    Some(match modifier {
+        "srgb" | "hsl" | "oklab" | "oklch" => format!("in {modifier}"),
+        "longer" | "shorter" | "increasing" | "decreasing" => format!("in oklch {modifier} hue"),
+        _ => crate::parser::arbitrary_modifier(modifier)?,
+    })
+}
+
+/// The `background-image` for one gradient: `position` is the part before
+/// the color stops (`to right`, `45deg`, `from 180deg`), if any. With an
+/// interpolation it is declared twice, the plain form first: a browser
+/// that can't parse `in oklch` inside a gradient drops the second
+/// declaration and keeps the first (Tailwind CSS uses `@supports` for the
+/// same fallback).
+fn gradient(func: &str, position: Option<&str>, interpolation: Option<&str>) -> Vec<Declaration> {
+    let image = |position: Option<String>| match position {
+        Some(p) => format!("{func}-gradient({p}, var(--kb-gradient-stops))"),
+        None => format!("{func}-gradient(var(--kb-gradient-stops))"),
+    };
+    let mut decls = vec![decl("background-image", &image(position.map(String::from)))];
+    if let Some(space) = interpolation {
+        let with_space = match position {
+            Some(p) => format!("{p} {space}"),
+            None => space.to_string(),
+        };
+        decls.push(decl("background-image", &image(Some(with_space))));
+    }
+    decls
+}
+
+/// `bg-linear-to-r`/`bg-linear-45`/`bg-radial`/`bg-conic-180` etc., each
+/// with an optional interpolation modifier (`bg-linear-to-r/oklch`), and
+/// `-bg-linear-45`/`-bg-conic-180` for a negative angle (the minus used to
+/// be dropped). Bracket forms (`bg-linear-[25deg]`) are NOT reached through
+/// `parser.rs`'s own arbitrary-value branch — that only fires when the value
+/// immediately after the whole matched prefix starts with `[` (i.e.
+/// `bg-[...]`, which stays a color per this module's own doc comment),
+/// whereas here the `[` appears mid-value after a literal `linear-`/
+/// `radial-`/`conic-` prefix — so they go through
+/// `parser::arbitrary_modifier` (underscores, the safety check, and the
+/// `(--var)` shorthand) here instead.
+///
+/// A bracket or variable value may be the angle alone (`bg-linear-[25deg]`,
+/// with `from-*`/`to-*` supplying the colors) or the whole argument list
+/// (`bg-linear-[25deg,red_5%,yellow_60%]`, `bg-linear-(--my-gradient)`). So
+/// the color stops are appended through `--kb-gradient-tail`, which
+/// `from-*`/`via-*` set to `, <stops>` and which is empty otherwise. (They
+/// used to be appended unconditionally, so a complete gradient with no
+/// `from-*` was invalid and drew nothing.)
+fn resolve_gradient_image(value: &str, negative: bool) -> Option<Vec<Declaration>> {
+    // Tailwind v3's `bg-gradient-to-r`, still accepted by v4.
+    let legacy;
+    let value = match value.strip_prefix("gradient-to-") {
+        Some(dir) => {
+            legacy = format!("linear-to-{dir}");
+            legacy.as_str()
+        }
+        None => value,
+    };
+    let (value, modifier) = split_interpolation(value);
+    let space = match modifier {
+        Some(m) => Some(interpolation(m)?),
+        None => None,
+    };
+    let space = space.as_deref();
+    let whole = |func: &str, rest: &str| -> Option<Vec<Declaration>> {
+        // No interpolation or minus on a hand-written gradient: it says both itself.
+        if space.is_some() || negative {
             return None;
         }
-        Some(raw.replace('_', " "))
-    }
+        let raw = crate::parser::arbitrary_modifier(rest)?;
+        Some(vec![decl("background-image", &format!("{func}-gradient({raw} var(--kb-gradient-tail,))"))])
+    };
+    let degrees = |rest: &str| rest.parse::<u32>().ok().map(|n| format!("{}{n}deg", if negative { "-" } else { "" }));
 
     if let Some(rest) = value.strip_prefix("linear-") {
         if let Some(dir) = named(rest, LINEAR_DIR) {
-            return Some(vec![decl("background-image", &format!("linear-gradient({dir}, var(--kb-gradient-stops))"))]);
+            return (!negative).then(|| gradient("linear", Some(dir), space));
         }
-        if let Ok(angle) = rest.parse::<i32>() {
-            return Some(vec![decl("background-image", &format!("linear-gradient({angle}deg, var(--kb-gradient-stops))"))]);
+        if let Some(angle) = degrees(rest) {
+            return Some(gradient("linear", Some(&angle), space));
         }
-        let raw = arbitrary_arg(rest)?;
-        return Some(vec![decl("background-image", &format!("linear-gradient({raw}, var(--kb-gradient-stops))"))]);
+        return whole("linear", rest);
     }
 
     if value == "radial" {
-        return Some(vec![decl("background-image", "radial-gradient(var(--kb-gradient-stops))")]);
+        return (!negative).then(|| gradient("radial", None, space));
     }
     if let Some(rest) = value.strip_prefix("radial-") {
-        let raw = arbitrary_arg(rest)?;
-        return Some(vec![decl("background-image", &format!("radial-gradient({raw}, var(--kb-gradient-stops))"))]);
+        return whole("radial", rest);
     }
 
     if value == "conic" {
-        return Some(vec![decl("background-image", "conic-gradient(var(--kb-gradient-stops))")]);
+        return (!negative).then(|| gradient("conic", None, space));
     }
     if let Some(rest) = value.strip_prefix("conic-") {
-        if let Ok(angle) = rest.parse::<i32>() {
-            return Some(vec![decl(
-                "background-image",
-                &format!("conic-gradient(from {angle}deg, var(--kb-gradient-stops))"),
-            )]);
+        if let Some(angle) = degrees(rest) {
+            return Some(gradient("conic", Some(&format!("from {angle}")), space));
         }
-        let raw = arbitrary_arg(rest)?;
-        return Some(vec![decl("background-image", &format!("conic-gradient({raw}, var(--kb-gradient-stops))"))]);
+        return whole("conic", rest);
     }
 
     None
 }
+
+/// What a bracket/variable gradient (`bg-linear-[…]`, `bg-linear-(--g)`)
+/// appends after its own value: the color stops, behind a comma. Set by
+/// `from-*`/`via-*` (whoever defines the stops); unset, the gradient is just
+/// the value. See `resolve_gradient_image`.
+const GRADIENT_TAIL: &str = ", var(--kb-gradient-stops)";
 
 enum Stop {
     Position(String),
@@ -206,6 +277,7 @@ fn resolve_from(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declara
             decl("--kb-gradient-from", &format!("{c} var(--kb-gradient-from-position, 0%)")),
             decl("--kb-gradient-to", "rgb(255 255 255 / 0) var(--kb-gradient-to-position, 100%)"),
             decl("--kb-gradient-stops", "var(--kb-gradient-from), var(--kb-gradient-to)"),
+            decl("--kb-gradient-tail", GRADIENT_TAIL),
         ]),
     }
 }
@@ -223,6 +295,7 @@ fn resolve_via(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declarat
                 "--kb-gradient-stops",
                 &format!("var(--kb-gradient-from), {c} var(--kb-gradient-via-position, 50%), var(--kb-gradient-to)"),
             ),
+            decl("--kb-gradient-tail", GRADIENT_TAIL),
         ]),
     }
 }
@@ -236,7 +309,7 @@ fn resolve_to(theme: &ThemeConfig, parsed: &ParsedClass) -> Option<Vec<Declarati
 
 pub fn resolve(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec<Declaration>> {
     match parsed.utility.as_str() {
-        "bg" if !parsed.is_arbitrary => resolve_bg_keyword(parsed.value.as_deref()?),
+        "bg" if !parsed.is_arbitrary => resolve_bg_keyword(parsed.value.as_deref()?, parsed.negative),
         // Dedicated arbitrary-only utilities for background-position/-size
         // — see this crate's own `VALUE_PREFIXES` doc comment for why
         // these exist separately from the "bg-" catchall's named keyword
@@ -320,7 +393,7 @@ mod tests {
         );
         assert_eq!(
             resolve(&parse_class("bg-linear-[25deg]"), &t),
-            Some(vec![decl("background-image", "linear-gradient(25deg, var(--kb-gradient-stops))")]),
+            Some(vec![decl("background-image", "linear-gradient(25deg var(--kb-gradient-tail,))")]),
         );
     }
 
@@ -333,7 +406,7 @@ mod tests {
         );
         assert_eq!(
             resolve(&parse_class("bg-radial-[circle_at_top]"), &t),
-            Some(vec![decl("background-image", "radial-gradient(circle at top, var(--kb-gradient-stops))")]),
+            Some(vec![decl("background-image", "radial-gradient(circle at top var(--kb-gradient-tail,))")]),
         );
         assert_eq!(
             resolve(&parse_class("bg-conic"), &t),
@@ -354,6 +427,7 @@ mod tests {
                 decl("--kb-gradient-from", "#2563eb var(--kb-gradient-from-position, 0%)"),
                 decl("--kb-gradient-to", "rgb(255 255 255 / 0) var(--kb-gradient-to-position, 100%)"),
                 decl("--kb-gradient-stops", "var(--kb-gradient-from), var(--kb-gradient-to)"),
+                decl("--kb-gradient-tail", ", var(--kb-gradient-stops)"),
             ]),
         );
         assert_eq!(
@@ -364,6 +438,7 @@ mod tests {
                     "--kb-gradient-stops",
                     "var(--kb-gradient-from), #dc2626 var(--kb-gradient-via-position, 50%), var(--kb-gradient-to)",
                 ),
+                decl("--kb-gradient-tail", ", var(--kb-gradient-stops)"),
             ]),
         );
         assert_eq!(
@@ -381,6 +456,7 @@ mod tests {
                 decl("--kb-gradient-from", "rgba(37,99,235,0.5) var(--kb-gradient-from-position, 0%)"),
                 decl("--kb-gradient-to", "rgb(255 255 255 / 0) var(--kb-gradient-to-position, 100%)"),
                 decl("--kb-gradient-stops", "var(--kb-gradient-from), var(--kb-gradient-to)"),
+                decl("--kb-gradient-tail", ", var(--kb-gradient-stops)"),
             ]),
         );
         assert_eq!(

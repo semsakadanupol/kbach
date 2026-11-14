@@ -115,9 +115,11 @@ describe('resolveStyleJs', () => {
     expect(resolveStyleJs('bg-blue-6 min-[500px]:bg-blue-8', t, 'light', false, 500).backgroundColor).toBe('#1e40af');
     expect(resolveStyleJs('bg-blue-6 min-[500px]:bg-blue-8', t, 'light', false, 800).backgroundColor).toBe('#1e40af');
 
-    // 30rem = 480px — AT the breakpoint still counts as matching (real CSS max-width semantics).
+    // 30rem = 480px — AT the breakpoint no longer matches: max-[…] is strictly
+    // below, like max-md: (so it never overlaps min-[30rem]:).
     expect(resolveStyleJs('bg-blue-6 max-[30rem]:bg-blue-8', t, 'light', false, 900).backgroundColor).toBe('#2563eb');
-    expect(resolveStyleJs('bg-blue-6 max-[30rem]:bg-blue-8', t, 'light', false, 480).backgroundColor).toBe('#1e40af');
+    expect(resolveStyleJs('bg-blue-6 max-[30rem]:bg-blue-8', t, 'light', false, 480).backgroundColor).toBe('#2563eb');
+    expect(resolveStyleJs('bg-blue-6 max-[30rem]:bg-blue-8', t, 'light', false, 479).backgroundColor).toBe('#1e40af');
     expect(resolveStyleJs('bg-blue-6 max-[30rem]:bg-blue-8', t, 'light', false, 300).backgroundColor).toBe('#1e40af');
   });
 

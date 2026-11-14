@@ -283,10 +283,18 @@ enum MaskStop {
 }
 
 fn mask_stop(theme: &ThemeConfig, parsed: &ParsedClass, raw: &str) -> Option<MaskStop> {
-    // Arbitrary stop values aren't supported in this compound form (they'd
-    // bypass the parser's arbitrary-value safety check).
-    if raw.is_empty() || raw.contains('[') {
+    if raw.is_empty() {
         return None;
+    }
+    // `mask-t-from-[10px]`, `mask-y-to-(--m)`: any position, or a color with
+    // a `color:` hint. Through `arbitrary_modifier`, for the same safety
+    // check a bracket value gets from the parser.
+    if raw.starts_with('[') || raw.starts_with('(') {
+        let value = crate::parser::arbitrary_modifier(raw)?;
+        return Some(match value.strip_prefix("color:") {
+            Some(color) => MaskStop::Color(color.to_string()),
+            None => MaskStop::Position(value),
+        });
     }
     if let Some(n) = raw.strip_suffix('%') {
         return n.parse::<f64>().ok().filter(|n| *n >= 0.0).map(|_| MaskStop::Position(raw.to_string()));
@@ -393,14 +401,21 @@ pub fn resolve_gradient(parsed: &ParsedClass, theme: &ThemeConfig) -> Option<Vec
                 ]));
             }
         }
-        // `mask-linear-45` / `-mask-conic-90`: the layer's angle.
+        // `mask-linear-45` / `-mask-conic-90`: the layer's angle, or any
+        // one in brackets (`mask-linear-[70deg]`, `mask-conic-(--a)`).
         if layer != "radial" {
-            let angle = mask_angle(parsed, rest)?;
+            let angle = mask_angle(parsed, rest).or_else(|| crate::parser::arbitrary_modifier(rest))?;
             return Some(with_mask_image(vec![
                 decl(&prefix, &format!("{layer}-gradient(var({prefix}-stops, var({prefix}-position, 0deg)))")),
                 decl(&format!("{prefix}-position"), &angle),
             ]));
         }
+        // `mask-radial-[100%_100%]`: the radial layer's size.
+        let size = crate::parser::arbitrary_modifier(rest)?;
+        return Some(with_mask_image(vec![
+            decl(&prefix, &format!("radial-gradient(var({prefix}-stops, var({prefix}-size, farthest-corner)))")),
+            decl(&format!("{prefix}-size"), &size),
+        ]));
     }
     None
 }
@@ -459,7 +474,7 @@ mod gradient_tests {
 
     #[test]
     fn rejects_values_that_are_not_stops() {
-        for class in ["mask-t-from-[20px]", "mask-linear-from-notacolor", "mask-linear-abc", "mask-radial-at-nowhere", "mask-q-from-10"] {
+        for class in ["mask-t-from-[20px;x]", "mask-linear-from-notacolor", "mask-linear-abc", "mask-radial-at-nowhere", "mask-q-from-10"] {
             assert_eq!(resolve_gradient(&parse_class(class), &theme()), None, "{class}");
         }
         // the existing non-gradient mask utilities are untouched

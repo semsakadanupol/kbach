@@ -446,7 +446,8 @@ mod modifier_resolution_tests {
         assert!(only_rule("max-md:p-4").starts_with("@media (width < 768px)"));
         let range = only_rule("md:max-xl:p-4");
         assert!(range.contains("@media (min-width: 768px)") && range.contains("@media (width < 1280px)"), "{range}");
-        assert!(only_rule("max-[600px]:p-4").starts_with("@media (max-width: 600px)"));
+        // strictly below, like max-md: it never overlaps min-[600px]
+        assert!(only_rule("max-[600px]:p-4").starts_with("@media (width < 600px)"));
     }
 
     #[test]
@@ -458,9 +459,20 @@ mod modifier_resolution_tests {
 
     #[test]
     fn named_container_queries() {
-        assert!(only_rule("@md/main:p-4").starts_with("@container main (min-width: 768px)"));
+        // the container scale (@md is 28rem), not the screens (md is 768px)
+        assert!(only_rule("@md/main:p-4").starts_with("@container main (min-width: 28rem)"));
+        assert!(only_rule("@max-md/main:p-4").starts_with("@container main (width < 28rem)"));
+        assert!(only_rule("@min-md/main:p-4").starts_with("@container main (min-width: 28rem)"));
+        assert!(only_rule("@[400px]/main:p-4").starts_with("@container main (min-width: 400px)"));
+        assert!(only_rule("@max-[400px]/main:p-4").starts_with("@container main (width < 400px)"));
+        // the bracket goes into the at-rule, so it gets the arbitrary-value check
+        assert!(rules("@min-[1px){}body{color:red]/main:p-4").is_empty());
         assert!(only_rule("@min-[400px]/card:p-4").starts_with("@container card (min-width: 400px)"));
-        assert!(only_rule("@md:p-4").starts_with("@container (min-width: 768px)"));
+        assert!(only_rule("@md:p-4").starts_with("@container (min-width: 28rem)"));
+        assert!(only_rule("@3xs:p-4").starts_with("@container (min-width: 16rem)"));
+        assert!(only_rule("@max-sm:p-4").starts_with("@container (width < 24rem)"));
+        assert!(only_rule("@min-sm:p-4").starts_with("@container (min-width: 24rem)"));
+        assert!(only_rule("@[400px]:p-4").starts_with("@container (min-width: 400px)"));
         let named = only_rule("@container/main");
         assert!(named.contains("container-type: inline-size") && named.contains("container-name: main"), "{named}");
     }
@@ -526,6 +538,17 @@ mod modifier_resolution_tests {
         has("w-[calc(100%/3)]", "width: calc(100%/3)");
     }
 
+    /// `transition-[…]`: a bracketed property list. Produced nothing before.
+    #[test]
+    fn transition_with_a_property_list() {
+        let r = only_rule("transition-[width]");
+        assert!(r.contains("transition-property: width") && r.contains("var(--kb-duration, 150ms)"), "{r}");
+        assert!(only_rule("transition-[opacity,transform]").contains("transition-property: opacity, transform"));
+        for class in ["transition-[width;color:red]", "transition-[]", "transition-[a{b}]"] {
+            assert!(rules(class).is_empty(), "{class} must produce nothing, got {:?}", rules(class));
+        }
+    }
+
     /// Tailwind CSS v4 forms that used to produce nothing.
     #[test]
     fn tailwind_v4_syntax() {
@@ -557,5 +580,438 @@ mod modifier_resolution_tests {
         assert!(!at("3xl:p-4", 1500.0).contains_key("padding"));
         assert!(!at("hovr:p-4", 800.0).contains_key("padding"));
         assert!(!at("@container/main", 800.0).contains_key("containerName"));
+    }
+}
+
+/// Gaps found while writing the docs site (2026-11-11): each of these used
+/// to produce no CSS at all, or the wrong property.
+#[cfg(test)]
+mod docs_gap_tests {
+    use super::*;
+
+    const THEME: &str = r##"{"colors":{"blue-6":"#2563eb"},"spacing":{},"screens":{"sm":640,"md":768},"fontFamily":{},"darkMode":"class","container":{}}"##;
+
+    fn rule(class: &str) -> String {
+        let v: serde_json::Value = serde_json::from_str(&generate_css(class, THEME)).unwrap();
+        let r: Vec<String> = v["rules"].as_array().unwrap().iter().map(|r| r["rule"].as_str().unwrap().to_string()).collect();
+        assert_eq!(r.len(), 1, "{class}: {r:?}");
+        r[0].clone()
+    }
+    fn none(class: &str) {
+        let v: serde_json::Value = serde_json::from_str(&generate_css(class, THEME)).unwrap();
+        assert!(v["rules"].as_array().unwrap().is_empty(), "{class} must produce nothing, got {v}");
+    }
+    fn native(class: &str) -> std::collections::HashMap<String, serde_json::Value> {
+        let t: crate::theme::ThemeConfig = serde_json::from_str(THEME).unwrap();
+        crate::resolve_style::resolve_style(class, &t, "light", false, 400.0).into_iter().collect()
+    }
+
+    #[test]
+    fn text_size_with_a_line_height() {
+        let r = rule("text-sm/6");
+        assert!(r.contains("font-size: 0.875rem") && r.contains("line-height: 1.5rem") && !r.contains("--kb-leading"), "{r}");
+        assert!(rule("text-lg/tight").contains("line-height: 1.25"));
+        assert!(rule("text-sm/[20px]").contains("line-height: 20px"));
+        assert!(rule("text-sm/[calc(1em+2px)]").contains("line-height: calc(1em + 2px)"));
+        assert!(rule("text-sm/(--lh)").contains("line-height: var(--lh)"));
+        // a color's opacity is still a color, and nonsense after the slash is nothing
+        assert!(rule("text-blue-6/50").contains("color"));
+        none("text-sm/banana");
+        none("text-sm/");
+        none("text-sm/[a;b]");
+    }
+
+    #[test]
+    fn text_size_with_a_line_height_on_native() {
+        let s = native("text-sm/6");
+        assert!(s.contains_key("fontSize") && s.contains_key("lineHeight"), "{s:?}");
+        let tight = native("text-sm/tight");
+        assert_eq!(tight.get("lineHeight"), native("text-sm/[1.25]").get("lineHeight"), "a multiplier is multiplied out by the size");
+        assert!(!native("text-sm/(--lh)").contains_key("lineHeight"));
+    }
+
+    #[test]
+    fn arbitrary_font_is_a_weight_when_it_is_a_number() {
+        assert!(rule("font-[550]").contains("font-weight: 550"));
+        assert!(rule("font-(--w)").contains("font-weight: var(--w)"));
+        assert!(rule("font-[number:var(--w)]").contains("font-weight: var(--w)"));
+        assert!(rule("font-[Inter]").contains("font-family: Inter"));
+        assert!(rule("font-[Inter,_sans-serif]").contains("font-family: Inter, sans-serif"));
+        assert!(rule("font-(family-name:--f)").contains("font-family: var(--f)"));
+        assert!(rule("font-[generic-name:serif]").contains("font-family: serif"));
+        assert_eq!(native("font-[600]").get("fontWeight").map(|v| v.to_string()), Some("\"600\"".to_string()));
+        assert!(!native("font-[550]").contains_key("fontWeight"), "React Native takes only the hundreds");
+    }
+
+    #[test]
+    fn arbitrary_object_position() {
+        assert!(rule("object-[25%_75%]").contains("object-position: 25% 75%"));
+        assert!(rule("object-(--pos)").contains("object-position: var(--pos)"));
+        assert!(rule("object-left-top").contains("object-position: left top"));
+        assert!(rule("object-cover").contains("object-fit: cover"));
+    }
+
+    #[test]
+    fn duration_initial() {
+        let r = rule("duration-initial");
+        assert!(r.contains("--kb-duration: initial") && !r.contains("transition-duration"), "{r}");
+        assert!(rule("duration-150").contains("transition-duration: 150ms"));
+        none("duration-banana");
+    }
+
+    #[test]
+    fn vertical_align_keywords_and_any_value() {
+        for (class, v) in [("align-middle", "middle"), ("align-text-top", "text-top"), ("align-super", "super"), ("align-[4px]", "4px"), ("align-(--a)", "var(--a)")] {
+            assert!(rule(class).contains(&format!("vertical-align: {v}")), "{class}");
+        }
+        none("align-banana");
+    }
+}
+
+/// Variants that produced no CSS before 1.0.0-beta.19.
+#[cfg(test)]
+mod variant_gap_tests {
+    use super::*;
+
+    const THEME: &str = r##"{"colors":{"blue-6":"#2563eb"},"spacing":{},"screens":{"sm":640,"md":768},"fontFamily":{},"darkMode":"class","container":{}}"##;
+
+    fn rule(class: &str) -> String {
+        let v: serde_json::Value = serde_json::from_str(&generate_css(class, THEME)).unwrap();
+        let r: Vec<String> = v["rules"].as_array().unwrap().iter().map(|r| r["rule"].as_str().unwrap().to_string()).collect();
+        assert_eq!(r.len(), 1, "{class}: {r:?}");
+        r[0].clone()
+    }
+    fn none(class: &str) {
+        let v: serde_json::Value = serde_json::from_str(&generate_css(class, THEME)).unwrap();
+        assert!(v["rules"].as_array().unwrap().is_empty(), "{class} must produce nothing, got {v}");
+    }
+
+    #[test]
+    fn min_breakpoint_is_the_breakpoint_spelled_out() {
+        assert_eq!(rule("min-md:p-4").replace("min-md\\:", "md\\:"), rule("md:p-4"));
+        none("min-nope:p-4");
+        let t: crate::theme::ThemeConfig = serde_json::from_str(THEME).unwrap();
+        assert!(crate::resolve_style::resolve_style("min-md:p-4", &t, "light", false, 800.0).contains_key("padding"));
+        assert!(!crate::resolve_style::resolve_style("min-md:p-4", &t, "light", false, 700.0).contains_key("padding"));
+    }
+
+    #[test]
+    fn bare_data_attribute_variants() {
+        assert!(rule("data-open:p-4").contains(":p-4[data-open] {"));
+        assert!(rule("data-[state=open]:p-4").contains("[data-state=\"open\"]"), "the bracket form still works");
+        assert!(rule("not-data-open:p-4").contains(":not([data-open])"));
+        none("data-:p-4");
+    }
+
+    #[test]
+    fn group_and_peer_take_any_condition_on_themselves() {
+        assert!(rule("group-data-[state=open]:p-4").starts_with(".group[data-state=\"open\"] "));
+        assert!(rule("group-data-open:p-4").starts_with(".group[data-open] "));
+        assert!(rule("group-aria-[sort=ascending]:p-4").starts_with(".group[aria-sort=\"ascending\"] "));
+        assert!(rule("group-aria-expanded:p-4").starts_with(".group[aria-expanded=\"true\"] "));
+        assert!(rule("peer-data-open:p-4").starts_with(".peer[data-open] ~ "));
+        assert!(rule("group-has-checked:p-4").starts_with(".group:has(*:checked) "));
+        assert!(rule("group-nth-2:p-4").starts_with(".group:nth-child(2) "));
+        assert!(rule("group-data-open/menu:p-4").starts_with(".group\\/menu[data-open] "));
+        assert!(rule("in-data-open:p-4").starts_with(":where([data-open]) "));
+        // still nothing for things that aren't a condition on the element itself
+        none("group-dark:p-4");
+        none("group-md:p-4");
+        none("group-before:p-4");
+    }
+
+    #[test]
+    fn has_takes_a_variant_name() {
+        assert!(rule("has-checked:p-4").contains(":has(*:checked)"));
+        assert!(rule("has-focus-visible:p-4").contains(":has(*:focus-visible)"));
+        assert!(rule("has-[img]:p-4").contains(":has(img)"), "the bracket form still works");
+        none("has-nope:p-4");
+    }
+
+    #[test]
+    fn color_scheme_and_scripting_media_variants() {
+        assert!(rule("forced-colors:p-4").starts_with("@media (forced-colors: active)"));
+        assert!(rule("inverted-colors:p-4").starts_with("@media (inverted-colors: inverted)"));
+        assert!(rule("noscript:p-4").starts_with("@media (scripting: none)"));
+        assert!(rule("not-forced-colors:p-4").starts_with("@media not (forced-colors: active)"));
+        assert!(rule("not-print:p-4").starts_with("@media not print"));
+        // not-dark / not-<breakpoint> produced nothing before 1.0.0-beta.19
+        // (THEME's strategy is `class`)
+        assert_eq!(rule("not-dark:p-4"), ".not-dark\\:p-4:not(.dark *) { padding: 16px }");
+        assert!(rule("not-md:p-4").starts_with("@media not (min-width: 768px)"));
+        assert!(rule("not-max-md:p-4").starts_with("@media not (width < 768px)"));
+        none("not-nope:p-4");
+    }
+}
+
+/// What a comparison against Tailwind CSS 4.3.5's own output found on
+/// 2026-11-14: forms that produced nothing, and forms that produced the
+/// wrong CSS. Fixed in 1.0.0-beta.19.
+#[cfg(test)]
+mod tailwind_4_3_gap_tests {
+    use super::*;
+
+    const THEME: &str = r##"{"colors":{"blue-6":"#2563eb","white":"#ffffff"},"spacing":{},"screens":{"sm":640,"md":768},"fontFamily":{},"darkMode":"media","container":{}}"##;
+
+    fn rules(class: &str) -> Vec<String> {
+        let v: serde_json::Value = serde_json::from_str(&generate_css(class, THEME)).unwrap();
+        v["rules"].as_array().unwrap().iter().map(|r| r["rule"].as_str().unwrap().to_string()).collect()
+    }
+    fn rule(class: &str) -> String {
+        let r = rules(class);
+        assert_eq!(r.len(), 1, "{class}: {r:?}");
+        r[0].clone()
+    }
+    fn none(class: &str) {
+        assert!(rules(class).is_empty(), "{class} must produce nothing");
+    }
+    /// The declarations of a class with no variant.
+    fn decls(class: &str) -> String {
+        let r = rule(class);
+        r[r.find('{').unwrap() + 2..r.len() - 2].to_string()
+    }
+
+    #[test]
+    fn numeric_filters_use_their_number() {
+        assert!(decls("grayscale-50").starts_with("--kb-grayscale: grayscale(50%)"));
+        assert!(decls("invert-20").starts_with("--kb-invert: invert(20%)"));
+        assert!(decls("sepia-50").starts_with("--kb-sepia: sepia(50%)"));
+        assert!(decls("backdrop-grayscale-50").starts_with("--kb-backdrop-grayscale: grayscale(50%)"));
+        assert!(decls("backdrop-invert-20").starts_with("--kb-backdrop-invert: invert(20%)"));
+        assert!(decls("backdrop-sepia-50").starts_with("--kb-backdrop-sepia: sepia(50%)"));
+        assert!(decls("grayscale").starts_with("--kb-grayscale: grayscale(100%)"));
+        assert!(decls("grayscale-0").starts_with("--kb-grayscale: grayscale(0)"));
+        none("grayscale-banana");
+        // bare `filter` / `backdrop-filter` turn the composed value on
+        assert!(decls("filter").starts_with("filter: var(--kb-blur,)"));
+        assert!(decls("backdrop-filter").starts_with("backdrop-filter: var(--kb-backdrop-blur,)"));
+    }
+
+    #[test]
+    fn a_leading_minus_is_applied() {
+        assert_eq!(decls("-col-start-2"), "grid-column-start: -2");
+        assert_eq!(decls("-col-end-1"), "grid-column-end: -1");
+        assert_eq!(decls("-row-start-3"), "grid-row-start: -3");
+        assert_eq!(decls("-row-end-1"), "grid-row-end: -1");
+        assert_eq!(decls("-col-start-[2]"), "grid-column-start: -2");
+        assert_eq!(decls("-outline-offset-2"), "outline-offset: -2px");
+        assert_eq!(decls("-outline-offset-[3px]"), "outline-offset: -3px");
+        assert_eq!(decls("-underline-offset-2"), "text-underline-offset: -2px");
+        assert_eq!(decls("-underline-offset-(--o)"), "text-underline-offset: calc(var(--o) * -1)");
+        assert_eq!(decls("-tracking-wide"), "letter-spacing: -0.025em");
+        assert_eq!(decls("-tracking-tight"), "letter-spacing: 0.025em");
+        assert_eq!(decls("-tracking-[0.1em]"), "letter-spacing: -0.1em");
+        assert_eq!(decls("-bg-linear-45"), "background-image: linear-gradient(-45deg, var(--kb-gradient-stops))");
+        assert_eq!(decls("-bg-conic-180"), "background-image: conic-gradient(from -180deg, var(--kb-gradient-stops))");
+        assert!(decls("-scale-x-100").starts_with("--kb-scale-x: scaleX(-1)"));
+        none("-col-start-auto");
+        none("-bg-linear-to-r");
+        none("-bg-cover");
+    }
+
+    #[test]
+    fn opacity_modifier_forms() {
+        assert_eq!(decls("bg-[#ff0000]/[0.37]"), "background-color: rgba(255,0,0,0.37)");
+        assert_eq!(decls("bg-[#ff0000]/[37%]"), "background-color: rgba(255,0,0,0.37)");
+        assert_eq!(decls("bg-[#ff0000]/2.5"), "background-color: rgba(255,0,0,0.025)");
+        assert_eq!(decls("bg-[#ff0000]/(--o)"), "background-color: color-mix(in srgb, #ff0000 var(--o), transparent)");
+        assert_eq!(decls("bg-blue-6/[0.37]"), "background-color: rgba(37,99,235,0.37)");
+        assert_eq!(decls("bg-blue-6/[37%]"), "background-color: rgba(37,99,235,0.37)");
+        assert_eq!(decls("bg-white/2.5"), "background-color: rgba(255,255,255,0.025)");
+        assert_eq!(decls("bg-blue-6/(--o)"), "background-color: color-mix(in srgb, #2563eb var(--o), transparent)");
+        assert_eq!(decls("bg-blue-6/57"), "background-color: rgba(37,99,235,0.57)");
+        assert_eq!(decls("text-(--c)/50"), "color: color-mix(in srgb, var(--c) 50%, transparent)");
+        // not an opacity
+        none("bg-blue-6/[20px]");
+        none("bg-blue-6/150");
+        none("w-[10px]/50");
+        // a slash inside the brackets is not a modifier
+        assert_eq!(decls("w-[calc(100%/3)]"), "width: calc(100%/3)");
+    }
+
+    #[test]
+    fn arbitrary_text_size_with_a_line_height() {
+        assert_eq!(decls("text-[14px]/[20px]"), "font-size: 14px; line-height: 20px");
+        assert_eq!(decls("text-[14px]/6"), "font-size: 14px; line-height: 1.5rem");
+        assert_eq!(decls("text-[14px]/(--lh)"), "font-size: 14px; line-height: var(--lh)");
+        none("text-[14px]/banana");
+    }
+
+    #[test]
+    fn arbitrary_shadow_colors_set_the_color() {
+        assert_eq!(decls("shadow-[#333]"), "--kb-shadow-color: #333");
+        assert_eq!(decls("shadow-[color:red]"), "--kb-shadow-color: red");
+        assert_eq!(decls("shadow-(color:--c)"), "--kb-shadow-color: var(--c)");
+        assert_eq!(decls("shadow-[#333]/50"), "--kb-shadow-color: rgba(51,51,51,0.5)");
+        assert_eq!(decls("inset-shadow-[#333]"), "--kb-inset-shadow-color: #333");
+        assert_eq!(decls("text-shadow-[#333]"), "--kb-text-shadow-color: #333");
+        assert!(decls("drop-shadow-[#333]").starts_with("--kb-drop-shadow-color: #333; --kb-drop-shadow: var(--kb-drop-shadow-size,)"));
+        // a whole shadow, and a bare variable, are still the shadow itself
+        assert!(decls("shadow-[0_4px_6px_red]").starts_with("--kb-shadow: 0 4px 6px red;"));
+        assert!(decls("shadow-(--s)").starts_with("--kb-shadow: var(--s);"));
+        assert_eq!(decls("text-shadow-(--t)"), "text-shadow: var(--t)");
+    }
+
+    #[test]
+    fn shadow_sizes_take_an_opacity() {
+        assert!(decls("shadow-xl/20").starts_with("--kb-shadow: 0 20px 25px -5px var(--kb-shadow-color, rgb(0 0 0 / 0.2)), 0 8px 10px -6px var(--kb-shadow-color, rgb(0 0 0 / 0.2));"));
+        assert!(decls("inset-shadow-sm/50").starts_with("--kb-inset-shadow: inset 0 2px 4px var(--kb-inset-shadow-color, rgb(0 0 0 / 0.5));"));
+        assert!(decls("drop-shadow-xl/50").contains("drop-shadow(0 9px 7px var(--kb-drop-shadow-color, rgb(0 0 0 / 0.5)))"));
+        assert_eq!(decls("text-shadow-lg/30"), "text-shadow: 0px 1px 2px var(--kb-text-shadow-color, rgb(0 0 0 / 0.3)), 0px 3px 2px var(--kb-text-shadow-color, rgb(0 0 0 / 0.3)), 0px 4px 8px var(--kb-text-shadow-color, rgb(0 0 0 / 0.3))");
+        // unchanged without one
+        assert!(decls("shadow-xl").contains("rgb(0 0 0 / 0.1)"));
+        // a color with an opacity is still a color
+        assert_eq!(decls("shadow-blue-6/50"), "--kb-shadow-color: rgba(37,99,235,0.5)");
+        none("shadow-xl/banana");
+    }
+
+    #[test]
+    fn group_and_peer_conditions_with_an_ampersand() {
+        assert_eq!(rule("group-[&_p]:flex"), ".group p .group-\\[\\&_p\\]\\:flex { display: flex }");
+        assert_eq!(rule("group-[.foo_&]:flex"), ".foo .group .group-\\[\\.foo_\\&\\]\\:flex { display: flex }");
+        assert_eq!(rule("peer-[&:nth-of-type(3)]:flex"), ".peer:nth-of-type(3) ~ .peer-\\[\\&\\:nth-of-type\\(3\\)\\]\\:flex { display: flex }");
+        assert!(rule("group-[&_p]/item:flex").starts_with(".group\\/item p "));
+        // without one, the condition is on the group itself (unchanged)
+        assert!(rule("group-[.is-open]:flex").starts_with(".group.is-open "));
+    }
+
+    #[test]
+    fn content_sets_the_property_too() {
+        assert_eq!(decls("content-none"), "--kb-content: none; content: var(--kb-content)");
+        assert_eq!(decls("content-[attr(data-x)]"), "--kb-content: attr(data-x); content: var(--kb-content)");
+    }
+
+    #[test]
+    fn size_containers() {
+        assert_eq!(decls("@container-size"), "container-type: size");
+        assert_eq!(decls("@container-size/main"), "container-type: size; container-name: main");
+        assert_eq!(decls("@container-normal/main"), "container-type: normal; container-name: main");
+        assert_eq!(decls("@container-[size]"), "container-type: size");
+        assert_eq!(decls("@container-[inline-size]/main"), "container-type: inline-size; container-name: main");
+        assert_eq!(decls("@container"), "container-type: inline-size");
+        assert_eq!(decls("@container/main"), "container-type: inline-size; container-name: main");
+        none("@container-banana");
+        none("@container/");
+    }
+
+    #[test]
+    fn variants_that_produced_nothing() {
+        assert!(rule("pointer-none:flex").starts_with("@media (pointer: none)"));
+        assert!(rule("any-pointer-none:flex").starts_with("@media (any-pointer: none)"));
+        assert!(rule("not-pointer-none:flex").starts_with("@media not (pointer: none)"));
+        assert!(rule("not-sm:flex").starts_with("@media not (min-width: 640px)"));
+        assert!(rule("not-dark:flex").starts_with("@media not (prefers-color-scheme: dark)"));
+        assert!(rule("not-max-[900px]:flex").starts_with("@media not (width < 900px)"));
+        assert!(rule("not-@md:flex").starts_with("@container not (min-width: 28rem)"));
+        assert!(rule("not-@md/main:flex").starts_with("@container main not (min-width: 28rem)"));
+        assert!(rule("supports-grid:flex").starts_with("@supports (grid: var(--kb))"));
+        assert!(rule("supports-(--x):flex").starts_with("@supports var(--x)"));
+        assert!(rule("supports-[display:grid]:flex").starts_with("@supports (display:grid)"));
+        assert!(rule("supports-[not_(display:grid)]:flex").starts_with("@supports not (display:grid)"));
+        assert!(rule("supports-[selector(:has(a))]:flex").starts_with("@supports selector(:has(a))"));
+        assert!(rule("not-supports-[display:grid]:flex").starts_with("@supports not (display:grid)"));
+        assert!(rule("[@media(min-width:900px)]:flex").starts_with("@media (min-width:900px)"));
+        assert!(rule("[@media_print]:flex").starts_with("@media print"));
+        assert!(rule("[@supports(display:grid)]:flex").starts_with("@supports (display:grid)"));
+        assert!(rule("[@container(min-width:300px)]:flex").starts_with("@container (min-width:300px)"));
+        none("[@media]:flex");
+        none("[@media(x){}body{color:red]:flex");
+    }
+
+    #[test]
+    fn hover_only_where_the_device_can_hover() {
+        assert_eq!(rule("hover:flex"), "@media (hover: hover) { .hover\\:flex:hover { display: flex } }");
+        for class in ["group-hover:flex", "peer-hover:flex", "in-hover:flex", "has-hover:flex", "group-hover/item:flex"] {
+            assert!(rule(class).starts_with("@media (hover: hover) {"), "{class}");
+        }
+        // the opposite needs no media query
+        assert_eq!(rule("not-hover:flex"), ".not-hover\\:flex:not(:hover) { display: flex }");
+        assert!(!rule("focus:flex").contains("@media"));
+        assert!(!rule("group-focus:flex").contains("@media"));
+    }
+
+    #[test]
+    fn open_and_inert() {
+        assert_eq!(rule("open:flex"), ".open\\:flex:is([open], :popover-open, :open) { display: flex }");
+        assert_eq!(rule("inert:flex"), ".inert\\:flex:is([inert], [inert] *) { display: flex }");
+        assert_eq!(rule("group-open:flex"), ".group:is([open], :popover-open, :open) .group-open\\:flex { display: flex }");
+    }
+
+    #[test]
+    fn gradient_interpolation_and_whole_gradients() {
+        // the plain form first: a browser without gradient interpolation keeps it
+        assert_eq!(
+            decls("bg-linear-to-r/oklch"),
+            "background-image: linear-gradient(to right, var(--kb-gradient-stops)); background-image: linear-gradient(to right in oklch, var(--kb-gradient-stops))",
+        );
+        assert!(decls("bg-linear-to-r/longer").ends_with("linear-gradient(to right in oklch longer hue, var(--kb-gradient-stops))"));
+        assert!(decls("bg-linear-to-r/[in_hsl_longer_hue]").ends_with("linear-gradient(to right in hsl longer hue, var(--kb-gradient-stops))"));
+        assert!(decls("bg-linear-45/srgb").ends_with("linear-gradient(45deg in srgb, var(--kb-gradient-stops))"));
+        assert!(decls("bg-radial/oklch").ends_with("radial-gradient(in oklch, var(--kb-gradient-stops))"));
+        assert!(decls("bg-conic/decreasing").ends_with("conic-gradient(in oklch decreasing hue, var(--kb-gradient-stops))"));
+        assert!(decls("bg-conic-180/oklch").ends_with("conic-gradient(from 180deg in oklch, var(--kb-gradient-stops))"));
+        none("bg-linear-to-r/banana");
+        // Tailwind v3's name
+        assert_eq!(decls("bg-gradient-to-r"), decls("bg-linear-to-r"));
+        // a variable, or a whole gradient in brackets: the stops follow only
+        // when from-*/via-* set them
+        assert_eq!(decls("bg-linear-(--g)"), "background-image: linear-gradient(var(--g) var(--kb-gradient-tail,))");
+        assert_eq!(decls("bg-radial-(--r)"), "background-image: radial-gradient(var(--r) var(--kb-gradient-tail,))");
+        assert_eq!(
+            decls("bg-linear-[25deg,red_5%,yellow_60%]"),
+            "background-image: linear-gradient(25deg,red 5%,yellow 60% var(--kb-gradient-tail,))",
+        );
+        assert!(decls("from-blue-6").ends_with("--kb-gradient-tail: , var(--kb-gradient-stops)"));
+        none("bg-linear-[25deg]/oklch");
+    }
+
+    #[test]
+    fn bare_values_outside_the_old_scales() {
+        assert_eq!(decls("grid-cols-13"), "grid-template-columns: repeat(13, minmax(0, 1fr))");
+        assert_eq!(decls("grid-cols-15"), "grid-template-columns: repeat(15, minmax(0, 1fr))");
+        none("grid-cols-0");
+        assert_eq!(decls("aspect-3/2"), "aspect-ratio: 3 / 2");
+        assert_eq!(decls("aspect-16/9"), "aspect-ratio: 16 / 9");
+        none("aspect-3/x");
+        assert_eq!(decls("decoration-3"), "text-decoration-thickness: 3px");
+        assert_eq!(decls("underline-offset-3"), "text-underline-offset: 3px");
+        assert_eq!(decls("max-w-screen-md"), "max-width: 768px");
+        none("max-w-screen-nope");
+        none("w-screen-md");
+    }
+
+    #[test]
+    fn bracket_and_variable_values_on_more_utilities() {
+        assert!(decls("transition-(--t)").starts_with("transition-property: var(--t);"));
+        assert!(decls("scale-(--s)").starts_with("--kb-scale-x: scaleX(var(--s)); --kb-scale-y: scaleY(var(--s));"));
+        assert_eq!(decls("transform-[rotateX(10deg)]"), "transform: rotateX(10deg)");
+        assert_eq!(decls("transform-(--t)"), "transform: var(--t)");
+        assert_eq!(decls("list-[upper-roman]"), "list-style-type: upper-roman");
+        assert_eq!(decls("list-(--l)"), "list-style-type: var(--l)");
+        assert_eq!(decls("contain-[layout_paint]"), "contain: layout paint");
+        assert_eq!(decls("contain-(--c)"), "contain: var(--c)");
+        assert!(decls("mask-radial-[100%_100%]").ends_with("--kb-mask-radial-size: 100% 100%"));
+        assert!(decls("mask-y-to-(--m)").contains("--kb-mask-top-to-position: var(--m)"));
+        assert!(decls("mask-t-from-[10px]").ends_with("--kb-mask-top-from-position: 10px"));
+        assert!(decls("mask-t-from-[color:red]").ends_with("--kb-mask-top-from-color: red"));
+        assert!(decls("mask-linear-[70deg]").ends_with("--kb-mask-linear-position: 70deg"));
+        none("transform-[x;y]");
+        none("list-[a{b]");
+    }
+
+    #[test]
+    fn theme_functions_in_arbitrary_values() {
+        assert_eq!(decls("w-[--spacing(4)]"), "width: 16px");
+        assert_eq!(decls("m-[calc(--spacing(4)-1px)]"), "margin: calc(16px - 1px)");
+        assert_eq!(decls("w-[--spacing(var(--n))]"), "width: calc(4px*var(--n))");
+        assert_eq!(decls("bg-[--alpha(var(--c)/50%)]"), "background-color: color-mix(in srgb, var(--c) 50%, transparent)");
+        assert_eq!(decls("[margin:--spacing(2)]"), "margin: 8px");
+    }
+
+    #[test]
+    fn max_ranges_are_strictly_below() {
+        assert!(rule("max-[900px]:flex").starts_with("@media (width < 900px)"));
+        assert!(rule("@max-md:flex").starts_with("@container (width < 28rem)"));
+        assert!(rule("@max-[400px]:flex").starts_with("@container (width < 400px)"));
     }
 }

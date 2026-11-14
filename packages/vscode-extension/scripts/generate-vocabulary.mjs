@@ -83,8 +83,8 @@ function splitRespectingBrackets(token) {
   let depth = 0;
   let current = '';
   for (const ch of token) {
-    if (ch === '[') depth++;
-    else if (ch === ']') depth = Math.max(0, depth - 1);
+    if (ch === '[' || ch === '(') depth++;
+    else if (ch === ']' || ch === ')') depth = Math.max(0, depth - 1);
     if (ch === ':' && depth === 0) {
       parts.push(current);
       current = '';

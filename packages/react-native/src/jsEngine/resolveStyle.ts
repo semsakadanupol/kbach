@@ -67,9 +67,10 @@ function nativeModifierState(modifier: string, theme: ThemeConfig, colorScheme: 
     const px = reduceConstantMath(`calc(${modifier.slice(5, -1).trim()})`);
     return px === null ? null : width >= px;
   }
+  // Strictly below, like max-md: (so it never overlaps min-[…] at the same value).
   if (modifier.startsWith('max-[') && modifier.endsWith(']')) {
     const px = reduceConstantMath(`calc(${modifier.slice(5, -1).trim()})`);
-    return px === null ? null : width <= px;
+    return px === null ? null : width < px;
   }
   // Breakpoints the static list above doesn't have, read from the theme —
   // mirrors resolve_style.rs: a config's own breakpoint name
@@ -82,6 +83,21 @@ function nativeModifierState(modifier: string, theme: ThemeConfig, colorScheme: 
   if (modifier.startsWith('max-')) {
     const max = screen(modifier.slice(4));
     if (typeof max === 'number') return width < max;
+  }
+  // min-md: is md: spelled out
+  if (modifier.startsWith('min-')) {
+    const min = screen(modifier.slice(4));
+    if (typeof min === 'number') return width >= min;
+  }
+  // not-dark:, and not- on a breakpoint (not-md:, not-max-md:) — resolve_style.rs.
+  if (modifier.startsWith('not-')) {
+    const rest = modifier.slice(4);
+    if (rest === 'dark') return colorScheme !== 'dark';
+    const isBreakpoint = (name: string) => typeof screen(name) === 'number';
+    if (isBreakpoint(rest) || ((rest.startsWith('max-') || rest.startsWith('min-')) && isBreakpoint(rest.slice(4)))) {
+      const holds = nativeModifierState(rest, theme, colorScheme, pressed, width);
+      return holds === null ? null : !holds;
+    }
   }
   return null;
 }
@@ -172,6 +188,13 @@ function sanitizeForWarning(value: string): string {
 }
 
 function rnStyleValue(property: string, value: string): { value: string | number | null; warning: string | null } {
+  // A non-hex color's opacity is a `color-mix()` on web; React Native can't
+  // parse it, so native keeps the plain color. Mirrors resolve_style.rs.
+  if (value.startsWith('color-mix(in srgb, ') && value.endsWith(', transparent)')) {
+    const inner = value.slice('color-mix(in srgb, '.length, -', transparent)'.length);
+    const space = inner.lastIndexOf(' ');
+    if (space !== -1) return rnStyleValue(property, inner.slice(0, space));
+  }
   // `aspect-ratio` -> a plain number (RN's New-Architecture prop parser
   // won't apply a CSS ratio string like "3 / 4"). Mirrors resolve_style.rs.
   if (property === 'aspect-ratio') {

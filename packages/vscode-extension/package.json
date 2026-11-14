@@ -59,7 +59,7 @@
     "publish:marketplace": "node -e \"require('fs').copyFileSync('../../LICENSE','LICENSE')\" && npx @vscode/vsce publish --no-dependencies"
   },
   "devDependencies": {
-    "@kbach/core-engine": "1.0.0-beta.18",
+    "@kbach/core-engine": "1.0.0-beta.19",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "tsup": "^8.0.0",
